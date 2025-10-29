@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Pico: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.vscode/noop.py",
+            "preLaunchTask": "Run current file on Pico",
+            "console": "internalConsole",
+            "justMyCode": true
+        }
+    ]
+}
