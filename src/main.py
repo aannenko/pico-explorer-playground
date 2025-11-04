@@ -8,10 +8,13 @@ from machine import RTC, Timer
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from utilities import ntp, wifi
 
+WORK_START_HOUR_UTC = 8  # 9 (+01:00)
+WORK_END_HOUR_UTC = 17  # 18 (+01:00)
+WORK_DURATION_SEC = (WORK_END_HOUR_UTC - WORK_START_HOUR_UTC) * 3600
+REST_DURATION_SEC = (24 - (WORK_END_HOUR_UTC - WORK_START_HOUR_UTC)) * 3600
+
 WIFI_SSID = "your_ssid_here"
 WIFI_PASSWORD = "your_password_here"
-
-WORK_HOURS_UTC = (7, 16)  # UTC
 
 DISPLAY = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
 DISPLAY_INFO = Geometry(DISPLAY)
@@ -67,10 +70,11 @@ SYNC_TIME_REF = _sync_time
 
 
 # Main logic
-_connect_wifi()
-_sync_time()
-
+rtc = RTC()
 while True:
+    _connect_wifi()
+    _sync_time()
+
     TIMER_DISPLAY.reset()
     TIMER_DISPLAY.text_write(TIMER_DISPLAY.TEXT_ABOVE_CENTER, "above")
     TIMER_DISPLAY.text_write(TIMER_DISPLAY.TEXT_BELOW_CENTER, "below")
@@ -79,19 +83,18 @@ while True:
     total_sec: int
     elapsed_sec: int
 
-    rtc = RTC()
     _, _, _, _, hour, minute, second, _ = rtc.datetime()
-    if hour >= 7 and hour < 16:
+    if hour >= WORK_START_HOUR_UTC and hour < WORK_END_HOUR_UTC:
         phase = "work"
-        total_sec = 9 * 3600  # 9 hours
-        elapsed_sec = (hour - 7) * 3600 + minute * 60 + second
+        total_sec = WORK_DURATION_SEC
+        elapsed_sec = (hour - WORK_START_HOUR_UTC) * 3600 + minute * 60 + second
     else:
         phase = "rest"
-        total_sec = 15 * 3600  # 15 hours
-        if hour >= 16:
-            elapsed_sec = (hour - 16) * 3600 + minute * 60 + second
+        total_sec = REST_DURATION_SEC
+        if hour >= WORK_END_HOUR_UTC:
+            elapsed_sec = (hour - WORK_END_HOUR_UTC) * 3600 + minute * 60 + second
         else:
-            elapsed_sec = (hour + 8) * 3600 + minute * 60 + second
+            elapsed_sec = ((24 - WORK_END_HOUR_UTC) + hour) * 3600 + minute * 60 + second
 
     if elapsed_sec < 0:
         elapsed_sec = 0
