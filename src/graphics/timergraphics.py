@@ -3,9 +3,9 @@ from graphics.geometry import Geometry
 
 
 class TimerGraphics:
-    TEXT_CENTER = 0
-    TEXT_ABOVE_CENTER = 1
-    TEXT_BELOW_CENTER = 2
+    TEXT_CENTER = const(0)
+    TEXT_ABOVE_CENTER = const(1)
+    TEXT_BELOW_CENTER = const(2)
 
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._g = geometry

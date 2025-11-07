@@ -29,7 +29,7 @@ def try_connect(ssid: str, password: str, attempt_for_seconds: int = 300) -> boo
             return False  # timeout
 
         if status == network.STAT_CONNECTING:
-            time.sleep_ms(100)
+            time.sleep_ms(200)
             continue
 
         if status in (network.STAT_NO_AP_FOUND, network.STAT_CONNECT_FAIL):
