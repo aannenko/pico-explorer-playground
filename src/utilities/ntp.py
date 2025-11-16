@@ -7,7 +7,7 @@ def try_sync_time(attempts: int = 5) -> bool:
             ntptime.settime()
             return True
         except Exception as e:
-            print("[ntp] sync call failed:", e)
+            print("[ntp] exception:", e)
 
         time.sleep(10)
     return False

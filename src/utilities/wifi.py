@@ -26,14 +26,15 @@ def try_connect(ssid: str, password: str, timeout_ms: int = 300_000) -> bool:
     if not wlan.active():
         wlan.active(True)
 
-    if wlan.isconnected() and wlan.config("ssid") != ssid:
-        wlan.disconnect()
-        machine.idle()
-
     now_ms = time.ticks_ms()
     deadline_ms = time.ticks_add(now_ms, timeout_ms)
     attempt_start_ms = time.ticks_add(now_ms, -ATTEMPT_TTL_MS)
 
+    if wlan.isconnected() and wlan.config("ssid") != ssid:
+        wlan.disconnect()
+        time.sleep_ms(DISCONNECTED_SLEEP_MS)
+
+    is_exception_raised = False
     while True:
         status = wlan.status()
         if status == STAT_GOT_IP:
@@ -55,12 +56,14 @@ def try_connect(ssid: str, password: str, timeout_ms: int = 300_000) -> bool:
             else:  # took too long to connect
                 wlan.disconnect()
                 time.sleep_ms(DISCONNECTED_SLEEP_MS)
-        elif status == STAT_NO_AP_FOUND or status == STAT_CONNECT_FAIL:
-            if remaining_ms > DISCONNECTED_SLEEP_MS:
-                time.sleep_ms(DISCONNECTED_SLEEP_MS)
-            else:
-                return False  # timeout
+        elif is_exception_raised or status in (STAT_NO_AP_FOUND, STAT_CONNECT_FAIL):
+            time.sleep_ms(DISCONNECTED_SLEEP_MS)
 
         attempt_start_ms = now_ms
-        wlan.connect(ssid, password)
-        machine.idle()
+        try:
+            wlan.connect(ssid, password)
+            is_exception_raised = False
+            machine.idle()
+        except Exception as e:
+            is_exception_raised = True
+            print("[wifi] exception:", e)
