@@ -7,7 +7,7 @@ from picographics import PicoGraphics
 class Geometry:
     RING_SEGMENTS = const(120)
     SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
-    FONT = const("bitmap6")  # bitmap6 by default when we don't set the font
+    FONT = "bitmap6"  # bitmap6 by default when we don't set the font
     FONT_HEIGHT = const(6)
 
     def __init__(self, display: PicoGraphics) -> None:

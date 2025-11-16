@@ -16,8 +16,8 @@ WORK_END_HOUR_UTC = const(18 - TIME_ZONE_OFFSET_HOURS)
 WORK_DURATION_SEC = const((WORK_END_HOUR_UTC - WORK_START_HOUR_UTC) * 3600)
 REST_DURATION_SEC = const((24 - (WORK_END_HOUR_UTC - WORK_START_HOUR_UTC)) * 3600)
 
-WIFI_SSID = const("your_ssid_here")
-WIFI_PASSWORD = const("your_password_here")
+WIFI_SSID = "your_ssid_here"
+WIFI_PASSWORD = "your_password_here"
 
 
 # Setup
