@@ -4,7 +4,7 @@ import time
 from graphics.colors import Colors
 from graphics.geometry import Geometry
 from graphics.timergraphics import TimerGraphics
-from machine import RTC, Timer
+from machine import Timer
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from utilities import ntp, wifi
 
@@ -32,10 +32,30 @@ TIMER_GRAPHICS = TimerGraphics(
     )
 )
 
-CLOCK = RTC()
-
 
 # Helpers
+def _connect_wifi(throw_on_fail: bool = False) -> None:
+    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi")
+    DISPLAY.update()
+    is_connected = wifi.try_connect(WIFI_SSID, WIFI_PASSWORD)
+    if not is_connected:
+        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi fail")
+        DISPLAY.update()
+        if throw_on_fail:
+            raise RuntimeError("Could not connect to WiFi")
+
+
+def _sync_time(throw_on_fail: bool = False) -> None:
+    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "sync time")
+    DISPLAY.update()
+    is_time_synced = ntp.try_sync_time()
+    if not is_time_synced:
+        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "ntp fail")
+        DISPLAY.update()
+        if throw_on_fail:
+            raise RuntimeError("Could not sync time")
+
+
 def _update_ring(arg: int) -> None:
     TIMER_GRAPHICS.ring_clear_next_segment()
     DISPLAY.update()
@@ -51,34 +71,8 @@ def _schedule_update_ring(timer: Timer) -> None:
 SCHEDULE_UPDATE_RING_REF = _schedule_update_ring
 
 
-def _connect_wifi() -> None:
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi")
-    DISPLAY.update()
-    is_connected = wifi.try_connect(WIFI_SSID, WIFI_PASSWORD)
-    if not is_connected:
-        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi fail")
-        DISPLAY.update()
-        raise RuntimeError("Could not connect to WiFi")
-
-
-CONNECT_WIFI_REF = _connect_wifi
-
-
-def _sync_time() -> None:
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "sync time")
-    DISPLAY.update()
-    is_time_synced = ntp.try_sync_time()
-    if not is_time_synced:
-        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "ntp fail")
-        DISPLAY.update()
-        raise RuntimeError("Could not sync time")
-
-
-SYNC_TIME_REF = _sync_time
-
-
 def _update_time(arg: int) -> None:
-    _, _, _, _, hour, minute, second, _ = CLOCK.datetime()
+    _, _, _, hour, minute, second, _, _ = time.gmtime()
     TIMER_GRAPHICS.text_write(
         TimerGraphics.TEXT_ABOVE_CENTER,
         f"{hour + TIME_ZONE_OFFSET_HOURS:02}:{minute:02}:{second:02}"
@@ -97,6 +91,9 @@ SCHEDULE_UPDATE_TIME_REF = _schedule_update_time
 
 
 # Main logic
+_connect_wifi(throw_on_fail=True)
+_sync_time(throw_on_fail=True)
+
 Timer(  # Clock timer
     -1,
     mode=Timer.PERIODIC,
@@ -108,33 +105,36 @@ while True:
     _connect_wifi()
     _sync_time()
 
-    TIMER_GRAPHICS.reset()
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_BELOW_CENTER, "below")
-
-    phase: str
+    text_center: str
+    text_below: str
     total_sec: int
     elapsed_sec: int
 
-    _, _, _, _, hour, minute, second, _ = CLOCK.datetime()
+    _, _, _, hour, minute, second, _, _ = time.gmtime()
     if hour >= WORK_START_HOUR_UTC and hour < WORK_END_HOUR_UTC:
-        phase = "work"
+        text_center = "work"
+        text_below = "huf-huf"
         total_sec = WORK_DURATION_SEC
         elapsed_sec = (hour - WORK_START_HOUR_UTC) * 3600 + minute * 60 + second
     else:
-        phase = "rest"
+        text_center = "rest"
+        text_below = "zzz"
         total_sec = REST_DURATION_SEC
-        if hour >= WORK_END_HOUR_UTC:
-            elapsed_sec = (hour - WORK_END_HOUR_UTC) * 3600 + minute * 60 + second
-        else:
-            elapsed_sec = ((24 - WORK_END_HOUR_UTC) + hour) * 3600 + minute * 60 + second
+        elapsed_sec = (
+            (hour - WORK_END_HOUR_UTC) * 3600 + minute * 60 + second
+            if hour >= WORK_END_HOUR_UTC
+            else ((24 - WORK_END_HOUR_UTC) + hour) * 3600 + minute * 60 + second
+        )
 
     if elapsed_sec < 0:
         elapsed_sec = 0
     elif elapsed_sec > total_sec:
         elapsed_sec = total_sec
 
+    TIMER_GRAPHICS.reset()
     TIMER_GRAPHICS.ring_clear_segments(elapsed_sec * Geometry.RING_SEGMENTS // total_sec)
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, phase)
+    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, text_center)
+    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_BELOW_CENTER, text_below)
     DISPLAY.update()
 
     remaining_sec = total_sec - elapsed_sec
