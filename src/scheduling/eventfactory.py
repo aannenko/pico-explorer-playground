@@ -24,7 +24,7 @@ def work_week_loop(
     Yield work-rest-weekend events, starting from the currently running one
 
     Args:
-        work_days (frozenset[int]): Set of work days (0=Monday .. 6=Sunday)
+        work_days (set[int]): Set of work days (0=Monday .. 6=Sunday)
         work_start_utc (tuple[int, int]): Work start time in UTC (hour, minute)
         work_end_utc (tuple[int, int]): Work end time in UTC (hour, minute)
 
@@ -59,20 +59,10 @@ def work_week_loop(
 
     is_work_midnight = work_start_utc > work_end_utc
 
-
     # Calculate the number of events
-    weekend_days = _WEEK_DAYS - work_days
-    num_weekend_events = len(weekend_days)
-    for weekend_day in weekend_days:
-        if (weekend_day + 1) % 7 in weekend_days:
-            num_weekend_events -= 1
+    num_events = len(work_days) * 2  # work + rest/weekend per work day
 
-    num_work_events = len(work_days)
-    num_rest_events = num_work_events - num_weekend_events
-    num_events = num_work_events + num_rest_events + num_weekend_events
-
-
-    # Pre-calculate durations
+    # Pre-calculate event durations
     work_start_second_of_day = work_start_hour * 3600 + work_start_minute * 60
     work_end_second_of_day = work_end_hour * 3600 + work_end_minute * 60
     work_duration_sec = (
@@ -103,16 +93,17 @@ def work_week_loop(
         )
         if is_current:
             event_start_week_sec = (
-                event_start_week_sec
+                event_start_week_sec  # event started this week
                 if event_start_week_sec <= elapsed_week_sec
-                else event_start_week_sec - _SEC_IN_WEEK
+                else event_start_week_sec - _SEC_IN_WEEK  # event started last week
             )
             current_event_start_timestamp = week_start_timestamp + event_start_week_sec
             current_event_index = offset // _STRUCT_SIZE
 
+    weekend_days = _WEEK_DAYS - work_days
     for work_day in sorted(work_days):
         # Work event
-        work_start_week_sec = work_day * _SEC_IN_DAY + work_start_hour * 3600 + work_start_minute * 60
+        work_start_week_sec = work_day * _SEC_IN_DAY + work_start_second_of_day
         struct.pack_into(_STRUCT_FORMAT, buffer, offset, work_duration_sec, _WORK)
         _set_if_current(work_start_week_sec, work_duration_sec)
 
@@ -120,12 +111,14 @@ def work_week_loop(
 
         tomorrow = (work_day + 1) % 7
         rest_day = work_day if not is_work_midnight else tomorrow
-        rest_start_week_sec = rest_day * _SEC_IN_DAY + work_end_hour * 3600 + work_end_minute * 60
-        if tomorrow in work_days:  # Rest event
+        rest_start_week_sec = rest_day * _SEC_IN_DAY + work_end_second_of_day
+        if tomorrow in work_days:
+            # Rest event
             struct.pack_into(_STRUCT_FORMAT, buffer, offset, rest_duration_sec, _REST)
             _set_if_current(rest_start_week_sec, rest_duration_sec)
-        else:  # Weekend event
-            weekend_duration_sec = _SEC_IN_DAY - work_end_hour * 3600 - work_end_minute * 60 + work_start_hour * 3600 + work_start_minute * 60
+        else:
+            # Weekend event
+            weekend_duration_sec = rest_duration_sec
             day = rest_day
             while (day := (day + 1) % 7) in weekend_days:
                 weekend_duration_sec += _SEC_IN_DAY
