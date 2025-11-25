@@ -6,15 +6,12 @@ from graphics.geometry import Geometry
 from graphics.timergraphics import TimerGraphics
 from machine import Timer
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
+from scheduling import eventfactory
 from utilities import ntp, wifi
 
 
 # Constants
-TIME_ZONE_OFFSET_HOURS = const(1)  # UTC+01:00
-WORK_START_HOUR_UTC = const(9 - TIME_ZONE_OFFSET_HOURS)
-WORK_END_HOUR_UTC = const(18 - TIME_ZONE_OFFSET_HOURS)
-WORK_DURATION_SEC = const((WORK_END_HOUR_UTC - WORK_START_HOUR_UTC) * 3600)
-REST_DURATION_SEC = const((24 - (WORK_END_HOUR_UTC - WORK_START_HOUR_UTC)) * 3600)
+TIME_ZONE_OFFSET_HOURS = const(1)  # UTC+01:00 Prague Winter time
 
 WIFI_SSID = "your_ssid_here"
 WIFI_PASSWORD = "your_password_here"
@@ -101,48 +98,46 @@ Timer(  # Clock timer
     callback=SCHEDULE_UPDATE_TIME_REF
 )
 
-while True:
-    _connect_wifi()
-    _sync_time()
+for event in eventfactory.work_week_loop(
+    work_days={0, 1, 2, 3, 4},
+    work_start_utc=(8, 0),
+    work_end_utc=(17, 0),
+):
+    _connect_wifi(throw_on_fail=False)
+    _sync_time(throw_on_fail=False)
 
-    text_center: str
-    text_below: str
-    total_sec: int
-    elapsed_sec: int
-
-    _, _, _, hour, minute, second, _, _ = time.gmtime()
-    if hour >= WORK_START_HOUR_UTC and hour < WORK_END_HOUR_UTC:
-        text_center = "work"
-        text_below = "huf-huf"
-        total_sec = WORK_DURATION_SEC
-        elapsed_sec = (hour - WORK_START_HOUR_UTC) * 3600 + minute * 60 + second
-    else:
-        text_center = "rest"
-        text_below = "zzz"
-        total_sec = REST_DURATION_SEC
-        elapsed_sec = (
-            (hour - WORK_END_HOUR_UTC) * 3600 + minute * 60 + second
-            if hour >= WORK_END_HOUR_UTC
-            else ((24 - WORK_END_HOUR_UTC) + hour) * 3600 + minute * 60 + second
-        )
+    _, _, _, hour, minute, second, wday, _ = time.gmtime()
+    _, _, _, start_hour, start_minute, start_second, start_wday, _ = time.gmtime(event.start_timestamp)
+    elapsed_sec = (
+        (hour * 3600 + minute * 60 + second)
+        - (start_hour * 3600 + start_minute * 60 + start_second)
+        + ((wday - start_wday) % 7) * 86400
+    )
 
     if elapsed_sec < 0:
         elapsed_sec = 0
-    elif elapsed_sec > total_sec:
-        elapsed_sec = total_sec
+    elif elapsed_sec > event.duration_sec:
+        elapsed_sec = event.duration_sec
+
+    text_center = event.name
+    text_below = (
+        "huf-huf" if event.name == "work"
+        else "zzz" if event.name == "rest"
+        else "yawn"
+    )
 
     TIMER_GRAPHICS.reset()
-    TIMER_GRAPHICS.ring_clear_segments(elapsed_sec * Geometry.RING_SEGMENTS // total_sec)
+    TIMER_GRAPHICS.ring_clear_segments(elapsed_sec * Geometry.RING_SEGMENTS // event.duration_sec)
     TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, text_center)
     TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_BELOW_CENTER, text_below)
     DISPLAY.update()
 
-    remaining_sec = total_sec - elapsed_sec
+    remaining_sec = event.duration_sec - elapsed_sec
     if remaining_sec > 0:
         ring_timer = Timer(
             -1,
             mode=Timer.PERIODIC,
-            period=total_sec * 1000 // Geometry.RING_SEGMENTS,
+            period=event.duration_sec * 1000 // Geometry.RING_SEGMENTS,
             callback=SCHEDULE_UPDATE_RING_REF
         )
 
