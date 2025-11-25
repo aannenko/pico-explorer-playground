@@ -1,6 +1,6 @@
 {
     "micropico.openOnStart": true,
-    "micropico.syncFolder": "pico",
+    "micropico.syncFolder": "",
     "python.analysis.diagnosticSeverityOverrides": {
         "reportMissingModuleSource": "none"
     },
