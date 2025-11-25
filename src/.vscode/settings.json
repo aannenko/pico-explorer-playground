@@ -1,6 +1,5 @@
 {
     "micropico.openOnStart": true,
-    "micropico.syncFolder": "",
     "python.analysis.diagnosticSeverityOverrides": {
         "reportMissingModuleSource": "none"
     },
@@ -12,5 +11,19 @@
         "~/.micropico-stubs/included"
     ],
     "python.languageServer": "Pylance",
-    "python.terminal.activateEnvironment": false
+    "python.terminal.activateEnvironment": false,
+    "micropico.pyIgnore": [
+        "**/.picowgo",
+        "**/.micropico",
+        "**/.vscode",
+        "**/.gitignore",
+        "**/.git",
+        "**/.DS_Store",
+        "**/project.pico-go",
+        "**/env",
+        "**/venv",
+        "**/.venv",
+        "**/.idea",
+        "**/tests"
+    ]
 }
