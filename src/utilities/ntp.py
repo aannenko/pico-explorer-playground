@@ -1,6 +1,7 @@
 import ntptime
 import time
 
+
 def try_sync_time(attempts: int = 5) -> bool:
     for _ in range(attempts):
         try:
