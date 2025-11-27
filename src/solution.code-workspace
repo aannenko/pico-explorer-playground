@@ -1,0 +1,38 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"micropico.openOnStart": true,
+		"micropico.pyIgnore": [
+			"**/.picowgo",
+			"**/.micropico",
+			"**/.vscode",
+			"**/.gitignore",
+			"**/.git",
+			"**/.DS_Store",
+			"**/project.pico-go",
+			"**/env",
+			"**/venv",
+			"**/.venv",
+			"**/.idea",
+			"**/tests",
+			"**/*.code-workspace"
+		],
+		"micropico.syncFolder": "pico",
+		"python.analysis.diagnosticSeverityOverrides": {
+			"reportMissingModuleSource": "none"
+		},
+		"python.analysis.extraPaths": [
+			"~/.micropico-stubs/included"
+		],
+		"python.analysis.typeCheckingMode": "basic",
+		"python.analysis.typeshedPaths": [
+			"~/.micropico-stubs/included"
+		],
+		"python.languageServer": "Pylance",
+		"python.terminal.activateEnvironment": false
+	}
+}
