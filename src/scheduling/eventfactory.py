@@ -11,7 +11,7 @@ _WORK = const(0)
 _REST = const(1)
 _WEEKEND = const(2)
 
-_STRUCT_FORMAT = "IB"  # duration_sec, event_type
+_STRUCT_FORMAT = "IB"  # event_duration_sec, event_type
 _STRUCT_SIZE = struct.calcsize(_STRUCT_FORMAT)
 
 
@@ -131,14 +131,14 @@ def work_week_loop(
     # Yield events starting from the current one
     while True:
         offset = current_event_index * _STRUCT_SIZE
-        duration_sec, event_type = struct.unpack_from(_STRUCT_FORMAT, buffer, offset)
-        yield Event(
-            name=(
-                "work" if event_type == _WORK
-                else "rest" if event_type == _REST
-                else "weekend"),
-            start_timestamp=current_event_start_timestamp,
-            duration_sec=duration_sec,
+        event_duration_sec, event_type = struct.unpack_from(_STRUCT_FORMAT, buffer, offset)
+        event_name = (
+            "work" if event_type == _WORK
+            else "rest" if event_type == _REST
+            else "weekend"
         )
-        current_event_start_timestamp += duration_sec
+
+        yield Event(event_name, current_event_start_timestamp, event_duration_sec)
+
+        current_event_start_timestamp += event_duration_sec
         current_event_index = (current_event_index + 1) % num_events
