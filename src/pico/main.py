@@ -1,3 +1,4 @@
+import machine
 import micropython
 
 from displays.timerdisplay import TimerDisplay
@@ -76,10 +77,11 @@ SCHEDULE_CONNECT_WIFI_SYNC_TIME_SILENT_REF = _schedule_connect_wifi_sync_time_si
 _connect_wifi(throw_on_fail=True)
 _sync_time(throw_on_fail=True)
 
+twelve_hours_in_ms = const(12 * 60 * 60 * 1000)
 Timer(  # Connect to WiFi and sync time every 12 hours
     -1,
     mode=Timer.PERIODIC,
-    period=12 * 60 * 60 * 1000,
+    period=twelve_hours_in_ms,
     callback=SCHEDULE_CONNECT_WIFI_SYNC_TIME_SILENT_REF,
 )
 
@@ -90,3 +92,31 @@ TIMER_DISPLAY.initialize(
         work_end_utc=(17, 0),
     )
 )
+
+# short test events for demo
+# import time
+# now = time.time()
+# TIMER_DISPLAY.initialize(
+#     iter(
+#         [
+#             eventfactory.Event(
+#                 name="Event 1",
+#                 start_timestamp=now,
+#                 duration_sec=30,
+#             ),
+#             eventfactory.Event(
+#                 name="Event 2",
+#                 start_timestamp=now + 30,
+#                 duration_sec=20,
+#             ),
+#             eventfactory.Event(
+#                 name="Event 3",
+#                 start_timestamp=now + 50,
+#                 duration_sec=40,
+#             ),
+#         ]
+#     )
+# )
+
+while True:
+    machine.idle()

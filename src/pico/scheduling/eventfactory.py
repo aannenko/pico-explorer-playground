@@ -19,6 +19,7 @@ def work_week_loop(
     work_days: set[int],
     work_start_utc: tuple[int, int],
     work_end_utc: tuple[int, int],
+    now_timestamp: int = time.time(),
 ):
     """
     Yield work-rest-weekend events, starting from the currently running one
@@ -29,7 +30,7 @@ def work_week_loop(
         work_end_utc (tuple[int, int]): Work end time in UTC (hour, minute)
 
     Returns:
-        Iterable[Event]: A sequence of work, rest, and weekend events,
+        Iterator[Event]: A sequence of work, rest, and weekend events,
         starting from the currently running one.
     """
 
@@ -78,7 +79,6 @@ def work_week_loop(
     offset = 0
     current_event_index = 0
 
-    now_timestamp = time.time()
     _, _, _, now_hour, now_minute, now_second, now_weekday, _ = time.gmtime(now_timestamp)
     elapsed_week_sec = now_weekday * _SEC_IN_DAY + now_hour * 3600 + now_minute * 60 + now_second
     week_start_timestamp = now_timestamp - elapsed_week_sec
@@ -134,18 +134,14 @@ def work_week_loop(
         event_duration_sec, event_type = struct.unpack_from(_STRUCT_FORMAT, buffer, offset)
 
         event_name: str
-        event_alt_text: str
         if event_type == _WORK:
             event_name = "work"
-            event_alt_text = "huf-huf"
         elif event_type == _REST:
             event_name = "rest"
-            event_alt_text = "zzz"
         else:  # event_type == _WEEKEND
             event_name = "weekend"
-            event_alt_text = "yawn"
 
-        yield Event(event_name, event_alt_text, current_event_start_timestamp, event_duration_sec)
+        yield Event(event_name, current_event_start_timestamp, event_duration_sec)
 
         current_event_start_timestamp += event_duration_sec
         current_event_index = (current_event_index + 1) % num_events

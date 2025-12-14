@@ -11,19 +11,25 @@ class Event:
     def __init__(
         self,
         name: str,
-        alt_text: str,
         start_timestamp: int,
         duration_sec: int,
     ) -> None:
+        if not name:
+            raise ValueError("Event name cannot be empty")
+
+        if start_timestamp < 0:
+            raise ValueError("Event start timestamp cannot be negative")
+
+        if duration_sec < 0:
+            raise ValueError("Event duration cannot be negative")
+
         self.name = name
-        self.alt_text = alt_text
         self.start_timestamp = start_timestamp
         self.duration_sec = duration_sec
 
     def __repr__(self) -> str:
         return (
             f"Event(name={self.name}, "
-            f"alt_text={self.alt_text}, "
             f"start_timestamp={self.start_timestamp}, "
             f"duration_sec={self.duration_sec})"
         )
