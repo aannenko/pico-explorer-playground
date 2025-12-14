@@ -7,19 +7,20 @@
 	"settings": {
 		"micropico.openOnStart": true,
 		"micropico.pyIgnore": [
-			"**/.picowgo",
-			"**/.micropico",
-			"**/.vscode",
-			"**/.gitignore",
-			"**/.git",
+			"**/__pycache__",
 			"**/.DS_Store",
-			"**/project.pico-go",
-			"**/env",
-			"**/venv",
-			"**/.venv",
+			"**/.git",
+			"**/.gitignore",
 			"**/.idea",
+			"**/.micropico",
+			"**/.picowgo",
+			"**/.venv",
+			"**/.vscode",
+			"**/*.code-workspace",
+			"**/env",
+			"**/project.pico-go",
 			"**/tests",
-			"**/*.code-workspace"
+			"**/venv"
 		],
 		"micropico.syncFolder": "pico",
 		"python.analysis.diagnosticSeverityOverrides": {
@@ -33,6 +34,6 @@
 			"~/.micropico-stubs/included"
 		],
 		"python.languageServer": "Pylance",
-		"python.terminal.activateEnvironment": false
+		"python.terminal.activateEnvironment": true
 	}
 }
