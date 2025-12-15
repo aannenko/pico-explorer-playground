@@ -10,10 +10,11 @@ from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from scheduling import eventfactory
 from utilities import ntp, wifi
 
-
-# Constants
-WIFI_SSID = "your_ssid_here"
-WIFI_PASSWORD = "your_password_here"
+try:
+    import config
+except ImportError as exc:
+    raise RuntimeError("Missing required module: config;" \
+    " please create a config.py with your WiFi credentials.") from exc
 
 
 # Setup
@@ -39,7 +40,7 @@ TIMER_DISPLAY = TimerDisplay(
 def _connect_wifi(throw_on_fail: bool = False) -> None:
     TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi")
     DISPLAY.update()
-    is_connected = wifi.try_connect(WIFI_SSID, WIFI_PASSWORD)
+    is_connected = wifi.try_connect(config.WIFI_SSID, config.WIFI_PASSWORD)
     if not is_connected:
         TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi fail")
         DISPLAY.update()
@@ -93,27 +94,16 @@ TIMER_DISPLAY.initialize(
     )
 )
 
-# short test events for demo
+# # short test events for demo
 # import time
+# from scheduling.event import Event
 # now = time.time()
 # TIMER_DISPLAY.initialize(
 #     iter(
 #         [
-#             eventfactory.Event(
-#                 name="Event 1",
-#                 start_timestamp=now,
-#                 duration_sec=30,
-#             ),
-#             eventfactory.Event(
-#                 name="Event 2",
-#                 start_timestamp=now + 30,
-#                 duration_sec=20,
-#             ),
-#             eventfactory.Event(
-#                 name="Event 3",
-#                 start_timestamp=now + 50,
-#                 duration_sec=40,
-#             ),
+#             Event("Event 1", now, 10),
+#             Event("Event 2", now + 10, 5),
+#             Event("Event 3", now + 15, 15)
 #         ]
 #     )
 # )
