@@ -29,6 +29,7 @@ class TimerDisplay:
         self._ring_timer = Timer(-1)
         self._event_timer = Timer(-1)
         self._events = iter(())
+        self._event_end_timestamp = 0
 
     def _update_ring(self, _: int) -> None:
         self._graphics.ring_clear_next_segment()
@@ -38,12 +39,24 @@ class TimerDisplay:
         micropython.schedule(self._update_ring_ref, 0)
 
     def _update_clock(self, _: int) -> None:
-        _, _, _, hour, minute, second, _, _ = time.gmtime()
+        now = time.time()
+        _, _, _, hour, minute, second, _, _ = time.gmtime(now)
         local_hour = (hour + self._timezone_offset_hours) % 24
         self._graphics.text_write(
             TimerGraphics.TEXT_ABOVE_CENTER,
             f"{local_hour:02}:{minute:02}:{second:02}",
         )
+
+        rem_total_sec = self._event_end_timestamp - now
+        if 0 <= rem_total_sec <= 604800:
+            rem_hours = rem_total_sec // 3600
+            rem_minutes = rem_total_sec // 60 % 60
+            rem_seconds = rem_total_sec % 60
+            self._graphics.text_write(
+                TimerGraphics.TEXT_BELOW_CENTER,
+                f"-{rem_hours:02}:{rem_minutes:02}:{rem_seconds:02}",
+            )
+
         self._display.update()
 
     def _schedule_update_clock(self, _: Timer) -> None:
@@ -60,22 +73,27 @@ class TimerDisplay:
         now = time.time()
         try:
             event = next(self._events)
-            while event.start_timestamp + event.duration_sec <= now:
+            while (
+                event.duration_sec <= 0
+                or event.start_timestamp + event.duration_sec <= now
+            ):
                 event = next(self._events)
         except StopIteration:
             return  # iterator ended; nothing more to do
 
-        # compute elapsed within current event (clamped)
-        _, _, _, hour, minute, second, wday, _ = time.gmtime(now)
-        _, _, _, start_hour, start_minute, start_second, start_wday, _ = (
-            time.gmtime(event.start_timestamp)
-        )
-        elapsed_sec = (
-            (hour * 3600 + minute * 60 + second)
-            - (start_hour * 3600 + start_minute * 60 + start_second)
-            + ((wday - start_wday) % 7) * 86400
-        )
+        if event.start_timestamp > now:
+            # event is in the future; schedule next check at its start
+            self._event_timer.init(
+                mode=Timer.ONE_SHOT,
+                period=(event.start_timestamp - now) * 1000,
+                callback=self._schedule_chain_event_ref,
+            )
+            return
 
+        self._event_end_timestamp = event.start_timestamp + event.duration_sec
+
+        # compute elapsed within current event (clamped)
+        elapsed_sec = now - event.start_timestamp
         if elapsed_sec < 0:
             elapsed_sec = 0
         elif elapsed_sec > event.duration_sec:
@@ -115,16 +133,16 @@ class TimerDisplay:
 
     def initialize(self, events) -> None:
         self._events = events
-
+        self._chain_event(0)
         self._clock_timer.init(
             mode=Timer.PERIODIC,
             period=1000,
             callback=self._schedule_update_clock_ref,
         )
 
-        micropython.schedule(self._chain_event_ref, 0)
-
     def deinitialize(self) -> None:
         self._clock_timer.deinit()
         self._event_timer.deinit()
         self._ring_timer.deinit()
+        self._events = iter(())
+        self._event_end_timestamp = 0
