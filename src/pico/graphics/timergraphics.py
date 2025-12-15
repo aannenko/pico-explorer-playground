@@ -77,7 +77,11 @@ class TimerGraphics:
         self._segments_cleared += 1
 
     def text_clear(self, position: int) -> None:
-        if not self._last_text_center:
+        if (
+            position == self.TEXT_CENTER and not self._last_text_center
+            or position == self.TEXT_ABOVE_CENTER and not self._last_text_above_center
+            or position == self.TEXT_BELOW_CENTER and not self._last_text_below_center
+        ):
             return
 
         text_x: int
@@ -105,7 +109,16 @@ class TimerGraphics:
         self._g.display.rectangle(text_x, text_y, text_width, self._g.text_height)
 
     def text_write(self, position: int, text: str) -> None:
-        if text == self._last_text_center:
+        if position == self.TEXT_CENTER:
+            current_text = self._last_text_center
+        elif position == self.TEXT_ABOVE_CENTER:
+            current_text = self._last_text_above_center
+        elif position == self.TEXT_BELOW_CENTER:
+            current_text = self._last_text_below_center
+        else:
+            return
+
+        if text == current_text:
             return
 
         self.text_clear(position)
