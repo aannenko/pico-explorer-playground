@@ -14,7 +14,7 @@ class Geometry:
         self.display = display
 
         # Display geometry
-        self.height, self.width = display.get_bounds()
+        self.width, self.height = display.get_bounds()
         self.x_center = self.width // 2 + self.width % 2
         self.y_center = self.height // 2 + self.height % 2
 
