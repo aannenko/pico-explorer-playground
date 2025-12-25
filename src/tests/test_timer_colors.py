@@ -1,4 +1,4 @@
-from graphics.colors import Colors
+from displays.timer import Colors
 
 
 def test_colors_stores_values() -> None:

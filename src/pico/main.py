@@ -1,10 +1,7 @@
 import machine
 import micropython
 
-from displays.timerdisplay import TimerDisplay
-from graphics.colors import Colors
-from graphics.geometry import Geometry
-from graphics.timergraphics import TimerGraphics
+from displays import timer
 from machine import Timer
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from scheduling import eventfactory
@@ -19,9 +16,9 @@ except ImportError as exc:
 
 # Setup
 DISPLAY = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
-TIMER_GRAPHICS = TimerGraphics(
-    Geometry(DISPLAY),
-    Colors(
+TIMER_GRAPHICS = timer.Graphics(
+    timer.Geometry(DISPLAY),
+    timer.Colors(
         background=DISPLAY.create_pen(0, 0, 0),  # Black
         ring_color=DISPLAY.create_pen(0, 255, 0),  # Green
         primary_text_color=DISPLAY.create_pen(255, 255, 255),  # White
@@ -29,8 +26,7 @@ TIMER_GRAPHICS = TimerGraphics(
     ),
 )
 
-TIMER_DISPLAY = TimerDisplay(
-    display=DISPLAY,
+TIMER_DISPLAY = timer.Display(
     graphics=TIMER_GRAPHICS,
     timezone_offset_hours=1,  # UTC+01:00 Prague Winter time
 )
@@ -38,23 +34,23 @@ TIMER_DISPLAY = TimerDisplay(
 
 # Helpers
 def _connect_wifi(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi")
-    DISPLAY.update()
+    TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "wifi")
+    TIMER_GRAPHICS.update()
     is_connected = wifi.try_connect(config.WIFI_SSID, config.WIFI_PASSWORD)
     if not is_connected:
-        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "wifi fail")
-        DISPLAY.update()
+        TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "wifi fail")
+        TIMER_GRAPHICS.update()
         if throw_on_fail:
             raise RuntimeError("Could not connect to WiFi")
 
 
 def _sync_time(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "sync time")
-    DISPLAY.update()
+    TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "sync time")
+    TIMER_GRAPHICS.update()
     is_time_synced = ntp.try_sync_time()
     if not is_time_synced:
-        TIMER_GRAPHICS.text_write(TimerGraphics.TEXT_CENTER, "ntp fail")
-        DISPLAY.update()
+        TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "ntp fail")
+        TIMER_GRAPHICS.update()
         if throw_on_fail:
             raise RuntimeError("Could not sync time")
 

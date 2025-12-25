@@ -5,8 +5,7 @@ from dataclasses import dataclass
 import machine
 import pytest
 
-from displays.timerdisplay import TimerDisplay
-from graphics.timergraphics import TimerGraphics
+from displays.timer import Display, Graphics
 from scheduling.event import Event
 
 
@@ -19,7 +18,8 @@ class FakeDisplay:
 
 
 class FakeGraphics:
-    def __init__(self) -> None:
+    def __init__(self, painter: FakeDisplay) -> None:
+        self.painter = painter
         self.calls: list[tuple[str, tuple, dict]] = []
 
     def reset(self) -> None:
@@ -33,6 +33,9 @@ class FakeGraphics:
 
     def text_write(self, position: int, text: str) -> None:
         self.calls.append(("text_write", (position, text), {}))
+
+    def update(self) -> None:
+        self.painter.update()
 
 
 @dataclass
@@ -67,10 +70,9 @@ def _mk_timer_factory():
 def test_initialize_starts_clock_timer_and_is_idempotent() -> None:
     timer_factory, timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: 0,
@@ -105,10 +107,9 @@ def test_initialize_starts_clock_timer_and_is_idempotent() -> None:
 def test_deinitialize_deinits_all_timers_and_resets_state() -> None:
     timer_factory, timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: 0,
@@ -135,10 +136,9 @@ def test_deinitialize_deinits_all_timers_and_resets_state() -> None:
 def test_update_ring_advances_ring_and_updates_display() -> None:
     timer_factory, _timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: 0,
@@ -156,12 +156,11 @@ def test_update_ring_advances_ring_and_updates_display() -> None:
 def test_update_clock_formats_local_time_and_remaining_time() -> None:
     timer_factory, _timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
     now = 1000
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=1,
         get_time=lambda: now,
@@ -173,22 +172,21 @@ def test_update_clock_formats_local_time_and_remaining_time() -> None:
     td._event_end_timestamp = now + 3661
     td._update_clock(0)
 
-    assert ("text_write", (TimerGraphics.TEXT_ABOVE_CENTER, "02:02:03"), {}) in graphics.calls
-    assert ("text_write", (TimerGraphics.TEXT_BELOW_CENTER, "-01:01:01"), {}) in graphics.calls
+    assert ("text_write", (Graphics.TEXT_ABOVE_CENTER, "02:02:03"), {}) in graphics.calls
+    assert ("text_write", (Graphics.TEXT_BELOW_CENTER, "-01:01:01"), {}) in graphics.calls
     assert display.update_calls == 1
 
 
 def test_schedule_wrappers_forward_to_schedule() -> None:
     timer_factory, _timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
     scheduled: list[tuple[object, int]] = []
 
     def schedule(fn, arg):
         scheduled.append((fn, arg))
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: 0,
@@ -211,11 +209,10 @@ def test_schedule_wrappers_forward_to_schedule() -> None:
 def test_chain_event_future_event_schedules_check_only() -> None:
     timer_factory, timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
     now = 1000
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: now,
@@ -246,11 +243,10 @@ def test_chain_event_future_event_schedules_check_only() -> None:
 def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> None:
     timer_factory, timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
     now = 1000
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: now,
@@ -272,7 +268,7 @@ def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> N
     clock_timer, ring_timer, event_timer = timers
 
     assert ("reset", (), {}) in graphics.calls
-    assert ("text_write", (TimerGraphics.TEXT_CENTER, "good"), {}) in graphics.calls
+    assert ("text_write", (Graphics.TEXT_CENTER, "good"), {}) in graphics.calls
 
     # elapsed = 100 sec, duration = 200 sec -> cleared = 120 * 100 // 200 = 60
     assert ("ring_clear_segments", (60,), {}) in graphics.calls
@@ -299,10 +295,9 @@ def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> N
 def test_chain_event_iterator_exhaustion_is_safe() -> None:
     timer_factory, timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: 0,
@@ -333,11 +328,10 @@ def test_chain_event_iterator_exhaustion_is_safe() -> None:
 def test_update_clock_remaining_time_window(end_timestamp: int, expected_below_calls: int) -> None:
     timer_factory, _timers = _mk_timer_factory()
     display = FakeDisplay()
-    graphics = FakeGraphics()
+    graphics = FakeGraphics(display)
 
     now = 1000
-    td = TimerDisplay(
-        display=display,
+    td = Display(
         graphics=graphics,
         timezone_offset_hours=0,
         get_time=lambda: now,
@@ -349,5 +343,5 @@ def test_update_clock_remaining_time_window(end_timestamp: int, expected_below_c
     td._event_end_timestamp = end_timestamp
     td._update_clock(0)
 
-    below = [c for c in graphics.calls if c[0] == "text_write" and c[1][0] == TimerGraphics.TEXT_BELOW_CENTER]
+    below = [c for c in graphics.calls if c[0] == "text_write" and c[1][0] == Graphics.TEXT_BELOW_CENTER]
     assert len(below) == expected_below_calls

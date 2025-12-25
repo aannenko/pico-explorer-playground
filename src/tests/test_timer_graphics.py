@@ -4,8 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from graphics.colors import Colors
-from graphics.timergraphics import TimerGraphics
+from displays.timer import Colors, Graphics
 
 
 class FakeDisplay:
@@ -36,7 +35,7 @@ class FakeDisplay:
 
 @dataclass
 class FakeGeometry:
-    display: FakeDisplay
+    painter: FakeDisplay
 
     # Ring geometry
     RING_SEGMENTS: int = 5
@@ -76,17 +75,16 @@ class FakeGeometry:
             self.y_inner_vertices = [400, 401, 402, 403, 404]
 
 
-def _mk_timergraphics() -> tuple[TimerGraphics, FakeDisplay, FakeGeometry]:
+def _mk_timergraphics() -> tuple[Graphics, FakeDisplay, FakeGeometry]:
     display = FakeDisplay()
-    geom = FakeGeometry(display=display)
+    geom = FakeGeometry(painter=display)
     colors = Colors(background=1, ring_color=2, primary_text_color=3, secondary_text_color=4)
-    return TimerGraphics(geom, colors), display, geom
-
+    return Graphics(geom, colors), display, geom
 
 def test_reset_draws_ring_and_clears_state() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TimerGraphics.TEXT_CENTER, "X")
+    tg.text_write(Graphics.TEXT_CENTER, "X")
     tg.ring_clear_segments(2)
     display.calls.clear()
 
@@ -162,7 +160,7 @@ def test_ring_clear_next_segment_wraps_at_end() -> None:
 def test_text_write_centers_and_uses_primary_color_for_center() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TimerGraphics.TEXT_CENTER, "Hi")
+    tg.text_write(Graphics.TEXT_CENTER, "Hi")
 
     # measure_text should be called before text placement
     assert ("measure_text", ("Hi",), {"scale": geom.text_scale}) in display.calls
@@ -179,10 +177,10 @@ def test_text_write_centers_and_uses_primary_color_for_center() -> None:
 def test_text_write_noop_if_same_text() -> None:
     tg, display, _geom = _mk_timergraphics()
 
-    tg.text_write(TimerGraphics.TEXT_ABOVE_CENTER, "A")
+    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
     display.calls.clear()
 
-    tg.text_write(TimerGraphics.TEXT_ABOVE_CENTER, "A")
+    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
 
     assert display.calls == []
 
@@ -191,13 +189,13 @@ def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
     tg, display, geom = _mk_timergraphics()
 
     # Clearing when empty is a noop.
-    tg.text_clear(TimerGraphics.TEXT_BELOW_CENTER)
+    tg.text_clear(Graphics.TEXT_BELOW_CENTER)
     assert display.calls == []
 
-    tg.text_write(TimerGraphics.TEXT_BELOW_CENTER, "B")
+    tg.text_write(Graphics.TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
-    tg.text_clear(TimerGraphics.TEXT_BELOW_CENTER)
+    tg.text_clear(Graphics.TEXT_BELOW_CENTER)
 
     assert display.calls[0] == ("set_pen", (1,), {})
     assert display.calls[1] == (
@@ -210,9 +208,9 @@ def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
 def test_ring_clear_segments_full_clear_rewrites_existing_text() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TimerGraphics.TEXT_CENTER, "C")
-    tg.text_write(TimerGraphics.TEXT_ABOVE_CENTER, "A")
-    tg.text_write(TimerGraphics.TEXT_BELOW_CENTER, "B")
+    tg.text_write(Graphics.TEXT_CENTER, "C")
+    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
+    tg.text_write(Graphics.TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
     tg.ring_clear_segments(geom.RING_SEGMENTS)

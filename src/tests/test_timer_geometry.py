@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from array import array
 
-from graphics.geometry import Geometry
+from displays.timer import Geometry
 
 
 class FakeDisplay:
