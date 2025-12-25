@@ -13,11 +13,16 @@ class TimerDisplay:
         display: PicoGraphics,
         graphics: TimerGraphics,
         timezone_offset_hours: int,
+        get_time=time.time,
+        gmtime=time.gmtime,
+        schedule=micropython.schedule,
+        timer_factory=Timer,
     ) -> None:
         self._display = display
         self._graphics = graphics
         self._timezone_offset_hours = timezone_offset_hours
 
+        # method references for use with micropython.schedule
         self._update_ring_ref = self._update_ring
         self._schedule_update_ring_ref = self._schedule_update_ring
         self._update_clock_ref = self._update_clock
@@ -25,22 +30,31 @@ class TimerDisplay:
         self._chain_event_ref = self._chain_event
         self._schedule_chain_event_ref = self._schedule_chain_event
 
-        self._clock_timer = Timer(-1)
-        self._ring_timer = Timer(-1)
-        self._event_timer = Timer(-1)
+        # dependencies for easier testing
+        self._schedule = schedule
+        self._get_time = get_time
+        self._gmtime = gmtime
+        self._timer_factory = timer_factory
+
+        # deinitialize() will reset these
+        self._clock_timer = self._timer_factory(-1)
+        self._ring_timer = self._timer_factory(-1)
+        self._event_timer = self._timer_factory(-1)
         self._events = iter(())
         self._event_end_timestamp = 0
+        self._active = False
 
     def _update_ring(self, _: int) -> None:
         self._graphics.ring_clear_next_segment()
         self._display.update()
 
     def _schedule_update_ring(self, _: Timer) -> None:
-        micropython.schedule(self._update_ring_ref, 0)
+        self._schedule(self._update_ring_ref, 0)
 
     def _update_clock(self, _: int) -> None:
-        now = time.time()
-        _, _, _, hour, minute, second, _, _ = time.gmtime(now)
+        now = self._get_time()
+        tm = self._gmtime(now)
+        hour, minute, second = tm[3], tm[4], tm[5]
         local_hour = (hour + self._timezone_offset_hours) % 24
         self._graphics.text_write(
             TimerGraphics.TEXT_ABOVE_CENTER,
@@ -60,17 +74,17 @@ class TimerDisplay:
         self._display.update()
 
     def _schedule_update_clock(self, _: Timer) -> None:
-        micropython.schedule(self._update_clock_ref, 0)
+        self._schedule(self._update_clock_ref, 0)
 
     def _chain_event(self, _: int) -> None:
-        # stop any previous periodic ring updates
+        # stop any previous periodic updates
         try:
             self._event_timer.deinit()
             self._ring_timer.deinit()
         except Exception:
             pass
 
-        now = time.time()
+        now = self._get_time()
         try:
             event = next(self._events)
             while (
@@ -129,9 +143,12 @@ class TimerDisplay:
             )
 
     def _schedule_chain_event(self, _: Timer) -> None:
-        micropython.schedule(self._chain_event_ref, 0)
+        self._schedule(self._chain_event_ref, 0)
 
     def initialize(self, events) -> None:
+        if self._active:
+            return
+        self._active = True
         self._events = events
         self._chain_event(0)
         self._clock_timer.init(
@@ -141,6 +158,9 @@ class TimerDisplay:
         )
 
     def deinitialize(self) -> None:
+        if not self._active:
+            return
+        self._active = False
         self._clock_timer.deinit()
         self._event_timer.deinit()
         self._ring_timer.deinit()
