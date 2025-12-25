@@ -4,7 +4,18 @@ import time
 
 from array import array
 from machine import Timer
+from micropython import const
 from picographics import PicoGraphics
+
+RING_SEGMENTS = const(120)
+SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
+FONT = "bitmap6"  # bitmap6 by default when we don't set the font
+FONT_HEIGHT = const(6)
+TEXT_CENTER = const(0)
+TEXT_ABOVE_CENTER = const(1)
+TEXT_BELOW_CENTER = const(2)
+
+_MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
 
 
 class Colors:
@@ -22,10 +33,6 @@ class Colors:
 
 
 class Geometry:
-    RING_SEGMENTS = const(120)
-    SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
-    FONT = "bitmap6"  # bitmap6 by default when we don't set the font
-    FONT_HEIGHT = const(6)
 
     @micropython.native
     def __init__(self, pico_graphics: PicoGraphics) -> None:
@@ -44,21 +51,19 @@ class Geometry:
         self.inner_poly_r = self.inner_circle_r - 1
 
         # Precompute ring polygon vertices without allocating intermediate arrays
-        empty_list = [0] * self.RING_SEGMENTS
+        empty_list = [0] * RING_SEGMENTS
         self.x_outer_vertices = array("H", empty_list)
         self.y_outer_vertices = array("H", empty_list)
         self.x_inner_vertices = array("H", empty_list)
         self.y_inner_vertices = array("H", empty_list)
-
-        seg_angle = self.SEGMENT_ANGLE
 
         x_center = self.x_center
         y_center = self.y_center
         outer_r = self.outer_poly_r
         inner_r = self.inner_poly_r
 
-        for i in range(self.RING_SEGMENTS):
-            angle = math.radians(seg_angle * i - 90)
+        for i in range(RING_SEGMENTS):
+            angle = math.radians(SEGMENT_ANGLE * i - 90)
             cos = math.cos(angle)
             sin = math.sin(angle)
 
@@ -68,9 +73,9 @@ class Geometry:
             self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
         # Text geometry
-        pico_graphics.set_font(self.FONT)
+        pico_graphics.set_font(FONT)
         self.text_scale = min(self.width, self.height) // 80
-        self.text_height = self.FONT_HEIGHT * self.text_scale
+        self.text_height = FONT_HEIGHT * self.text_scale
 
         self.max_text_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2)**2) * 2)
         self.max_text_center_width -= self.max_text_center_width % 2
@@ -86,10 +91,6 @@ class Geometry:
 
 
 class Graphics:
-    TEXT_CENTER = const(0)
-    TEXT_ABOVE_CENTER = const(1)
-    TEXT_BELOW_CENTER = const(2)
-
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._g = geometry
         self._c = colors
@@ -114,8 +115,8 @@ class Graphics:
             return
 
         self._g.painter.set_pen(self._c.background)
-        if count >= self._g.RING_SEGMENTS:
-            self._segments_cleared = self._g.RING_SEGMENTS
+        if count >= RING_SEGMENTS:
+            self._segments_cleared = RING_SEGMENTS
             self._g.painter.circle(self._g.x_center, self._g.y_center, self._g.outer_circle_r)
             self._g.painter.set_pen(self._c.primary_text_color)
             text_center_backup = self._last_text_center
@@ -124,9 +125,9 @@ class Graphics:
             self._last_text_center = ""
             self._last_text_above_center = ""
             self._last_text_below_center = ""
-            self.text_write(self.TEXT_CENTER, text_center_backup)
-            self.text_write(self.TEXT_ABOVE_CENTER, text_above_center_backup)
-            self.text_write(self.TEXT_BELOW_CENTER, text_below_center_backup)
+            self.text_write(TEXT_CENTER, text_center_backup)
+            self.text_write(TEXT_ABOVE_CENTER, text_above_center_backup)
+            self.text_write(TEXT_BELOW_CENTER, text_below_center_backup)
             return
 
         count = count - self._segments_cleared
@@ -143,11 +144,11 @@ class Graphics:
         self._segments_cleared += count
 
     def ring_clear_next_segment(self) -> None:
-        if self._segments_cleared >= self._g.RING_SEGMENTS:
+        if self._segments_cleared >= RING_SEGMENTS:
             return
 
         from_segment = self._segments_cleared
-        to_segment = (from_segment + 1) % self._g.RING_SEGMENTS  # wrap around to 0 after the last segment
+        to_segment = (from_segment + 1) % RING_SEGMENTS  # wrap around to 0 after the last segment
 
         self._g.painter.set_pen(self._c.background)
         self._g.painter.polygon([
@@ -161,26 +162,26 @@ class Graphics:
 
     def text_clear(self, position: int) -> None:
         if (
-            position == self.TEXT_CENTER and not self._last_text_center
-            or position == self.TEXT_ABOVE_CENTER and not self._last_text_above_center
-            or position == self.TEXT_BELOW_CENTER and not self._last_text_below_center
+            position == TEXT_CENTER and not self._last_text_center
+            or position == TEXT_ABOVE_CENTER and not self._last_text_above_center
+            or position == TEXT_BELOW_CENTER and not self._last_text_below_center
         ):
             return
 
         text_x: int
         text_y: int
         text_width: int
-        if position == self.TEXT_CENTER:
+        if position == TEXT_CENTER:
             text_x = self._g.text_center_rect_x
             text_y = self._g.text_center_y
             text_width = self._g.max_text_center_width
             self._last_text_center = ""
-        elif position == self.TEXT_ABOVE_CENTER:
+        elif position == TEXT_ABOVE_CENTER:
             text_x = self._g.text_above_center_rect_x
             text_y = self._g.text_above_center_y
             text_width = self._g.max_text_above_center_width
             self._last_text_above_center = ""
-        elif position == self.TEXT_BELOW_CENTER:
+        elif position == TEXT_BELOW_CENTER:
             text_x = self._g.text_above_center_rect_x
             text_y = self._g.text_below_center_y
             text_width = self._g.max_text_above_center_width
@@ -192,11 +193,11 @@ class Graphics:
         self._g.painter.rectangle(text_x, text_y, text_width, self._g.text_height)
 
     def text_write(self, position: int, text: str) -> None:
-        if position == self.TEXT_CENTER:
+        if position == TEXT_CENTER:
             current_text = self._last_text_center
-        elif position == self.TEXT_ABOVE_CENTER:
+        elif position == TEXT_ABOVE_CENTER:
             current_text = self._last_text_above_center
-        elif position == self.TEXT_BELOW_CENTER:
+        elif position == TEXT_BELOW_CENTER:
             current_text = self._last_text_below_center
         else:
             return
@@ -212,17 +213,17 @@ class Graphics:
         text_width = self._g.painter.measure_text(text, scale=self._g.text_scale)
         text_x: int
         text_y: int
-        if position == self.TEXT_CENTER:
+        if position == TEXT_CENTER:
             text_x = (self._g.width - text_width) // 2
             text_y = self._g.text_center_y
             self._last_text_center = text
             self._g.painter.set_pen(self._c.primary_text_color)
-        elif position == self.TEXT_ABOVE_CENTER:
+        elif position == TEXT_ABOVE_CENTER:
             text_x = (self._g.width - text_width) // 2
             text_y = self._g.text_above_center_y
             self._last_text_above_center = text
             self._g.painter.set_pen(self._c.secondary_text_color)
-        elif position == self.TEXT_BELOW_CENTER:
+        elif position == TEXT_BELOW_CENTER:
             text_x = (self._g.width - text_width) // 2
             text_y = self._g.text_below_center_y
             self._last_text_below_center = text
@@ -284,25 +285,24 @@ class Display:
             return
 
         now = self._get_time()
-        MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
 
         elapsed_sec = now - self._event_start_timestamp
-        if 0 <= elapsed_sec <= MAX_PRINTED_SEC:
+        if 0 <= elapsed_sec <= _MAX_PRINTED_SEC:
             elap_hours = elapsed_sec // 3600
             elap_minutes = elapsed_sec // 60 % 60
             elap_seconds = elapsed_sec % 60
             self._graphics.text_write(
-                Graphics.TEXT_ABOVE_CENTER,
+                TEXT_ABOVE_CENTER,
                 f"{elap_hours:02}:{elap_minutes:02}:{elap_seconds:02}",
             )
 
         remaining_sec = self._event_end_timestamp - now
-        if 0 <= remaining_sec <= MAX_PRINTED_SEC:
+        if 0 <= remaining_sec <= _MAX_PRINTED_SEC:
             rem_hours = remaining_sec // 3600
             rem_minutes = remaining_sec // 60 % 60
             rem_seconds = remaining_sec % 60
             self._graphics.text_write(
-                Graphics.TEXT_BELOW_CENTER,
+                TEXT_BELOW_CENTER,
                 f"-{rem_hours:02}:{rem_minutes:02}:{rem_seconds:02}",
             )
 
@@ -354,9 +354,9 @@ class Display:
         # draw event state
         self._graphics.reset()
         self._graphics.ring_clear_segments(
-            Geometry.RING_SEGMENTS * elapsed_sec // event.duration_sec
+            RING_SEGMENTS * elapsed_sec // event.duration_sec
         )
-        self._graphics.text_write(Graphics.TEXT_CENTER, event.name)
+        self._graphics.text_write(TEXT_CENTER, event.name)
         self._graphics.update()
 
         # schedule: ring ticking + next event start
@@ -364,7 +364,7 @@ class Display:
         if remaining_sec > 0:
             self._ring_timer.init(
                 mode=Timer.PERIODIC,
-                period=event.duration_sec * 1000 // Geometry.RING_SEGMENTS,
+                period=event.duration_sec * 1000 // RING_SEGMENTS,
                 callback=self._schedule_update_ring_ref,
             )
             self._event_timer.init(

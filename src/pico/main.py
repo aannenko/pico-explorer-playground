@@ -3,6 +3,7 @@ import micropython
 
 from displays import timer
 from machine import Timer
+from micropython import const
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from scheduling import eventfactory
 from utilities import ntp, wifi
@@ -34,22 +35,22 @@ TIMER_DISPLAY = timer.Display(
 
 # Helpers
 def _connect_wifi(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "wifi")
+    TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "wifi")
     TIMER_GRAPHICS.update()
     is_connected = wifi.try_connect(config.WIFI_SSID, config.WIFI_PASSWORD)
     if not is_connected:
-        TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "wifi fail")
+        TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "wifi fail")
         TIMER_GRAPHICS.update()
         if throw_on_fail:
             raise RuntimeError("Could not connect to WiFi")
 
 
 def _sync_time(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "sync time")
+    TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "sync time")
     TIMER_GRAPHICS.update()
     is_time_synced = ntp.try_sync_time()
     if not is_time_synced:
-        TIMER_GRAPHICS.text_write(timer.Graphics.TEXT_CENTER, "ntp fail")
+        TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "ntp fail")
         TIMER_GRAPHICS.update()
         if throw_on_fail:
             raise RuntimeError("Could not sync time")
@@ -74,11 +75,11 @@ SCHEDULE_CONNECT_WIFI_SYNC_TIME_SILENT_REF = _schedule_connect_wifi_sync_time_si
 _connect_wifi(throw_on_fail=True)
 _sync_time(throw_on_fail=True)
 
-twelve_hours_in_ms = const(12 * 60 * 60 * 1000)
+TWELVE_HOURS_IN_MS = const(12 * 60 * 60 * 1000)
 Timer(  # Connect to WiFi and sync time every 12 hours
     -1,
     mode=Timer.PERIODIC,
-    period=twelve_hours_in_ms,
+    period=TWELVE_HOURS_IN_MS,
     callback=SCHEDULE_CONNECT_WIFI_SYNC_TIME_SILENT_REF,
 )
 

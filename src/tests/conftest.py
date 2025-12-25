@@ -23,6 +23,10 @@ if "picographics" not in sys.modules:
 if "micropython" not in sys.modules:
     micropython_stub = types.ModuleType("micropython")
 
+    def _const(value):
+        # MicroPython's const() is an optimization hint; in CPython it's a no-op.
+        return value
+
     def _native(func):
         # No-op decorator for CPython tests.
         return func
@@ -31,6 +35,7 @@ if "micropython" not in sys.modules:
         # In unit tests we default to instantaneous execution.
         callback(arg)
 
+    micropython_stub.const = _const
     micropython_stub.native = _native
     micropython_stub.schedule = _schedule
     sys.modules["micropython"] = micropython_stub

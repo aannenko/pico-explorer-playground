@@ -1,6 +1,7 @@
 import struct
 import time
 
+from micropython import const
 from scheduling.event import Event
 
 _WEEK_DAYS = {0, 1, 2, 3, 4, 5, 6}  # Monday=0 .. Sunday=6
