@@ -27,6 +27,7 @@ class Geometry:
     FONT = "bitmap6"  # bitmap6 by default when we don't set the font
     FONT_HEIGHT = const(6)
 
+    @micropython.native
     def __init__(self, pico_graphics: PicoGraphics) -> None:
         self.painter = pico_graphics
 
@@ -42,14 +43,29 @@ class Geometry:
         self.outer_poly_r = self.outer_circle_r + 2
         self.inner_poly_r = self.inner_circle_r - 1
 
-        angles_rad = array('f', (math.radians(self.SEGMENT_ANGLE * i - 90) for i in range(self.RING_SEGMENTS)))
-        cos_values = array('f', (math.cos(angle) for angle in angles_rad))
-        sin_values = array('f', (math.sin(angle) for angle in angles_rad))
+        # Precompute ring polygon vertices without allocating intermediate arrays
+        empty_list = [0] * self.RING_SEGMENTS
+        self.x_outer_vertices = array("H", empty_list)
+        self.y_outer_vertices = array("H", empty_list)
+        self.x_inner_vertices = array("H", empty_list)
+        self.y_inner_vertices = array("H", empty_list)
 
-        self.x_outer_vertices = array('H', (int(self.x_center + self.outer_poly_r * cos_val) for cos_val in cos_values))
-        self.y_outer_vertices = array('H', (int(self.y_center + self.outer_poly_r * sin_val) for sin_val in sin_values))
-        self.x_inner_vertices = array('H', (int(self.x_center + self.inner_poly_r * cos_val) for cos_val in cos_values))
-        self.y_inner_vertices = array('H', (int(self.y_center + self.inner_poly_r * sin_val) for sin_val in sin_values))
+        seg_angle = self.SEGMENT_ANGLE
+
+        x_center = self.x_center
+        y_center = self.y_center
+        outer_r = self.outer_poly_r
+        inner_r = self.inner_poly_r
+
+        for i in range(self.RING_SEGMENTS):
+            angle = math.radians(seg_angle * i - 90)
+            cos = math.cos(angle)
+            sin = math.sin(angle)
+
+            self.x_outer_vertices[i] = int(x_center + outer_r * cos)
+            self.y_outer_vertices[i] = int(y_center + outer_r * sin)
+            self.x_inner_vertices[i] = int(x_center + inner_r * cos)
+            self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
         # Text geometry
         pico_graphics.set_font(self.FONT)

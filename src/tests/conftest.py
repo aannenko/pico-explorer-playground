@@ -23,10 +23,15 @@ if "picographics" not in sys.modules:
 if "micropython" not in sys.modules:
     micropython_stub = types.ModuleType("micropython")
 
+    def _native(func):
+        # No-op decorator for CPython tests.
+        return func
+
     def _schedule(callback, arg):
         # In unit tests we default to instantaneous execution.
         callback(arg)
 
+    micropython_stub.native = _native
     micropython_stub.schedule = _schedule
     sys.modules["micropython"] = micropython_stub
 
