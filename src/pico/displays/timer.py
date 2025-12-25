@@ -236,8 +236,8 @@ class Display:
         # method references for use with micropython.schedule
         self._update_ring_ref = self._update_ring
         self._schedule_update_ring_ref = self._schedule_update_ring
-        self._update_clock_ref = self._update_clock
-        self._schedule_update_clock_ref = self._schedule_update_clock
+        self._update_timers_ref = self._update_timers
+        self._schedule_update_timers_ref = self._schedule_update_timers
         self._chain_event_ref = self._chain_event
         self._schedule_chain_event_ref = self._schedule_chain_event
 
@@ -248,10 +248,11 @@ class Display:
         self._timer_factory = timer_factory
 
         # deinitialize() will reset these
-        self._clock_timer = self._timer_factory(-1)
+        self._seconds_timer = self._timer_factory(-1)
         self._ring_timer = self._timer_factory(-1)
         self._event_timer = self._timer_factory(-1)
         self._events = iter(())
+        self._event_start_timestamp = 0
         self._event_end_timestamp = 0
         self._active = False
 
@@ -262,21 +263,28 @@ class Display:
     def _schedule_update_ring(self, _: Timer) -> None:
         self._schedule(self._update_ring_ref, 0)
 
-    def _update_clock(self, _: int) -> None:
-        now = self._get_time()
-        tm = self._gmtime(now)
-        hour, minute, second = tm[3], tm[4], tm[5]
-        local_hour = (hour + self._timezone_offset_hours) % 24
-        self._graphics.text_write(
-            Graphics.TEXT_ABOVE_CENTER,
-            f"{local_hour:02}:{minute:02}:{second:02}",
-        )
+    def _update_timers(self, _: int) -> None:
+        if not self._event_start_timestamp:
+            return
 
-        rem_total_sec = self._event_end_timestamp - now
-        if 0 <= rem_total_sec <= 604800:
-            rem_hours = rem_total_sec // 3600
-            rem_minutes = rem_total_sec // 60 % 60
-            rem_seconds = rem_total_sec % 60
+        now = self._get_time()
+        MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
+
+        elapsed_sec = now - self._event_start_timestamp
+        if 0 <= elapsed_sec <= MAX_PRINTED_SEC:
+            elap_hours = elapsed_sec // 3600
+            elap_minutes = elapsed_sec // 60 % 60
+            elap_seconds = elapsed_sec % 60
+            self._graphics.text_write(
+                Graphics.TEXT_ABOVE_CENTER,
+                f"{elap_hours:02}:{elap_minutes:02}:{elap_seconds:02}",
+            )
+
+        remaining_sec = self._event_end_timestamp - now
+        if 0 <= remaining_sec <= MAX_PRINTED_SEC:
+            rem_hours = remaining_sec // 3600
+            rem_minutes = remaining_sec // 60 % 60
+            rem_seconds = remaining_sec % 60
             self._graphics.text_write(
                 Graphics.TEXT_BELOW_CENTER,
                 f"-{rem_hours:02}:{rem_minutes:02}:{rem_seconds:02}",
@@ -284,8 +292,8 @@ class Display:
 
         self._graphics.update()
 
-    def _schedule_update_clock(self, _: Timer) -> None:
-        self._schedule(self._update_clock_ref, 0)
+    def _schedule_update_timers(self, _: Timer) -> None:
+        self._schedule(self._update_timers_ref, 0)
 
     def _chain_event(self, _: int) -> None:
         # stop any previous periodic updates
@@ -296,6 +304,8 @@ class Display:
             pass
 
         now = self._get_time()
+
+        # get next event which is not yet expired
         try:
             event = next(self._events)
             while (
@@ -315,6 +325,7 @@ class Display:
             )
             return
 
+        self._event_start_timestamp = event.start_timestamp
         self._event_end_timestamp = event.start_timestamp + event.duration_sec
 
         # compute elapsed within current event (clamped)
@@ -362,18 +373,19 @@ class Display:
         self._active = True
         self._events = events
         self._chain_event(0)
-        self._clock_timer.init(
+        self._seconds_timer.init(
             mode=Timer.PERIODIC,
             period=1000,
-            callback=self._schedule_update_clock_ref,
+            callback=self._schedule_update_timers_ref,
         )
 
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
-        self._clock_timer.deinit()
+        self._seconds_timer.deinit()
         self._event_timer.deinit()
         self._ring_timer.deinit()
         self._events = iter(())
+        self._event_start_timestamp = 0
         self._event_end_timestamp = 0
