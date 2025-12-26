@@ -8,8 +8,10 @@ from picographics import PicoGraphics
 
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
+
 FONT = "bitmap6"  # bitmap6 by default when we don't set the font
 FONT_HEIGHT = const(6)
+
 TEXT_CENTER = const(0)
 TEXT_ABOVE_CENTER = const(1)
 TEXT_BELOW_CENTER = const(2)
@@ -48,7 +50,6 @@ class Geometry:
         self.outer_poly_r = self.outer_circle_r + 2
         self.inner_poly_r = self.inner_circle_r - 1
 
-        # Precompute ring polygon vertices without allocating intermediate arrays
         empty_list = [0] * RING_SEGMENTS
         self.x_outer_vertices = array("H", empty_list)
         self.y_outer_vertices = array("H", empty_list)
@@ -239,14 +240,16 @@ class Display:
     def __init__(
         self,
         graphics: Graphics,
-        timezone_offset_hours: int,
         get_time=time.time,
-        gmtime=time.gmtime,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
         self._graphics = graphics
-        self._timezone_offset_hours = timezone_offset_hours
+
+        # dependencies for easier testing
+        self._get_time = get_time
+        self._schedule = schedule
+        self._timer_factory = timer_factory
 
         # method references for use with micropython.schedule
         self._update_ring_ref = self._update_ring
@@ -255,12 +258,6 @@ class Display:
         self._schedule_update_timers_ref = self._schedule_update_timers
         self._chain_event_ref = self._chain_event
         self._schedule_chain_event_ref = self._schedule_chain_event
-
-        # dependencies for easier testing
-        self._schedule = schedule
-        self._get_time = get_time
-        self._gmtime = gmtime
-        self._timer_factory = timer_factory
 
         # deinitialize() will reset these
         self._seconds_timer = self._timer_factory(-1)

@@ -74,9 +74,7 @@ def test_initialize_starts_seconds_timer_and_is_idempotent() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 0,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -111,9 +109,7 @@ def test_deinitialize_deinits_all_timers_and_resets_state() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 0,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -141,9 +137,7 @@ def test_update_ring_advances_ring_and_updates_display() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 0,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -163,9 +157,7 @@ def test_update_timers_formats_elapsed_and_remaining_time() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=1,
         get_time=lambda: now,
-        gmtime=lambda _now: (0, 0, 0, 1, 2, 3, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -186,9 +178,7 @@ def test_update_timers_no_active_event_does_nothing() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 1000,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -212,9 +202,7 @@ def test_schedule_wrappers_forward_to_schedule() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 0,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=schedule,
         timer_factory=timer_factory,
     )
@@ -238,9 +226,7 @@ def test_chain_event_future_event_schedules_check_only() -> None:
     now = 1000
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: now,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -272,9 +258,7 @@ def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> N
     now = 1000
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: now,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -326,9 +310,7 @@ def test_chain_event_iterator_exhaustion_is_safe() -> None:
 
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: 0,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -360,9 +342,7 @@ def test_update_timers_remaining_time_window(end_timestamp: int, expected_below_
     now = 1000
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: now,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -391,9 +371,7 @@ def test_update_timers_elapsed_time_window(start_timestamp: int, expected_above_
     now = 1000
     td = Display(
         graphics=graphics,
-        timezone_offset_hours=0,
         get_time=lambda: now,
-        gmtime=lambda _now: (0, 0, 0, 0, 0, 0, 0, 0),
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )

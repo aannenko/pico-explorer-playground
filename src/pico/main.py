@@ -26,10 +26,7 @@ TIMER_GRAPHICS = timer.Graphics(
     ),
 )
 
-TIMER_DISPLAY = timer.Display(
-    graphics=TIMER_GRAPHICS,
-    timezone_offset_hours=1,  # UTC+01:00 Prague Winter time
-)
+TIMER_DISPLAY = timer.Display(graphics=TIMER_GRAPHICS)
 
 
 # Helpers
