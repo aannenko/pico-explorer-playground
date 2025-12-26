@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from array import array
 
-from displays.timer import Geometry
+from displays.timer import Geometry, FONT, FONT_HEIGHT, RING_SEGMENTS
 
 
 class FakeDisplay:
@@ -32,7 +32,7 @@ def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     assert g.outer_poly_r == 120
     assert g.inner_poly_r == 109
 
-    assert display.font_calls == [g.FONT]
+    assert display.font_calls == [FONT]
 
 
 def test_geometry_center_rounds_up_for_odd_dimensions() -> None:
@@ -57,10 +57,10 @@ def test_geometry_precomputes_vertex_arrays() -> None:
     assert g.x_inner_vertices.typecode == "H"
     assert g.y_inner_vertices.typecode == "H"
 
-    assert len(g.x_outer_vertices) == g.RING_SEGMENTS
-    assert len(g.y_outer_vertices) == g.RING_SEGMENTS
-    assert len(g.x_inner_vertices) == g.RING_SEGMENTS
-    assert len(g.y_inner_vertices) == g.RING_SEGMENTS
+    assert len(g.x_outer_vertices) == RING_SEGMENTS
+    assert len(g.y_outer_vertices) == RING_SEGMENTS
+    assert len(g.x_inner_vertices) == RING_SEGMENTS
+    assert len(g.y_inner_vertices) == RING_SEGMENTS
 
     # Segment 0 is at angle -90°, so x should be centered and y should be above center.
     # Note: Geometry uses float32 intermediates; allow a small integer rounding tolerance.
@@ -73,7 +73,7 @@ def test_geometry_text_rects_are_even_and_centered() -> None:
     g = Geometry(display)
 
     assert g.text_scale == 3  # 240//80
-    assert g.text_height == g.FONT_HEIGHT * g.text_scale
+    assert g.text_height == FONT_HEIGHT * g.text_scale
 
     assert g.max_text_center_width % 2 == 0
     assert g.max_text_above_center_width % 2 == 0

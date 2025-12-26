@@ -4,7 +4,6 @@ import time
 
 from array import array
 from machine import Timer
-from micropython import const
 from picographics import PicoGraphics
 
 RING_SEGMENTS = const(120)
@@ -33,7 +32,6 @@ class Colors:
 
 
 class Geometry:
-
     @micropython.native
     def __init__(self, pico_graphics: PicoGraphics) -> None:
         self.painter = pico_graphics

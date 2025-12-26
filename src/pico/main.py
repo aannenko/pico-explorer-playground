@@ -3,7 +3,6 @@ import micropython
 
 from displays import timer
 from machine import Timer
-from micropython import const
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
 from scheduling import eventfactory
 from utilities import ntp, wifi

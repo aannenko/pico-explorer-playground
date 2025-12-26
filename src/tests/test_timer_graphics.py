@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from displays.timer import Colors, Graphics
+from displays.timer import Colors, Graphics, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
 
 
 class FakeDisplay:
@@ -38,7 +38,6 @@ class FakeGeometry:
     painter: FakeDisplay
 
     # Ring geometry
-    RING_SEGMENTS: int = 5
     x_center: int = 50
     y_center: int = 40
     outer_circle_r: int = 30
@@ -66,13 +65,13 @@ class FakeGeometry:
 
     def __post_init__(self) -> None:
         if self.x_outer_vertices is None:
-            self.x_outer_vertices = [100, 101, 102, 103, 104]
+            self.x_outer_vertices = [100 + i for i in range(120)]
         if self.y_outer_vertices is None:
-            self.y_outer_vertices = [200, 201, 202, 203, 204]
+            self.y_outer_vertices = [200 + i for i in range(120)]
         if self.x_inner_vertices is None:
-            self.x_inner_vertices = [300, 301, 302, 303, 304]
+            self.x_inner_vertices = [300 + i for i in range(120)]
         if self.y_inner_vertices is None:
-            self.y_inner_vertices = [400, 401, 402, 403, 404]
+            self.y_inner_vertices = [400 + i for i in range(120)]
 
 
 def _mk_timergraphics() -> tuple[Graphics, FakeDisplay, FakeGeometry]:
@@ -84,7 +83,7 @@ def _mk_timergraphics() -> tuple[Graphics, FakeDisplay, FakeGeometry]:
 def test_reset_draws_ring_and_clears_state() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(Graphics.TEXT_CENTER, "X")
+    tg.text_write(TEXT_CENTER, "X")
     tg.ring_clear_segments(2)
     display.calls.clear()
 
@@ -137,7 +136,7 @@ def test_ring_clear_segments_draws_polygon_for_increment() -> None:
 def test_ring_clear_next_segment_wraps_at_end() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.ring_clear_segments(geom.RING_SEGMENTS - 1)
+    tg.ring_clear_segments(RING_SEGMENTS - 1)
     display.calls.clear()
 
     tg.ring_clear_next_segment()
@@ -148,7 +147,7 @@ def test_ring_clear_next_segment_wraps_at_end() -> None:
     assert method == "polygon"
     (points,) = args
 
-    last = geom.RING_SEGMENTS - 1
+    last = RING_SEGMENTS - 1
     assert points == [
         (geom.x_outer_vertices[last], geom.y_outer_vertices[last]),
         (geom.x_outer_vertices[0], geom.y_outer_vertices[0]),
@@ -160,7 +159,7 @@ def test_ring_clear_next_segment_wraps_at_end() -> None:
 def test_text_write_centers_and_uses_primary_color_for_center() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(Graphics.TEXT_CENTER, "Hi")
+    tg.text_write(TEXT_CENTER, "Hi")
 
     # measure_text should be called before text placement
     assert ("measure_text", ("Hi",), {"scale": geom.text_scale}) in display.calls
@@ -177,10 +176,10 @@ def test_text_write_centers_and_uses_primary_color_for_center() -> None:
 def test_text_write_noop_if_same_text() -> None:
     tg, display, _geom = _mk_timergraphics()
 
-    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
+    tg.text_write(TEXT_ABOVE_CENTER, "A")
     display.calls.clear()
 
-    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
+    tg.text_write(TEXT_ABOVE_CENTER, "A")
 
     assert display.calls == []
 
@@ -189,13 +188,13 @@ def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
     tg, display, geom = _mk_timergraphics()
 
     # Clearing when empty is a noop.
-    tg.text_clear(Graphics.TEXT_BELOW_CENTER)
+    tg.text_clear(TEXT_BELOW_CENTER)
     assert display.calls == []
 
-    tg.text_write(Graphics.TEXT_BELOW_CENTER, "B")
+    tg.text_write(TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
-    tg.text_clear(Graphics.TEXT_BELOW_CENTER)
+    tg.text_clear(TEXT_BELOW_CENTER)
 
     assert display.calls[0] == ("set_pen", (1,), {})
     assert display.calls[1] == (
@@ -208,12 +207,12 @@ def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
 def test_ring_clear_segments_full_clear_rewrites_existing_text() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(Graphics.TEXT_CENTER, "C")
-    tg.text_write(Graphics.TEXT_ABOVE_CENTER, "A")
-    tg.text_write(Graphics.TEXT_BELOW_CENTER, "B")
+    tg.text_write(TEXT_CENTER, "C")
+    tg.text_write(TEXT_ABOVE_CENTER, "A")
+    tg.text_write(TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
-    tg.ring_clear_segments(geom.RING_SEGMENTS)
+    tg.ring_clear_segments(RING_SEGMENTS)
 
     # Full clear draws outer circle with background.
     assert display.calls[0] == ("set_pen", (1,), {})
