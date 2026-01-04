@@ -1,3 +1,4 @@
+import config
 import math
 import micropython
 import time
@@ -9,34 +10,37 @@ from picographics import PicoGraphics
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
 
-FONT = "bitmap6"  # bitmap6 by default when we don't set the font
-FONT_HEIGHT = const(6)
+# Coordinates in the form of X,Y; 5,5 is center, 0,0 is top-left, 9,9 is bottom-right
+TEXT_CENTER = const(55)  # 5,5
+TEXT_ABOVE_CENTER = const(54)  # 5,4
+TEXT_BELOW_CENTER = const(56)  # 5,6
 
-TEXT_CENTER = const(0)
-TEXT_ABOVE_CENTER = const(1)
-TEXT_BELOW_CENTER = const(2)
+FONT = config.FONT
+FONT_HEIGHT = config.FONT_HEIGHT
+FONT_SCALE_DIVISOR = config.FONT_SCALE_DIVISOR
 
-_MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
+_RING_THICKNESS_DIVISOR = const(30)
+_RING_OUTER_MARGIN = const(2)
+_MAX_PRINTED_SEC = const(199 * 3600 + 59 * 60 + 59)  # 199:59:59
 
 
 class Colors:
     def __init__(
         self,
         background: int,
-        ring_color: int,
-        primary_text_color: int,
-        secondary_text_color: int,
+        ring: int,
+        primary_text: int,
+        secondary_text: int,
     ) -> None:
         self.background = background
-        self.ring_color = ring_color
-        self.primary_text_color = primary_text_color
-        self.secondary_text_color = secondary_text_color
-
+        self.ring = ring
+        self.primary_text = primary_text
+        self.secondary_text = secondary_text
 
 class Geometry:
     @micropython.native
     def __init__(self, pico_graphics: PicoGraphics) -> None:
-        self.painter = pico_graphics
+        self.graphics = pico_graphics
 
         # Display geometry
         self.width, self.height = pico_graphics.get_bounds()
@@ -44,8 +48,8 @@ class Geometry:
         self.y_center = self.height // 2 + self.height % 2
 
         # Ring geometry
-        self.ring_thickness = min(self.width, self.height) // 30
-        self.outer_circle_r = min(self.x_center, self.y_center) - 2
+        self.ring_thickness = min(self.width, self.height) // _RING_THICKNESS_DIVISOR
+        self.outer_circle_r = min(self.x_center, self.y_center) - _RING_OUTER_MARGIN
         self.inner_circle_r = self.outer_circle_r - self.ring_thickness
         self.outer_poly_r = self.outer_circle_r + 2
         self.inner_poly_r = self.inner_circle_r - 1
@@ -73,7 +77,7 @@ class Geometry:
 
         # Text geometry
         pico_graphics.set_font(FONT)
-        self.text_scale = min(self.width, self.height) // 80
+        self.text_scale = min(self.width, self.height) // FONT_SCALE_DIVISOR
         self.text_height = FONT_HEIGHT * self.text_scale
 
         self.max_text_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2)**2) * 2)
@@ -89,10 +93,12 @@ class Geometry:
         self.text_below_center_y = self.text_center_y + self.text_height * 2
 
 
-class Graphics:
+class Renderer:
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
-        self._g = geometry
-        self._c = colors
+        self._geom = geometry
+        self._gfx = geometry.graphics
+        self._colors = colors
+
         self._segments_cleared = 0
         self._last_text_center = ""
         self._last_text_above_center = ""
@@ -104,20 +110,20 @@ class Graphics:
         self._last_text_above_center = ""
         self._last_text_below_center = ""
 
-        self._g.painter.set_pen(self._c.ring_color)
-        self._g.painter.circle(self._g.x_center, self._g.y_center, self._g.outer_circle_r)
-        self._g.painter.set_pen(self._c.background)
-        self._g.painter.circle(self._g.x_center, self._g.y_center, self._g.inner_circle_r)
+        self._gfx.set_pen(self._colors.ring)
+        self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.outer_circle_r)
+        self._gfx.set_pen(self._colors.background)
+        self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.inner_circle_r)
 
     def ring_clear_segments(self, count: int) -> None:
         if count <= self._segments_cleared:
             return
 
-        self._g.painter.set_pen(self._c.background)
+        self._gfx.set_pen(self._colors.background)
         if count >= RING_SEGMENTS:
             self._segments_cleared = RING_SEGMENTS
-            self._g.painter.circle(self._g.x_center, self._g.y_center, self._g.outer_circle_r)
-            self._g.painter.set_pen(self._c.primary_text_color)
+            self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.outer_circle_r)
+            self._gfx.set_pen(self._colors.primary_text)
             text_center_backup = self._last_text_center
             text_above_center_backup = self._last_text_above_center
             text_below_center_backup = self._last_text_below_center
@@ -135,10 +141,10 @@ class Graphics:
 
         for i in range(count + 1):
             idx = self._segments_cleared + i
-            points[i] = (self._g.x_outer_vertices[idx], self._g.y_outer_vertices[idx])
-            points[total_points - 1 - i] = (self._g.x_inner_vertices[idx], self._g.y_inner_vertices[idx])
+            points[i] = (self._geom.x_outer_vertices[idx], self._geom.y_outer_vertices[idx])
+            points[total_points - 1 - i] = (self._geom.x_inner_vertices[idx], self._geom.y_inner_vertices[idx])
 
-        self._g.painter.polygon(points)
+        self._gfx.polygon(points)
 
         self._segments_cleared += count
 
@@ -149,47 +155,43 @@ class Graphics:
         from_segment = self._segments_cleared
         to_segment = (from_segment + 1) % RING_SEGMENTS  # wrap around to 0 after the last segment
 
-        self._g.painter.set_pen(self._c.background)
-        self._g.painter.polygon([
-            (self._g.x_outer_vertices[from_segment], self._g.y_outer_vertices[from_segment]),
-            (self._g.x_outer_vertices[to_segment], self._g.y_outer_vertices[to_segment]),
-            (self._g.x_inner_vertices[to_segment], self._g.y_inner_vertices[to_segment]),
-            (self._g.x_inner_vertices[from_segment], self._g.y_inner_vertices[from_segment])
+        self._gfx.set_pen(self._colors.background)
+        self._gfx.polygon([
+            (self._geom.x_outer_vertices[from_segment], self._geom.y_outer_vertices[from_segment]),
+            (self._geom.x_outer_vertices[to_segment], self._geom.y_outer_vertices[to_segment]),
+            (self._geom.x_inner_vertices[to_segment], self._geom.y_inner_vertices[to_segment]),
+            (self._geom.x_inner_vertices[from_segment], self._geom.y_inner_vertices[from_segment])
         ])
 
         self._segments_cleared += 1
 
     def text_clear(self, position: int) -> None:
-        if (
-            position == TEXT_CENTER and not self._last_text_center
-            or position == TEXT_ABOVE_CENTER and not self._last_text_above_center
-            or position == TEXT_BELOW_CENTER and not self._last_text_below_center
-        ):
-            return
-
-        text_x: int
-        text_y: int
-        text_width: int
         if position == TEXT_CENTER:
-            text_x = self._g.text_center_rect_x
-            text_y = self._g.text_center_y
-            text_width = self._g.max_text_center_width
+            if not self._last_text_center:
+                return
+            text_x = self._geom.text_center_rect_x
+            text_y = self._geom.text_center_y
+            text_width = self._geom.max_text_center_width
             self._last_text_center = ""
         elif position == TEXT_ABOVE_CENTER:
-            text_x = self._g.text_above_center_rect_x
-            text_y = self._g.text_above_center_y
-            text_width = self._g.max_text_above_center_width
+            if not self._last_text_above_center:
+                return
+            text_x = self._geom.text_above_center_rect_x
+            text_y = self._geom.text_above_center_y
+            text_width = self._geom.max_text_above_center_width
             self._last_text_above_center = ""
         elif position == TEXT_BELOW_CENTER:
-            text_x = self._g.text_above_center_rect_x
-            text_y = self._g.text_below_center_y
-            text_width = self._g.max_text_above_center_width
+            if not self._last_text_below_center:
+                return
+            text_x = self._geom.text_above_center_rect_x
+            text_y = self._geom.text_below_center_y
+            text_width = self._geom.max_text_above_center_width
             self._last_text_below_center = ""
         else:
             return
 
-        self._g.painter.set_pen(self._c.background)
-        self._g.painter.rectangle(text_x, text_y, text_width, self._g.text_height)
+        self._gfx.set_pen(self._colors.background)
+        self._gfx.rectangle(text_x, text_y, text_width, self._geom.text_height)
 
     def text_write(self, position: int, text: str) -> None:
         if position == TEXT_CENTER:
@@ -209,42 +211,40 @@ class Graphics:
         if not text:
             return
 
-        text_width = self._g.painter.measure_text(text, scale=self._g.text_scale)
-        text_x: int
-        text_y: int
+        text_width = self._gfx.measure_text(text, scale=self._geom.text_scale)
         if position == TEXT_CENTER:
-            text_x = (self._g.width - text_width) // 2
-            text_y = self._g.text_center_y
+            text_x = (self._geom.width - text_width) // 2
+            text_y = self._geom.text_center_y
             self._last_text_center = text
-            self._g.painter.set_pen(self._c.primary_text_color)
+            self._gfx.set_pen(self._colors.primary_text)
         elif position == TEXT_ABOVE_CENTER:
-            text_x = (self._g.width - text_width) // 2
-            text_y = self._g.text_above_center_y
+            text_x = (self._geom.width - text_width) // 2
+            text_y = self._geom.text_above_center_y
             self._last_text_above_center = text
-            self._g.painter.set_pen(self._c.secondary_text_color)
+            self._gfx.set_pen(self._colors.secondary_text)
         elif position == TEXT_BELOW_CENTER:
-            text_x = (self._g.width - text_width) // 2
-            text_y = self._g.text_below_center_y
+            text_x = (self._geom.width - text_width) // 2
+            text_y = self._geom.text_below_center_y
             self._last_text_below_center = text
-            self._g.painter.set_pen(self._c.secondary_text_color)
+            self._gfx.set_pen(self._colors.secondary_text)
         else:
             return
 
-        self._g.painter.text(text, text_x, text_y, scale=self._g.text_scale)
+        self._gfx.text(text, text_x, text_y, scale=self._geom.text_scale)
 
     def update(self) -> None:
-        self._g.painter.update()
+        self._gfx.update()
 
 
 class Display:
     def __init__(
         self,
-        graphics: Graphics,
+        renderer: Renderer,
         get_time=time.time,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
-        self._graphics = graphics
+        self._renderer = renderer
 
         # dependencies for easier testing
         self._get_time = get_time
@@ -252,10 +252,10 @@ class Display:
         self._timer_factory = timer_factory
 
         # method references for use with micropython.schedule
-        self._update_ring_ref = self._update_ring
-        self._schedule_update_ring_ref = self._schedule_update_ring
-        self._update_timers_ref = self._update_timers
-        self._schedule_update_timers_ref = self._schedule_update_timers
+        self._update_each_second_ref = self._update_each_second
+        self._schedule_update_each_second_ref = self._schedule_update_each_second
+        self._clear_ring_segment_ref = self._clear_ring_segment
+        self._schedule_clear_ring_segment_ref = self._schedule_clear_ring_segment
         self._chain_event_ref = self._chain_event
         self._schedule_chain_event_ref = self._schedule_chain_event
 
@@ -268,43 +268,47 @@ class Display:
         self._event_end_timestamp = 0
         self._active = False
 
-    def _update_ring(self, _: int) -> None:
-        self._graphics.ring_clear_next_segment()
-        self._graphics.update()
-
-    def _schedule_update_ring(self, _: Timer) -> None:
-        self._schedule(self._update_ring_ref, 0)
-
-    def _update_timers(self, _: int) -> None:
+    def _update_each_second(self, _: int) -> None:
         if not self._event_start_timestamp:
             return
 
         now = self._get_time()
 
         elapsed_sec = now - self._event_start_timestamp
+        elap_hours = elapsed_sec // 3600
         if 0 <= elapsed_sec <= _MAX_PRINTED_SEC:
-            elap_hours = elapsed_sec // 3600
             elap_minutes = elapsed_sec // 60 % 60
             elap_seconds = elapsed_sec % 60
-            self._graphics.text_write(
+            self._renderer.text_write(
                 TEXT_ABOVE_CENTER,
                 f"{elap_hours:02}:{elap_minutes:02}:{elap_seconds:02}",
             )
+        else:
+            self._renderer.text_write(TEXT_ABOVE_CENTER, f"{elap_hours} h")
 
         remaining_sec = self._event_end_timestamp - now
+        rem_hours = remaining_sec // 3600
         if 0 <= remaining_sec <= _MAX_PRINTED_SEC:
-            rem_hours = remaining_sec // 3600
             rem_minutes = remaining_sec // 60 % 60
             rem_seconds = remaining_sec % 60
-            self._graphics.text_write(
+            self._renderer.text_write(
                 TEXT_BELOW_CENTER,
                 f"-{rem_hours:02}:{rem_minutes:02}:{rem_seconds:02}",
             )
+        else:
+            self._renderer.text_write(TEXT_BELOW_CENTER, f"-{rem_hours} h")
 
-        self._graphics.update()
+        self._renderer.update()
 
-    def _schedule_update_timers(self, _: Timer) -> None:
-        self._schedule(self._update_timers_ref, 0)
+    def _schedule_update_each_second(self, _: Timer) -> None:
+        self._schedule(self._update_each_second_ref, 0)
+
+    def _clear_ring_segment(self, _: int) -> None:
+        self._renderer.ring_clear_next_segment()
+        self._renderer.update()
+
+    def _schedule_clear_ring_segment(self, _: Timer) -> None:
+        self._schedule(self._clear_ring_segment_ref, 0)
 
     def _chain_event(self, _: int) -> None:
         # stop any previous periodic updates
@@ -339,7 +343,7 @@ class Display:
         self._event_start_timestamp = event.start_timestamp
         self._event_end_timestamp = event.start_timestamp + event.duration_sec
 
-        # compute elapsed within current event (clamped)
+        # calculate elapsed time of the current event (clamped)
         elapsed_sec = now - event.start_timestamp
         if elapsed_sec < 0:
             elapsed_sec = 0
@@ -347,12 +351,10 @@ class Display:
             elapsed_sec = event.duration_sec
 
         # draw event state
-        self._graphics.reset()
-        self._graphics.ring_clear_segments(
-            RING_SEGMENTS * elapsed_sec // event.duration_sec
-        )
-        self._graphics.text_write(TEXT_CENTER, event.name)
-        self._graphics.update()
+        self._renderer.reset()
+        self._renderer.ring_clear_segments(RING_SEGMENTS * elapsed_sec // event.duration_sec)
+        self._renderer.text_write(TEXT_CENTER, event.name)
+        self._renderer.update()
 
         # schedule: ring ticking + next event start
         remaining_sec = event.duration_sec - elapsed_sec
@@ -360,7 +362,7 @@ class Display:
             self._ring_timer.init(
                 mode=Timer.PERIODIC,
                 period=event.duration_sec * 1000 // RING_SEGMENTS,
-                callback=self._schedule_update_ring_ref,
+                callback=self._schedule_clear_ring_segment_ref,
             )
             self._event_timer.init(
                 mode=Timer.ONE_SHOT,
@@ -387,7 +389,7 @@ class Display:
         self._seconds_timer.init(
             mode=Timer.PERIODIC,
             period=1000,
-            callback=self._schedule_update_timers_ref,
+            callback=self._schedule_update_each_second_ref,
         )
 
     def deinitialize(self) -> None:

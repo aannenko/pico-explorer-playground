@@ -1,5 +1,6 @@
 import machine
 import micropython
+import time
 
 from displays import timer
 from machine import Timer
@@ -15,46 +16,57 @@ except ImportError as exc:
 
 
 # Setup
-DISPLAY = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
-TIMER_GRAPHICS = timer.Graphics(
-    timer.Geometry(DISPLAY),
+PICO_GRAPHICS = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
+
+TIMER_RENDERER = timer.Renderer(
+    timer.Geometry(PICO_GRAPHICS),
     timer.Colors(
-        background=DISPLAY.create_pen(0, 0, 0),  # Black
-        ring_color=DISPLAY.create_pen(0, 255, 0),  # Green
-        primary_text_color=DISPLAY.create_pen(255, 255, 255),  # White
-        secondary_text_color=DISPLAY.create_pen(160, 160, 160),  # Gray
+        background=PICO_GRAPHICS.create_pen(0, 0, 0),  # Black
+        ring=PICO_GRAPHICS.create_pen(0, 255, 0),  # Green
+        primary_text=PICO_GRAPHICS.create_pen(255, 255, 255),  # White
+        secondary_text=PICO_GRAPHICS.create_pen(160, 160, 160),  # Gray
     ),
 )
 
-TIMER_DISPLAY = timer.Display(graphics=TIMER_GRAPHICS)
+TIMER_DISPLAY = timer.Display(TIMER_RENDERER)
 
 
 # Helpers
-def _connect_wifi(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "wifi")
-    TIMER_GRAPHICS.update()
+def _connect_wifi(throw_on_fail: bool = False) -> bool:
+    TIMER_RENDERER.text_write(timer.TEXT_CENTER, "wifi")
+    TIMER_RENDERER.update()
     is_connected = wifi.try_connect(config.WIFI_SSID, config.WIFI_PASSWORD)
     if not is_connected:
-        TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "wifi fail")
-        TIMER_GRAPHICS.update()
         if throw_on_fail:
+            TIMER_RENDERER.text_write(timer.TEXT_CENTER, "wifi fail")
+            TIMER_RENDERER.update()
             raise RuntimeError("Could not connect to WiFi")
+        now = time.gmtime()
+        hour, minute = (now[3] + config.TIME_ZONE_OFFSET) % 24, now[4]
+        TIMER_RENDERER.text_write(timer.TEXT_BELOW_CENTER, f"at {hour:02}:{minute:02}")
+        TIMER_RENDERER.update()
+    return is_connected
 
 
-def _sync_time(throw_on_fail: bool = False) -> None:
-    TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "sync time")
-    TIMER_GRAPHICS.update()
+def _sync_time(throw_on_fail: bool = False) -> bool:
+    TIMER_RENDERER.text_write(timer.TEXT_CENTER, "sync time")
+    TIMER_RENDERER.update()
     is_time_synced = ntp.try_sync_time()
     if not is_time_synced:
-        TIMER_GRAPHICS.text_write(timer.TEXT_CENTER, "ntp fail")
-        TIMER_GRAPHICS.update()
         if throw_on_fail:
+            TIMER_RENDERER.text_write(timer.TEXT_CENTER, "ntp fail")
+            TIMER_RENDERER.update()
             raise RuntimeError("Could not sync time")
+        now = time.gmtime()
+        hour, minute = (now[3] + config.TIME_ZONE_OFFSET) % 24, now[4]
+        TIMER_RENDERER.text_write(timer.TEXT_BELOW_CENTER, f"at {hour:02}:{minute:02}")
+        TIMER_RENDERER.update()
+    return is_time_synced
 
 
 def _connect_wifi_sync_time_silent(_: int) -> None:
-    _connect_wifi(throw_on_fail=False)
-    _sync_time(throw_on_fail=False)
+    if _connect_wifi(throw_on_fail=False):
+        _sync_time(throw_on_fail=False)
 
 
 CONNECT_WIFI_SYNC_TIME_SILENT_REF = _connect_wifi_sync_time_silent

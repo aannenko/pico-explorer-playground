@@ -4,10 +4,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from displays.timer import Colors, Graphics, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
+from displays.timer import Colors, Renderer, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
 
 
-class FakeDisplay:
+class FakePicoGraphics:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
 
@@ -32,10 +32,13 @@ class FakeDisplay:
     def text(self, text: str, x: int, y: int, *, scale: int) -> None:
         self.calls.append(("text", (text, x, y), {"scale": scale}))
 
+    def update(self) -> None:
+        self.calls.append(("update", (), {}))
+
 
 @dataclass
 class FakeGeometry:
-    painter: FakeDisplay
+    graphics: FakePicoGraphics
 
     # Ring geometry
     x_center: int = 50
@@ -74,11 +77,11 @@ class FakeGeometry:
             self.y_inner_vertices = [400 + i for i in range(120)]
 
 
-def _mk_timergraphics() -> tuple[Graphics, FakeDisplay, FakeGeometry]:
-    display = FakeDisplay()
-    geom = FakeGeometry(painter=display)
-    colors = Colors(background=1, ring_color=2, primary_text_color=3, secondary_text_color=4)
-    return Graphics(geom, colors), display, geom
+def _mk_timergraphics() -> tuple[Renderer, FakePicoGraphics, FakeGeometry]:
+    display = FakePicoGraphics()
+    geom = FakeGeometry(graphics=display)
+    colors = Colors(background=1, ring=2, primary_text=3, secondary_text=4)
+    return Renderer(geom, colors), display, geom
 
 def test_reset_draws_ring_and_clears_state() -> None:
     tg, display, geom = _mk_timergraphics()

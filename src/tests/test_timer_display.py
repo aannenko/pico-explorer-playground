@@ -5,22 +5,15 @@ from dataclasses import dataclass
 import machine
 import pytest
 
-from displays.timer import Display, TEXT_CENTER, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER
+import displays.timer as timer
+from displays.timer import Display, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from scheduling.event import Event
 
 
-class FakePicoGraphics:
+class FakeRenderer:
     def __init__(self) -> None:
-        self.update_calls = 0
-
-    def update(self) -> None:
-        self.update_calls += 1
-
-
-class FakeGraphics:
-    def __init__(self, painter: FakePicoGraphics) -> None:
-        self.painter = painter
         self.calls: list[tuple[str, tuple, dict]] = []
+        self.update_calls = 0
 
     def reset(self) -> None:
         self.calls.append(("reset", (), {}))
@@ -35,7 +28,7 @@ class FakeGraphics:
         self.calls.append(("text_write", (position, text), {}))
 
     def update(self) -> None:
-        self.painter.update()
+        self.update_calls += 1
 
 
 @dataclass
@@ -69,11 +62,10 @@ def _mk_timer_factory():
 
 def test_initialize_starts_seconds_timer_and_is_idempotent() -> None:
     timer_factory, timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -87,7 +79,7 @@ def test_initialize_starts_seconds_timer_and_is_idempotent() -> None:
         {
             "mode": machine.Timer.PERIODIC,
             "period": 1000,
-            "callback": td._schedule_update_timers_ref,
+            "callback": td._schedule_update_each_second_ref,
         }
     ]
 
@@ -97,18 +89,17 @@ def test_initialize_starts_seconds_timer_and_is_idempotent() -> None:
         {
             "mode": machine.Timer.PERIODIC,
             "period": 1000,
-            "callback": td._schedule_update_timers_ref,
+            "callback": td._schedule_update_each_second_ref,
         }
     ]
 
 
 def test_deinitialize_deinits_all_timers_and_resets_state() -> None:
     timer_factory, timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -130,33 +121,31 @@ def test_deinitialize_deinits_all_timers_and_resets_state() -> None:
     assert [t.deinit_calls for t in timers] == [1, 2, 2]
 
 
-def test_update_ring_advances_ring_and_updates_display() -> None:
+def test_clear_ring_segment_advances_ring_and_updates_display() -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
 
-    td._update_ring(0)
+    td._clear_ring_segment(0)
 
-    assert ("ring_clear_next_segment", (), {}) in graphics.calls
-    assert painter.update_calls == 1
+    assert ("ring_clear_next_segment", (), {}) in renderer.calls
+    assert renderer.update_calls == 1
 
 
-def test_update_timers_formats_elapsed_and_remaining_time() -> None:
+def test_update_each_second_formats_elapsed_and_remaining_time() -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     now = 10_000
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: now,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -164,20 +153,19 @@ def test_update_timers_formats_elapsed_and_remaining_time() -> None:
 
     td._event_start_timestamp = now - 3661
     td._event_end_timestamp = now + 3661
-    td._update_timers(0)
+    td._update_each_second(0)
 
-    assert ("text_write", (TEXT_ABOVE_CENTER, "01:01:01"), {}) in graphics.calls
-    assert ("text_write", (TEXT_BELOW_CENTER, "-01:01:01"), {}) in graphics.calls
-    assert painter.update_calls == 1
+    assert ("text_write", (TEXT_ABOVE_CENTER, "01:01:01"), {}) in renderer.calls
+    assert ("text_write", (TEXT_BELOW_CENTER, "-01:01:01"), {}) in renderer.calls
+    assert renderer.update_calls == 1
 
 
-def test_update_timers_no_active_event_does_nothing() -> None:
+def test_update_each_second_no_active_event_does_nothing() -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 1000,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -185,47 +173,45 @@ def test_update_timers_no_active_event_does_nothing() -> None:
 
     td._event_start_timestamp = 0
     td._event_end_timestamp = 0
-    td._update_timers(0)
+    td._update_each_second(0)
 
-    assert graphics.calls == []
-    assert painter.update_calls == 0
+    assert renderer.calls == []
+    assert renderer.update_calls == 0
 
 
 def test_schedule_wrappers_forward_to_schedule() -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
     scheduled: list[tuple[object, int]] = []
 
     def schedule(fn, arg):
         scheduled.append((fn, arg))
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 0,
         schedule=schedule,
         timer_factory=timer_factory,
     )
 
-    td._schedule_update_ring(None)  # type: ignore[arg-type]
-    td._schedule_update_timers(None)  # type: ignore[arg-type]
+    td._schedule_clear_ring_segment(None)  # type: ignore[arg-type]
+    td._schedule_update_each_second(None)  # type: ignore[arg-type]
     td._schedule_chain_event(None)  # type: ignore[arg-type]
 
     assert scheduled == [
-        (td._update_ring_ref, 0),
-        (td._update_timers_ref, 0),
+        (td._clear_ring_segment_ref, 0),
+        (td._update_each_second_ref, 0),
         (td._chain_event_ref, 0),
     ]
 
 
 def test_chain_event_future_event_schedules_check_only() -> None:
     timer_factory, timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     now = 1000
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: now,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -246,18 +232,17 @@ def test_chain_event_future_event_schedules_check_only() -> None:
     ]
 
     # No drawing yet
-    assert graphics.calls == []
-    assert painter.update_calls == 0
+    assert renderer.calls == []
+    assert renderer.update_calls == 0
 
 
 def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> None:
     timer_factory, timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     now = 1000
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: now,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -278,19 +263,19 @@ def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> N
 
     clock_timer, ring_timer, event_timer = timers
 
-    assert ("reset", (), {}) in graphics.calls
-    assert ("text_write", (TEXT_CENTER, "good"), {}) in graphics.calls
+    assert ("reset", (), {}) in renderer.calls
+    assert ("text_write", (TEXT_CENTER, "good"), {}) in renderer.calls
 
     # elapsed = 100 sec, duration = 200 sec -> cleared = 120 * 100 // 200 = 60
-    assert ("ring_clear_segments", (60,), {}) in graphics.calls
+    assert ("ring_clear_segments", (60,), {}) in renderer.calls
 
-    assert painter.update_calls == 1
+    assert renderer.update_calls == 1
 
     assert ring_timer.init_calls == [
         {
             "mode": machine.Timer.PERIODIC,
             "period": 200 * 1000 // 120,
-            "callback": td._schedule_update_ring_ref,
+            "callback": td._schedule_clear_ring_segment_ref,
         }
     ]
 
@@ -305,11 +290,10 @@ def test_chain_event_active_event_draws_and_schedules_ring_and_next_event() -> N
 
 def test_chain_event_iterator_exhaustion_is_safe() -> None:
     timer_factory, timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -322,26 +306,25 @@ def test_chain_event_iterator_exhaustion_is_safe() -> None:
 
     assert ring_timer.init_calls == []
     assert event_timer.init_calls == []
-    assert graphics.calls == []
-    assert painter.update_calls == 0
+    assert renderer.calls == []
+    assert renderer.update_calls == 0
 
 
 @pytest.mark.parametrize(
     "end_timestamp,expected_below_calls",
     [
-        (0, 0),  # negative remaining -> no below-center text
-        (1000 + (999 * 3600 + 59 * 60 + 59) + 1, 0),  # too large -> no below-center text
-        (1000 + 1, 1),  # within window -> yes
+        (0, 1),  # negative remaining -> hours format is still written
+        (1000 + timer._MAX_PRINTED_SEC + 1, 1),  # too large -> hours format is still written
+        (1000 + 1, 1),  # within window -> HH:MM:SS is written
     ],
 )
-def test_update_timers_remaining_time_window(end_timestamp: int, expected_below_calls: int) -> None:
+def test_update_each_second_remaining_time_window(end_timestamp: int, expected_below_calls: int) -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     now = 1000
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: now,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
@@ -349,36 +332,49 @@ def test_update_timers_remaining_time_window(end_timestamp: int, expected_below_
 
     td._event_start_timestamp = now
     td._event_end_timestamp = end_timestamp
-    td._update_timers(0)
+    td._update_each_second(0)
 
-    below = [c for c in graphics.calls if c[0] == "text_write" and c[1][0] == TEXT_BELOW_CENTER]
+    below = [c for c in renderer.calls if c[0] == "text_write" and c[1][0] == TEXT_BELOW_CENTER]
     assert len(below) == expected_below_calls
+
+    (position, text) = below[0][1]
+    assert position == TEXT_BELOW_CENTER
+    if end_timestamp == now + 1:
+        assert text == "-00:00:01"
+    else:
+        assert text.endswith(" h")
 
 
 @pytest.mark.parametrize(
     "start_timestamp,expected_above_calls",
     [
-        (1000 + 1, 0),  # negative elapsed -> no above-center text
-        (1000 - (999 * 3600 + 59 * 60 + 59) - 1, 0),  # too large -> no above-center text
-        (1000 - 1, 1),  # within window -> yes
+        (1000 + 1, 1),  # negative elapsed -> hours format is still written
+        (1000 - timer._MAX_PRINTED_SEC - 1, 1),  # too large -> hours format is still written
+        (1000 - 1, 1),  # within window -> HH:MM:SS is written
     ],
 )
-def test_update_timers_elapsed_time_window(start_timestamp: int, expected_above_calls: int) -> None:
+def test_update_each_second_elapsed_time_window(start_timestamp: int, expected_above_calls: int) -> None:
     timer_factory, _timers = _mk_timer_factory()
-    painter = FakePicoGraphics()
-    graphics = FakeGraphics(painter)
+    renderer = FakeRenderer()
 
     now = 1000
     td = Display(
-        graphics=graphics,
+        renderer=renderer,
         get_time=lambda: now,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
 
     td._event_start_timestamp = start_timestamp
-    td._event_end_timestamp = 0  # negative remaining -> below-center text won't be written
-    td._update_timers(0)
+    td._event_end_timestamp = 0  # negative remaining -> below-center text will be hours format
+    td._update_each_second(0)
 
-    above = [c for c in graphics.calls if c[0] == "text_write" and c[1][0] == TEXT_ABOVE_CENTER]
+    above = [c for c in renderer.calls if c[0] == "text_write" and c[1][0] == TEXT_ABOVE_CENTER]
     assert len(above) == expected_above_calls
+
+    (position, text) = above[0][1]
+    assert position == TEXT_ABOVE_CENTER
+    if start_timestamp == now - 1:
+        assert text == "00:00:01"
+    else:
+        assert text.endswith(" h")

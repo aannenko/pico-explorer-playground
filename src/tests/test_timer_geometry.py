@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from array import array
 
+import displays.timer as timer
 from displays.timer import Geometry, FONT, FONT_HEIGHT, RING_SEGMENTS
 
 
@@ -27,10 +28,10 @@ def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     assert g.y_center == 120
 
     assert g.ring_thickness == 8  # min(240,240)//30
-    assert g.outer_circle_r == 118  # min(120,120)-2
-    assert g.inner_circle_r == 110
-    assert g.outer_poly_r == 120
-    assert g.inner_poly_r == 109
+    assert g.outer_circle_r == min(g.x_center, g.y_center) - timer._RING_OUTER_MARGIN
+    assert g.inner_circle_r == g.outer_circle_r - g.ring_thickness
+    assert g.outer_poly_r == g.outer_circle_r + 2
+    assert g.inner_poly_r == g.inner_circle_r - 1
 
     assert display.font_calls == [FONT]
 
@@ -72,7 +73,7 @@ def test_geometry_text_rects_are_even_and_centered() -> None:
     display = FakeDisplay(240, 240)
     g = Geometry(display)
 
-    assert g.text_scale == 3  # 240//80
+    assert g.text_scale == 3  # 240//80 (from config.FONT_SCALE_DIVISOR)
     assert g.text_height == FONT_HEIGHT * g.text_scale
 
     assert g.max_text_center_width % 2 == 0
