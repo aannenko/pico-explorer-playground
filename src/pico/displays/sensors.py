@@ -72,14 +72,6 @@ class Renderer:
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
 
-    @property
-    def value_pen(self) -> int:
-        return self._colors.value_text
-
-    @property
-    def secondary_pen(self) -> int:
-        return self._colors.secondary_text
-
     def header_write(self, text: str) -> None:
         if text == self._last_header:
             return
@@ -159,11 +151,11 @@ class Display:
     def _update_sensor(self, _: int) -> None:
         temp, press, hum, gas_r, status = self._bme690_reader.read()
 
-        self._renderer.line_write(0, f"Temp: {temp:0.1f} C", pen=self._renderer.value_pen)
-        self._renderer.line_write(1, f"Prsr: {press:0.0f} mb", pen=self._renderer.secondary_pen)
-        self._renderer.line_write(2, f"Hum: {hum:0.2f} %", pen=self._renderer.secondary_pen)
-        self._renderer.line_write(3, f"GasR: {gas_r:0.1f} kOhm", pen=self._renderer.secondary_pen)
-        self._renderer.line_write(4, f"Stat: {status}", pen=self._renderer.secondary_pen)
+        self._renderer.line_write(0, f"Temp: {temp:0.1f} C", pen=self._renderer._colors.value_text)
+        self._renderer.line_write(1, f"Prsr: {press:0.0f} mb", pen=self._renderer._colors.secondary_text)
+        self._renderer.line_write(2, f"Hum: {hum:0.2f} %", pen=self._renderer._colors.secondary_text)
+        self._renderer.line_write(3, f"GasR: {gas_r:0.1f} kOhm", pen=self._renderer._colors.secondary_text)
+        self._renderer.line_write(4, f"Stat: {status}", pen=self._renderer._colors.secondary_text)
         self._renderer.update()
 
     def _schedule_update_sensor(self, _: Timer) -> None:
