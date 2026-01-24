@@ -112,6 +112,9 @@ class Renderer:
         self._last_text_above_center = ""
         self._last_text_below_center = ""
 
+        self._gfx.set_pen(self._colors.background)
+        self._gfx.clear()
+
         self._gfx.set_pen(self._colors.ring)
         self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.outer_circle_r)
         self._gfx.set_pen(self._colors.background)
