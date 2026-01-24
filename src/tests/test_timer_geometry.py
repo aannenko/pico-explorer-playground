@@ -3,7 +3,7 @@ from __future__ import annotations
 from array import array
 
 import displays.timer as timer
-from displays.timer import Geometry, FONT, FONT_HEIGHT, RING_SEGMENTS
+from displays.timer import Geometry, RING_SEGMENTS
 
 
 class FakeDisplay:
@@ -20,7 +20,7 @@ class FakeDisplay:
 
 def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     display = FakeDisplay(240, 240)
-    g = Geometry(display)
+    g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)
 
     assert g.width == 240
     assert g.height == 240
@@ -33,12 +33,12 @@ def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     assert g.outer_poly_r == g.outer_circle_r + 2
     assert g.inner_poly_r == g.inner_circle_r - 1
 
-    assert display.font_calls == [FONT]
+    assert display.font_calls == ["bitmap6"]
 
 
 def test_geometry_center_rounds_up_for_odd_dimensions() -> None:
     display = FakeDisplay(241, 239)
-    g = Geometry(display)
+    g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)
 
     assert g.x_center == 121
     assert g.y_center == 120
@@ -46,7 +46,7 @@ def test_geometry_center_rounds_up_for_odd_dimensions() -> None:
 
 def test_geometry_precomputes_vertex_arrays() -> None:
     display = FakeDisplay(240, 240)
-    g = Geometry(display)
+    g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)
 
     assert isinstance(g.x_outer_vertices, array)
     assert isinstance(g.y_outer_vertices, array)
@@ -71,10 +71,10 @@ def test_geometry_precomputes_vertex_arrays() -> None:
 
 def test_geometry_text_rects_are_even_and_centered() -> None:
     display = FakeDisplay(240, 240)
-    g = Geometry(display)
+    g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)
 
-    assert g.text_scale == 3  # 240//80 (from config.FONT_SCALE_DIVISOR)
-    assert g.text_height == FONT_HEIGHT * g.text_scale
+    assert g.text_scale == 3
+    assert g.text_height == 6 * g.text_scale
 
     assert g.max_text_center_width % 2 == 0
     assert g.max_text_above_center_width % 2 == 0

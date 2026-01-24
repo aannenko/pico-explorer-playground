@@ -1,11 +1,10 @@
-import config
 import math
 import micropython
 import time
 
 from array import array
 from machine import Timer
-from picographics import PicoGraphics
+from picographics import PicoGraphics  # type: ignore
 
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
@@ -15,13 +14,9 @@ TEXT_CENTER = const(55)  # 5,5
 TEXT_ABOVE_CENTER = const(54)  # 5,4
 TEXT_BELOW_CENTER = const(56)  # 5,6
 
-FONT = config.FONT
-FONT_HEIGHT = config.FONT_HEIGHT
-FONT_SCALE_DIVISOR = config.FONT_SCALE_DIVISOR
-
 _RING_THICKNESS_DIVISOR = const(30)
 _RING_OUTER_MARGIN = const(2)
-_MAX_PRINTED_SEC = const(199 * 3600 + 59 * 60 + 59)  # 199:59:59
+_MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
 
 
 class Colors:
@@ -39,7 +34,13 @@ class Colors:
 
 class Geometry:
     @micropython.native
-    def __init__(self, pico_graphics: PicoGraphics) -> None:
+    def __init__(
+        self,
+        pico_graphics: PicoGraphics,
+        font: str,
+        font_height: int,
+        text_scale: int,
+    ) -> None:
         self.graphics = pico_graphics
 
         # Display geometry
@@ -76,9 +77,10 @@ class Geometry:
             self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
         # Text geometry
-        pico_graphics.set_font(FONT)
-        self.text_scale = min(self.width, self.height) // FONT_SCALE_DIVISOR
-        self.text_height = FONT_HEIGHT * self.text_scale
+        pico_graphics.set_font(font)
+        self.text_scale = text_scale
+        self.text_height = font_height * text_scale
+        self.line_spacing = self.text_height // 2
 
         self.max_text_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2)**2) * 2)
         self.max_text_center_width -= self.max_text_center_width % 2
@@ -88,9 +90,9 @@ class Geometry:
         self.max_text_above_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2 + self.text_height * 2)**2) * 2)
         self.max_text_above_center_width -= self.max_text_above_center_width % 2
         self.text_above_center_rect_x = (self.width - self.max_text_above_center_width) // 2
-        self.text_above_center_y = self.text_center_y - self.text_height * 2
+        self.text_above_center_y = self.text_center_y - self.text_height - self.line_spacing
 
-        self.text_below_center_y = self.text_center_y + self.text_height * 2
+        self.text_below_center_y = self.text_center_y + self.text_height + self.line_spacing
 
 
 class Renderer:

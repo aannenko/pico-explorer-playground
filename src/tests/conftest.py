@@ -53,3 +53,43 @@ if "machine" not in sys.modules:
 
     machine_stub.Timer = _Timer
     sys.modules["machine"] = machine_stub
+
+# Sensor driver deps (only available on-device). Provide minimal stubs so
+# importing `sensors.bme690` works under CPython unit tests.
+if "pimoroni" not in sys.modules:
+    pimoroni_stub = types.ModuleType("pimoroni")
+    pimoroni_stub.PICO_EXPLORER_I2C_PINS = {"sda": 0, "scl": 1}  # type: ignore[attr-defined]
+    sys.modules["pimoroni"] = pimoroni_stub
+
+if "pimoroni_i2c" not in sys.modules:
+    pimoroni_i2c_stub = types.ModuleType("pimoroni_i2c")
+
+    class _PimoroniI2C:  # minimal constructor-compatible shim
+        def __init__(self, **_kwargs):
+            pass
+
+    pimoroni_i2c_stub.PimoroniI2C = _PimoroniI2C
+    sys.modules["pimoroni_i2c"] = pimoroni_i2c_stub
+
+if "breakout_bme69x" not in sys.modules:
+    breakout_stub = types.ModuleType("breakout_bme69x")
+
+    breakout_stub.STATUS_HEATER_STABLE = 1
+    breakout_stub.FILTER_COEFF_3 = 3
+    breakout_stub.OVERSAMPLING_1X = 1
+    breakout_stub.OVERSAMPLING_2X = 2
+    breakout_stub.STANDBY_TIME_1000_MS = 1000
+
+    class _BreakoutBME69X:  # minimal API shim used by `BME690Reader`
+        def __init__(self, _i2c):
+            pass
+
+        def configure(self, *_args):
+            return None
+
+        def read(self):
+            # Return a tuple long enough for [0:5] slicing.
+            return (0.0, 0.0, 0.0, 0.0, 0)
+
+    breakout_stub.BreakoutBME69X = _BreakoutBME69X
+    sys.modules["breakout_bme69x"] = breakout_stub
