@@ -15,20 +15,22 @@ Main behavior: show a ring-style timer UI and cycle through scheduled events.
 - `pico/` is deployed directly to the Pico board (copied as-is via MicroPico).
 - `tests/` runs locally on the host machine using a standard CPython interpreter and pytest.
 - Entry point: `pico/main.py`
-  - Initializes PicoGraphics + timer display
-  - Connects WiFi, syncs NTP time, schedules periodic resync
-  - Starts the event loop via `eventfactory.work_week_loop(...)`
-- Timer UI: `pico/displays/timer.py`
-  - `Geometry`: precomputes ring/text geometry, vertex arrays
-  - `Renderer`: draws ring + text with minimal redraw
-  - `Display`: schedules per-second text updates and ring segment updates, chains events
+  - Initializes PicoGraphics, creates display views and wires them together
+  - Delegates WiFi/NTP to `NetworkService`, view switching to `DisplayManager`
+  - Starts the main loop (button polling → `DisplayManager.cycle()`)
+- Display views: `pico/displays/`
+  - `status.py` — `StatusDisplay`: simple centered text screen (e.g. "wifi", "sync time")
+  - `timer.py` — `Geometry`, `Renderer`, `Display`: ring-style countdown timer UI
+  - `sensors.py` — `Geometry`, `Renderer`, `Display`: BME690 sensor dashboard
+  - `manager.py` — `DisplayManager`: manages active view index and initialize/deinitialize cycling
 - Scheduling: `pico/scheduling/*`
   - Event model + factories for iterators of events
-- Utilities: `pico/utilities/*`
-  - WiFi connect and NTP time sync helpers
+- Utilities: `pico/utilities/`
+  - `wifi.py`, `ntp.py` — low-level WiFi connect and NTP time sync helpers
+  - `network_service.py` — `NetworkService`: encapsulates WiFi + NTP with status display, retry, and periodic timer scheduling
 
 ## Testing expectations
-- Host-side tests exist under `tests/` (pytest).- `tests/conftest.py` provides shims/stubs for MicroPython-only modules (`micropython`, `machine`, `picographics`, `pimoroni`, `pimoroni_i2c`, `breakout_bme69x`) and the `const()` builtin so that `pico/` code can be imported under CPython.
+- Host-side tests exist under `tests/` (pytest).- `tests/conftest.py` provides shims/stubs for MicroPython-only modules (`micropython`, `machine`, `picographics`, `pimoroni`, `pimoroni_i2c`, `breakout_bme69x`, `ntptime`, `network`) and the `const()` builtin so that `pico/` code can be imported under CPython.
 - Individual tests use fakes (e.g., `FakeTimer`, `FakeRenderer`, `FakeBME69X`) to isolate logic from hardware.
 - Keep logic testable via dependency injection (e.g., `get_time`, `schedule`, `timer_factory` patterns already used).
 - Don’t add heavy new dependencies unless necessary.
@@ -46,7 +48,7 @@ Main behavior: show a ring-style timer UI and cycle through scheduled events.
 ## Planned direction (non-binding)
 These are goals/intent to guide design choices. They are not requirements unless explicitly requested in a task.
 
-- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views. Currently two views exist: Sensors and Timer. Each view has `initialize()` / `deinitialize()` lifecycle methods; `main.py` manages the active view index and switching. This will likely keep evolving (more views, refined navigation).
+- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views. Currently two views exist: Sensors and Timer. Each view has `initialize()` / `deinitialize()` lifecycle methods; `DisplayManager` manages the active view index and switching. This will likely keep evolving (more views, refined navigation).
 - Sensor dashboard view (**partially implemented**): shows BME690 readings (temperature, pressure, humidity, gas resistance, heater status) and a header with local time. History graphs are planned but not yet implemented. Show current time/date at the top.
 - Calendar view: an Outlook-like calendar in horizontal mode where time progresses left-to-right. Show current time/date at the top.
 - Web configuration: add a tiny web server to define one-shot and repeated (daily/weekly/…) timers. One-shot timers map to a single event; repeated timers map to multiple events repeating in a circle (similar to the current ring timer behavior).
