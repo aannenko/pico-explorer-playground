@@ -359,7 +359,7 @@ class Display:
         self._renderer.reset()
         self._renderer.ring_clear_segments(RING_SEGMENTS * elapsed_sec // event.duration_sec)
         self._renderer.text_write(TEXT_CENTER, event.name)
-        self._renderer.update()
+        self._update_each_second(0)
 
         # schedule: ring ticking + next event start
         remaining_sec = event.duration_sec - elapsed_sec
