@@ -32,6 +32,9 @@ class FakePicoGraphics:
     def text(self, text: str, x: int, y: int, *, scale: int) -> None:
         self.calls.append(("text", (text, x, y), {"scale": scale}))
 
+    def clear(self) -> None:
+        self.calls.append(("clear", (), {}))
+
     def update(self) -> None:
         self.calls.append(("update", (), {}))
 
@@ -93,6 +96,8 @@ def test_reset_draws_ring_and_clears_state() -> None:
     tg.reset()
 
     assert display.calls == [
+        ("set_pen", (1,), {}),
+        ("clear", (), {}),
         ("set_pen", (2,), {}),
         ("circle", (geom.x_center, geom.y_center, geom.outer_circle_r), {}),
         ("set_pen", (1,), {}),

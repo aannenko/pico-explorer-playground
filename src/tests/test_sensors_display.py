@@ -7,18 +7,17 @@ import machine
 import displays.sensors as sensors
 
 
+class FakeColors:
+    def __init__(self, value_text: int, secondary_text: int) -> None:
+        self.value_text = value_text
+        self.secondary_text = secondary_text
+
+
 class FakeRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
         self.update_calls = 0
-
-    @property
-    def value_pen(self) -> int:
-        return 11
-
-    @property
-    def secondary_pen(self) -> int:
-        return 22
+        self._colors = FakeColors(value_text=11, secondary_text=22)
 
     def reset(self) -> None:
         self.calls.append(("reset", (), {}))
@@ -70,7 +69,7 @@ def _mk_timer_factory():
     return factory, created
 
 
-def test_update_header_formats_expected_string(monkeypatch) -> None:
+def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     renderer = FakeRenderer()
 
     # Make gmtime deterministic.
@@ -80,39 +79,19 @@ def test_update_header_formats_expected_string(monkeypatch) -> None:
         lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0),
     )
 
-    d = sensors.Display(
-        renderer=renderer,
-        bme690_reader=FakeBME690Reader((0.0, 0.0, 0.0, 0.0, "Stable")),
-        sensor_read_delay_ms=5000,
-        time_zone_offset=0,
-        get_time=lambda: 0,
-        schedule=lambda fn, arg: fn(arg),
-        timer_factory=lambda _id: FakeTimer(_id),
-    )
-
-    d._update_header(0)
-
-    assert ("header_write", ("'26-01-04 13:05",), {}) in renderer.calls
-    assert renderer.update_calls == 1
-
-
-def test_update_sensor_writes_lines_with_primary_and_secondary_pens() -> None:
-    renderer = FakeRenderer()
-
     reading = (22.4, 963.11, 25.7, 65.674, "Stable")
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader(reading),
-        sensor_read_delay_ms=5000,
         time_zone_offset=0,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=lambda _id: FakeTimer(_id),
     )
 
-    d._update_sensor(0)
+    d._update_display(0)
 
-    # First line uses value_pen, others secondary_pen.
+    assert ("header_write", ("'26-01-04 13:05",), {}) in renderer.calls
     assert ("line_write", (0, "Temp: 22.4 C"), {"pen": 11}) in renderer.calls
     assert ("line_write", (1, "Prsr: 963 mb"), {"pen": 22}) in renderer.calls
     assert ("line_write", (2, "Hum: 25.70 %"), {"pen": 22}) in renderer.calls
@@ -121,7 +100,7 @@ def test_update_sensor_writes_lines_with_primary_and_secondary_pens() -> None:
     assert renderer.update_calls == 1
 
 
-def test_initialize_starts_timers_and_is_idempotent(monkeypatch) -> None:
+def test_initialize_starts_timer_and_is_idempotent(monkeypatch) -> None:
     timer_factory, timers = _mk_timer_factory()
     renderer = FakeRenderer()
 
@@ -134,7 +113,6 @@ def test_initialize_starts_timers_and_is_idempotent(monkeypatch) -> None:
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable")),
-        sensor_read_delay_ms=5000,
         time_zone_offset=0,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
@@ -143,21 +121,14 @@ def test_initialize_starts_timers_and_is_idempotent(monkeypatch) -> None:
 
     d.initialize()
 
-    assert len(timers) == 2
-    seconds_timer, sensor_timer = timers
+    assert len(timers) == 1
+    seconds_timer = timers[0]
 
     assert seconds_timer.init_calls == [
         {
             "mode": machine.Timer.PERIODIC,
             "period": 1000,
-            "callback": d._schedule_update_header_ref,
-        }
-    ]
-    assert sensor_timer.init_calls == [
-        {
-            "mode": machine.Timer.PERIODIC,
-            "period": 5000,
-            "callback": d._schedule_update_sensor_ref,
+            "callback": d._schedule_update_display_ref,
         }
     ]
 
@@ -167,19 +138,18 @@ def test_initialize_starts_timers_and_is_idempotent(monkeypatch) -> None:
         {
             "mode": machine.Timer.PERIODIC,
             "period": 1000,
-            "callback": d._schedule_update_header_ref,
+            "callback": d._schedule_update_display_ref,
         }
     ]
 
 
-def test_deinitialize_deinits_timers_and_is_idempotent() -> None:
+def test_deinitialize_deinits_timer_and_is_idempotent() -> None:
     timer_factory, timers = _mk_timer_factory()
     renderer = FakeRenderer()
 
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader((0.0, 0.0, 0.0, 0.0, "Stable")),
-        sensor_read_delay_ms=5000,
         time_zone_offset=0,
         get_time=lambda: 0,
         schedule=lambda fn, arg: fn(arg),
@@ -190,7 +160,7 @@ def test_deinitialize_deinits_timers_and_is_idempotent() -> None:
     d.deinitialize()
 
     assert d._active is False
-    assert [t.deinit_calls for t in timers] == [1, 1]
+    assert [t.deinit_calls for t in timers] == [1]
 
     d.deinitialize()
-    assert [t.deinit_calls for t in timers] == [1, 1]
+    assert [t.deinit_calls for t in timers] == [1]

@@ -86,8 +86,8 @@ SENSORS_DISPLAY = sensors.Display(
     bme690_reader=bme690.BME690Reader(
         temp_offset=config.BME690_TEMP_OFFSET,
         hum_offset=config.BME690_HUM_OFFSET,
+        sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
     ),
-    sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
     time_zone_offset=config.TIME_ZONE_OFFSET,
 )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import sensors.bme690 as bme690
 
 
@@ -24,6 +26,22 @@ class FakeBreakoutBME69X:
         return (temp, press, hum, gas_r, status, 123, 456)
 
 
+@dataclass
+class FakeTimer:
+    timer_id: int
+
+    def init(self, **_kwargs) -> None:
+        pass
+
+    def deinit(self) -> None:
+        pass
+
+
+def _noop_schedule(fn, arg):
+    # Don't call fn — we only want the initial _do_read in the constructor.
+    pass
+
+
 def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> None:
     monkeypatch.setattr(bme690, "PimoroniI2C", FakeI2C)
     monkeypatch.setattr(bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
@@ -43,7 +61,12 @@ def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> N
         0b10,  # heater stable
     )
 
-    reader = bme690.BME690Reader(temp_offset=1.5, hum_offset=-2.0)
+    reader = bme690.BME690Reader(
+        temp_offset=1.5,
+        hum_offset=-2.0,
+        schedule=_noop_schedule,
+        timer_factory=FakeTimer,
+    )
 
     temp, press_mb, hum, gas_kohm, heater = reader.read()
 
@@ -69,7 +92,12 @@ def test_read_maps_unstable_status(monkeypatch) -> None:
         0,  # heater unstable
     )
 
-    reader = bme690.BME690Reader(temp_offset=0.0, hum_offset=0.0)
+    reader = bme690.BME690Reader(
+        temp_offset=0.0,
+        hum_offset=0.0,
+        schedule=_noop_schedule,
+        timer_factory=FakeTimer,
+    )
 
     *_vals, heater = reader.read()
     assert heater == "Unstable"

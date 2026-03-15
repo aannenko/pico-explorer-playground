@@ -112,7 +112,6 @@ class Display:
         self,
         renderer: Renderer,
         bme690_reader: BME690Reader,
-        sensor_read_delay_ms: int,
         time_zone_offset: int,
         get_time = time.time,
         schedule = micropython.schedule,
@@ -125,41 +124,32 @@ class Display:
         self._timer_factory = timer_factory
 
         self._bme690_reader = bme690_reader
-        self._sensor_read_delay_ms = sensor_read_delay_ms
 
         self._time_zone_offset = time_zone_offset
 
-        self._update_header_ref = self._update_header
-        self._schedule_update_header_ref = self._schedule_update_header
-        self._update_sensor_ref = self._update_sensor
-        self._schedule_update_sensor_ref = self._schedule_update_sensor
+        self._update_display_ref = self._update_display
+        self._schedule_update_display_ref = self._schedule_update_display
 
         self._seconds_timer = self._timer_factory(-1)
-        self._sensor_timer = self._timer_factory(-1)
         self._active = False
 
-    def _update_header(self, _: int) -> None:
+    def _update_display(self, _: int) -> None:
         now = self._get_time()
         year, month, mday, hour, minute = time.gmtime(now + self._time_zone_offset * 3600)[0:5]
         local_str = f"'{(year % 100):02}-{month:02}-{mday:02} {hour:02}:{minute:02}"
         self._renderer.header_write(local_str)
-        self._renderer.update()
 
-    def _schedule_update_header(self, _: Timer) -> None:
-        self._schedule(self._update_header_ref, 0)
-
-    def _update_sensor(self, _: int) -> None:
         temp, press, hum, gas_r, status = self._bme690_reader.read()
-
         self._renderer.line_write(0, f"Temp: {temp:0.1f} C", pen=self._renderer._colors.value_text)
         self._renderer.line_write(1, f"Prsr: {press:0.0f} mb", pen=self._renderer._colors.secondary_text)
         self._renderer.line_write(2, f"Hum: {hum:0.2f} %", pen=self._renderer._colors.secondary_text)
         self._renderer.line_write(3, f"GasR: {gas_r:0.1f} kOhm", pen=self._renderer._colors.secondary_text)
         self._renderer.line_write(4, f"Stat: {status}", pen=self._renderer._colors.secondary_text)
+
         self._renderer.update()
 
-    def _schedule_update_sensor(self, _: Timer) -> None:
-        self._schedule(self._update_sensor_ref, 0)
+    def _schedule_update_display(self, _: Timer) -> None:
+        self._schedule(self._update_display_ref, 0)
 
     def initialize(self) -> None:
         if self._active:
@@ -167,20 +157,12 @@ class Display:
         self._active = True
         self._renderer.reset()
 
-        # Immediate draw
-        self._update_header(0)
-        self._update_sensor(0)
+        self._update_display(0)
 
-        # Periodic updates
         self._seconds_timer.init(
             mode=Timer.PERIODIC,
             period=1000,
-            callback=self._schedule_update_header_ref,
-        )
-        self._sensor_timer.init(
-            mode=Timer.PERIODIC,
-            period=self._sensor_read_delay_ms,
-            callback=self._schedule_update_sensor_ref,
+            callback=self._schedule_update_display_ref,
         )
 
     def deinitialize(self) -> None:
@@ -188,4 +170,3 @@ class Display:
             return
         self._active = False
         self._seconds_timer.deinit()
-        self._sensor_timer.deinit()
