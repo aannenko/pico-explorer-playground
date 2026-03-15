@@ -12,6 +12,8 @@ Main behavior: show a ring-style timer UI and cycle through scheduled events.
 - Prefer `const(...)` for constants; keep math integer where possible.
 
 ## Code structure (entry points and key modules)
+- `pico/` is deployed directly to the Pico board (copied as-is via MicroPico).
+- `tests/` runs locally on the host machine using a standard CPython interpreter and pytest.
 - Entry point: `pico/main.py`
   - Initializes PicoGraphics + timer display
   - Connects WiFi, syncs NTP time, schedules periodic resync
@@ -26,7 +28,8 @@ Main behavior: show a ring-style timer UI and cycle through scheduled events.
   - WiFi connect and NTP time sync helpers
 
 ## Testing expectations
-- Host-side tests exist under `tests/` (pytest).
+- Host-side tests exist under `tests/` (pytest).- `tests/conftest.py` provides shims/stubs for MicroPython-only modules (`micropython`, `machine`, `picographics`, `pimoroni`, `pimoroni_i2c`, `breakout_bme69x`) and the `const()` builtin so that `pico/` code can be imported under CPython.
+- Individual tests use fakes (e.g., `FakeTimer`, `FakeRenderer`, `FakeBME69X`) to isolate logic from hardware.
 - Keep logic testable via dependency injection (e.g., `get_time`, `schedule`, `timer_factory` patterns already used).
 - Don’t add heavy new dependencies unless necessary.
 
@@ -43,8 +46,8 @@ Main behavior: show a ring-style timer UI and cycle through scheduled events.
 ## Planned direction (non-binding)
 These are goals/intent to guide design choices. They are not requirements unless explicitly requested in a task.
 
-- Multi-screen UI: use hardware buttons around the Pico Explorer display to switch between multiple independent screens/views (like virtual desktops). Views may have entirely different layouts and data sources.
-- Sensor dashboard view: show readings from a small in-house weather station, including Pimoroni BME690 metrics (temperature, pressure, humidity, CO₂). Display a small history graph near each value. Show current time/date at the top.
+- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views. Currently two views exist: Sensors and Timer. Each view has `initialize()` / `deinitialize()` lifecycle methods; `main.py` manages the active view index and switching. This will likely keep evolving (more views, refined navigation).
+- Sensor dashboard view (**partially implemented**): shows BME690 readings (temperature, pressure, humidity, gas resistance, heater status) and a header with local time. History graphs are planned but not yet implemented. Show current time/date at the top.
 - Calendar view: an Outlook-like calendar in horizontal mode where time progresses left-to-right. Show current time/date at the top.
 - Web configuration: add a tiny web server to define one-shot and repeated (daily/weekly/…) timers. One-shot timers map to a single event; repeated timers map to multiple events repeating in a circle (similar to the current ring timer behavior).
 
@@ -54,3 +57,13 @@ Design implications:
 - Header typography (Sensors/Calendar): use `bitmap6` at x3 scale, single line, plus ~3px bottom margin.
 - Prefer clean boundaries between data acquisition (sensors/network), scheduling, and rendering.
 - Be mindful of MicroPython constraints: small memory footprint and minimal allocations in tight refresh/update loops.
+
+## Maintaining this file
+This file (`copilot-instructions.md`) should be maintained by Copilot. When making changes to the codebase that affect architecture, conventions, module structure, or project direction, Copilot should propose updates to this file to keep it accurate and in sync with the actual state of the code. This includes:
+- Adding or removing modules, entry points, or display views.
+- Changes to coding conventions, testing patterns, or dependency injection approaches.
+- New hardware integrations or sensor support.
+- Progress on planned features (moving items from "planned" to documented reality).
+- Updates to build/test tooling or project configuration.
+
+Copilot should treat this file as a living document and update it proactively as part of completing tasks, rather than letting it drift out of date.
