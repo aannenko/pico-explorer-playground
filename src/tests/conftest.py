@@ -93,3 +93,36 @@ if "breakout_bme69x" not in sys.modules:
 
     breakout_stub.BreakoutBME69X = _BreakoutBME69X
     sys.modules["breakout_bme69x"] = breakout_stub
+
+if "ntptime" not in sys.modules:
+    ntptime_stub = types.ModuleType("ntptime")
+    ntptime_stub.settime = lambda: None  # type: ignore[attr-defined]
+    sys.modules["ntptime"] = ntptime_stub
+
+if "network" not in sys.modules:
+    network_stub = types.ModuleType("network")
+
+    class _WLAN:
+        def __init__(self, _mode):
+            pass
+        def active(self, _state=None):
+            return True
+        def isconnected(self):
+            return False
+        def connect(self, _ssid, _password):
+            pass
+        def disconnect(self):
+            pass
+        def status(self):
+            return 0
+        def config(self, _key):
+            return ""
+
+    network_stub.WLAN = _WLAN
+    network_stub.STA_IF = 0
+    network_stub.STAT_GOT_IP = 3
+    network_stub.STAT_WRONG_PASSWORD = 4
+    network_stub.STAT_CONNECTING = 1
+    network_stub.STAT_NO_AP_FOUND = 2
+    network_stub.STAT_CONNECT_FAIL = 5
+    sys.modules["network"] = network_stub
