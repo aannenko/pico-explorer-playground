@@ -8,6 +8,7 @@
 		}
 	],
 	"settings": {
+		"editor.defaultFormatter": "ms-python.black-formatter",
 		"micropico.openOnStart": true,
 		"micropico.pyIgnore": [
 			"**/__pycache__",
