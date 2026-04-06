@@ -23,6 +23,8 @@ class NetworkService:
         self._connect_and_sync_ref = self._connect_and_sync
         self._schedule_connect_and_sync_ref = self._schedule_connect_and_sync
 
+        self._sync_timer: Timer | None = None
+
     def connect_wifi(self, throw_on_fail: bool = False) -> bool:
         self._status("wifi")
         is_connected = wifi.try_connect(self._ssid, self._password)
@@ -48,7 +50,7 @@ class NetworkService:
         self.sync_time(throw_on_fail=True)
 
     def start_periodic_sync(self, period_ms: int, timer_factory=Timer) -> None:
-        timer_factory(
+        self._sync_timer = timer_factory(
             -1,
             mode=Timer.PERIODIC,
             period=period_ms,

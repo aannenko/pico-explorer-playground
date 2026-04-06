@@ -3,7 +3,8 @@ import time
 
 from machine import Timer
 from picographics import PicoGraphics  # type: ignore
-from sensors.bme690 import BME690Reader
+from services.sensors.pimoroni_bme690 import PimoroniBME690
+from utilities.safe_timer import safe_init
 
 
 class Colors:
@@ -111,7 +112,7 @@ class Display:
     def __init__(
         self,
         renderer: Renderer,
-        bme690_reader: BME690Reader,
+        bme690_reader: PimoroniBME690,
         time_zone_offset: int,
         get_time = time.time,
         schedule = micropython.schedule,
@@ -159,7 +160,8 @@ class Display:
 
         self._update_display(0)
 
-        self._seconds_timer.init(
+        safe_init(
+            self._seconds_timer,
             mode=Timer.PERIODIC,
             period=1000,
             callback=self._schedule_update_display_ref,

@@ -1,10 +1,11 @@
 import math
 import micropython
-import time
 
 from array import array
 from machine import Timer
+from services.event_service import EventService
 from picographics import PicoGraphics  # type: ignore
+from utilities.safe_timer import safe_init
 
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
@@ -19,6 +20,16 @@ _RING_OUTER_MARGIN = const(2)
 _MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
 
 
+@micropython.native
+def _fmt_time(sec: int) -> str:
+    hours = sec // 3600
+    if 0 <= sec <= _MAX_PRINTED_SEC:
+        minutes = sec // 60 % 60
+        seconds = sec % 60
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+    return f"{hours} h"
+
+
 class Colors:
     def __init__(
         self,
@@ -31,6 +42,7 @@ class Colors:
         self.ring = ring
         self.primary_text = primary_text
         self.secondary_text = secondary_text
+
 
 class Geometry:
     @micropython.native
@@ -82,12 +94,14 @@ class Geometry:
         self.text_height = font_height * text_scale
         self.line_spacing = self.text_height // 2
 
-        self.max_text_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2)**2) * 2)
+        self.max_text_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2) ** 2) * 2)
         self.max_text_center_width -= self.max_text_center_width % 2
         self.text_center_rect_x = (self.width - self.max_text_center_width) // 2
         self.text_center_y = (self.height - self.text_height) // 2
 
-        self.max_text_above_center_width = int(math.sqrt(self.inner_circle_r**2 - (self.text_height // 2 + self.text_height * 2)**2) * 2)
+        self.max_text_above_center_width = int(
+            math.sqrt(self.inner_circle_r**2 - (self.text_height // 2 + self.text_height * 2) ** 2) * 2
+        )
         self.max_text_above_center_width -= self.max_text_above_center_width % 2
         self.text_above_center_rect_x = (self.width - self.max_text_above_center_width) // 2
         self.text_above_center_y = self.text_center_y - self.text_height - self.line_spacing
@@ -107,10 +121,10 @@ class Renderer:
         self._last_text_below_center = ""
 
     def reset(self) -> None:
-        self._segments_cleared = 0
-        self._last_text_center = ""
-        self._last_text_above_center = ""
-        self._last_text_below_center = ""
+        self._segments_cleared: int = 0
+        self._last_text_center: str = ""
+        self._last_text_above_center: str = ""
+        self._last_text_below_center: str = ""
 
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
@@ -161,12 +175,14 @@ class Renderer:
         to_segment = (from_segment + 1) % RING_SEGMENTS  # wrap around to 0 after the last segment
 
         self._gfx.set_pen(self._colors.background)
-        self._gfx.polygon([
-            (self._geom.x_outer_vertices[from_segment], self._geom.y_outer_vertices[from_segment]),
-            (self._geom.x_outer_vertices[to_segment], self._geom.y_outer_vertices[to_segment]),
-            (self._geom.x_inner_vertices[to_segment], self._geom.y_inner_vertices[to_segment]),
-            (self._geom.x_inner_vertices[from_segment], self._geom.y_inner_vertices[from_segment])
-        ])
+        self._gfx.polygon(
+            [
+                (self._geom.x_outer_vertices[from_segment], self._geom.y_outer_vertices[from_segment]),
+                (self._geom.x_outer_vertices[to_segment], self._geom.y_outer_vertices[to_segment]),
+                (self._geom.x_inner_vertices[to_segment], self._geom.y_inner_vertices[to_segment]),
+                (self._geom.x_inner_vertices[from_segment], self._geom.y_inner_vertices[from_segment]),
+            ]
+        )
 
         self._segments_cleared += 1
 
@@ -245,153 +261,87 @@ class Display:
     def __init__(
         self,
         renderer: Renderer,
-        get_time=time.time,
+        event_service: EventService,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
         self._renderer = renderer
-
-        # dependencies for easier testing
-        self._get_time = get_time
+        self._service = event_service
         self._schedule = schedule
-        self._timer_factory = timer_factory
 
-        # method references for use with micropython.schedule
         self._update_each_second_ref = self._update_each_second
         self._schedule_update_each_second_ref = self._schedule_update_each_second
-        self._clear_ring_segment_ref = self._clear_ring_segment
-        self._schedule_clear_ring_segment_ref = self._schedule_clear_ring_segment
-        self._chain_event_ref = self._chain_event
-        self._schedule_chain_event_ref = self._schedule_chain_event
 
-        # deinitialize() will reset these
-        self._seconds_timer = self._timer_factory(-1)
-        self._ring_timer = self._timer_factory(-1)
-        self._event_timer = self._timer_factory(-1)
-        self._events = iter(())
-        self._event_start_timestamp = 0
-        self._event_end_timestamp = 0
-        self._active = False
+        self._seconds_timer = timer_factory(-1)
+        self._segments_cleared: int = 0
+        self._last_event = None
+        self._active: bool = False
 
-    def _update_each_second(self, _: int) -> None:
-        if not self._event_start_timestamp:
+    def _full_redraw(self) -> None:
+        self._segments_cleared = 0
+        self._renderer.reset()
+
+        service = self._service
+        event = service.current_event
+        if event is None:
+            self._renderer.text_write(TEXT_CENTER, "No events")
+            self._renderer.update()
             return
 
-        now = self._get_time()
+        self._renderer.text_write(TEXT_CENTER, event.name)
 
-        elapsed_sec = now - self._event_start_timestamp
-        elap_hours = elapsed_sec // 3600
-        if 0 <= elapsed_sec <= _MAX_PRINTED_SEC:
-            elap_minutes = elapsed_sec // 60 % 60
-            elap_seconds = elapsed_sec % 60
-            self._renderer.text_write(
-                TEXT_ABOVE_CENTER,
-                f"{elap_hours:02}:{elap_minutes:02}:{elap_seconds:02}",
-            )
-        else:
-            self._renderer.text_write(TEXT_ABOVE_CENTER, f"{elap_hours} h")
+        total = service.total_sec
+        elapsed = service.elapsed_sec
+        if total > 0:
+            expected = elapsed * RING_SEGMENTS // total
+            if expected > 0:
+                self._renderer.ring_clear_segments(expected)
+                self._segments_cleared = expected
 
-        remaining_sec = self._event_end_timestamp - now
-        rem_hours = remaining_sec // 3600
-        if 0 <= remaining_sec <= _MAX_PRINTED_SEC:
-            rem_minutes = remaining_sec // 60 % 60
-            rem_seconds = remaining_sec % 60
-            self._renderer.text_write(
-                TEXT_BELOW_CENTER,
-                f"-{rem_hours:02}:{rem_minutes:02}:{rem_seconds:02}",
-            )
-        else:
-            self._renderer.text_write(TEXT_BELOW_CENTER, f"-{rem_hours} h")
-
+        self._write_time_texts(elapsed, service.remaining_sec)
         self._renderer.update()
+
+    def _incremental_update(self) -> None:
+        service = self._service
+        if service.current_event is None:
+            return
+
+        total = service.total_sec
+        elapsed = service.elapsed_sec
+        if total > 0:
+            expected = elapsed * RING_SEGMENTS // total
+            if expected > self._segments_cleared:
+                self._renderer.ring_clear_segments(expected)
+                self._segments_cleared = expected
+
+        self._write_time_texts(elapsed, service.remaining_sec)
+        self._renderer.update()
+
+    def _write_time_texts(self, elapsed_sec: int, remaining_sec: int) -> None:
+        self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed_sec))
+        self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(remaining_sec)}")
+
+    def _update_each_second(self, _: int) -> None:
+        if not self._active:
+            return
+        event = self._service.current_event
+        if event is not self._last_event:
+            self._last_event = event
+            self._full_redraw()
+        else:
+            self._incremental_update()
 
     def _schedule_update_each_second(self, _: Timer) -> None:
         self._schedule(self._update_each_second_ref, 0)
 
-    def _clear_ring_segment(self, _: int) -> None:
-        self._renderer.ring_clear_next_segment()
-        self._renderer.update()
-
-    def _schedule_clear_ring_segment(self, _: Timer) -> None:
-        self._schedule(self._clear_ring_segment_ref, 0)
-
-    def _chain_event(self, _: int) -> None:
-        # stop any previous periodic updates
-        try:
-            self._event_timer.deinit()
-            self._ring_timer.deinit()
-        except Exception:
-            pass
-
-        now = self._get_time()
-
-        # get next event which is not yet expired
-        try:
-            event = next(self._events)
-            while (
-                event.duration_sec <= 0
-                or event.start_timestamp + event.duration_sec <= now
-            ):
-                event = next(self._events)
-        except StopIteration:
-            return  # iterator ended; nothing more to do
-
-        if event.start_timestamp > now:
-            # event is in the future; schedule next check at its start
-            self._event_timer.init(
-                mode=Timer.ONE_SHOT,
-                period=(event.start_timestamp - now) * 1000,
-                callback=self._schedule_chain_event_ref,
-            )
-            return
-
-        self._event_start_timestamp = event.start_timestamp
-        self._event_end_timestamp = event.start_timestamp + event.duration_sec
-
-        # calculate elapsed time of the current event (clamped)
-        elapsed_sec = now - event.start_timestamp
-        if elapsed_sec < 0:
-            elapsed_sec = 0
-        elif elapsed_sec > event.duration_sec:
-            elapsed_sec = event.duration_sec
-
-        # draw event state
-        self._renderer.reset()
-        self._renderer.ring_clear_segments(RING_SEGMENTS * elapsed_sec // event.duration_sec)
-        self._renderer.text_write(TEXT_CENTER, event.name)
-        self._update_each_second(0)
-
-        # schedule: ring ticking + next event start
-        remaining_sec = event.duration_sec - elapsed_sec
-        if remaining_sec > 0:
-            self._ring_timer.init(
-                mode=Timer.PERIODIC,
-                period=event.duration_sec * 1000 // RING_SEGMENTS,
-                callback=self._schedule_clear_ring_segment_ref,
-            )
-            self._event_timer.init(
-                mode=Timer.ONE_SHOT,
-                period=remaining_sec * 1000,
-                callback=self._schedule_chain_event_ref,
-            )
-        else:
-            # already past the end of the event; schedule next event "soon"
-            self._event_timer.init(
-                mode=Timer.ONE_SHOT,
-                period=10,
-                callback=self._schedule_chain_event_ref,
-            )
-
-    def _schedule_chain_event(self, _: Timer) -> None:
-        self._schedule(self._chain_event_ref, 0)
-
-    def initialize(self, events) -> None:
+    def initialize(self) -> None:
         if self._active:
             return
         self._active = True
-        self._events = events
-        self._chain_event(0)
-        self._seconds_timer.init(
+        self._last_event = self._service.current_event
+        self._full_redraw()
+        safe_init(
+            self._seconds_timer,
             mode=Timer.PERIODIC,
             period=1000,
             callback=self._schedule_update_each_second_ref,
@@ -402,8 +352,5 @@ class Display:
             return
         self._active = False
         self._seconds_timer.deinit()
-        self._event_timer.deinit()
-        self._ring_timer.deinit()
-        self._events = iter(())
-        self._event_start_timestamp = 0
-        self._event_end_timestamp = 0
+        self._segments_cleared = 0
+        self._last_event = None

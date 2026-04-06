@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import sensors.bme690 as bme690
+import services.sensors.pimoroni_bme690 as pimoroni_bme690
 
 
 class FakeI2C:
@@ -43,15 +43,15 @@ def _noop_schedule(fn, arg):
 
 
 def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> None:
-    monkeypatch.setattr(bme690, "PimoroniI2C", FakeI2C)
-    monkeypatch.setattr(bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
-    monkeypatch.setattr(bme690, "BreakoutBME69X", FakeBreakoutBME69X)
+    monkeypatch.setattr(pimoroni_bme690, "PimoroniI2C", FakeI2C)
+    monkeypatch.setattr(pimoroni_bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
+    monkeypatch.setattr(pimoroni_bme690, "BreakoutBME69X", FakeBreakoutBME69X)
 
-    monkeypatch.setattr(bme690, "STATUS_HEATER_STABLE", 0b10)
-    monkeypatch.setattr(bme690, "FILTER_COEFF_3", 3)
-    monkeypatch.setattr(bme690, "STANDBY_TIME_1000_MS", 1000)
-    monkeypatch.setattr(bme690, "OVERSAMPLING_2X", 2)
-    monkeypatch.setattr(bme690, "OVERSAMPLING_1X", 1)
+    monkeypatch.setattr(pimoroni_bme690, "STATUS_HEATER_STABLE", 0b10)
+    monkeypatch.setattr(pimoroni_bme690, "FILTER_COEFF_3", 3)
+    monkeypatch.setattr(pimoroni_bme690, "STANDBY_TIME_1000_MS", 1000)
+    monkeypatch.setattr(pimoroni_bme690, "OVERSAMPLING_2X", 2)
+    monkeypatch.setattr(pimoroni_bme690, "OVERSAMPLING_1X", 1)
 
     FakeBreakoutBME69X.next_reading = (
         20.0,  # C
@@ -61,7 +61,7 @@ def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> N
         0b10,  # heater stable
     )
 
-    reader = bme690.BME690Reader(
+    reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=1.5,
         hum_offset=-2.0,
         schedule=_noop_schedule,
@@ -78,11 +78,11 @@ def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> N
 
 
 def test_read_maps_unstable_status(monkeypatch) -> None:
-    monkeypatch.setattr(bme690, "PimoroniI2C", FakeI2C)
-    monkeypatch.setattr(bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
-    monkeypatch.setattr(bme690, "BreakoutBME69X", FakeBreakoutBME69X)
+    monkeypatch.setattr(pimoroni_bme690, "PimoroniI2C", FakeI2C)
+    monkeypatch.setattr(pimoroni_bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
+    monkeypatch.setattr(pimoroni_bme690, "BreakoutBME69X", FakeBreakoutBME69X)
 
-    monkeypatch.setattr(bme690, "STATUS_HEATER_STABLE", 0b10)
+    monkeypatch.setattr(pimoroni_bme690, "STATUS_HEATER_STABLE", 0b10)
 
     FakeBreakoutBME69X.next_reading = (
         0.0,
@@ -92,7 +92,7 @@ def test_read_maps_unstable_status(monkeypatch) -> None:
         0,  # heater unstable
     )
 
-    reader = bme690.BME690Reader(
+    reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
         hum_offset=0.0,
         schedule=_noop_schedule,

@@ -51,14 +51,50 @@ if "machine" not in sys.modules:
         def deinit(self):
             return None
 
+    class _Pin:
+        def __init__(self, pin_id, *args, **kwargs):
+            self._pin_id = pin_id
+
+    class _PWM:
+        def __init__(self, pin, *args, **kwargs):
+            self._pin = pin
+            self._freq = 0
+            self._duty = 0
+
+        def freq(self, f=None):
+            if f is not None:
+                self._freq = f
+            return self._freq
+
+        def duty_u16(self, d=None):
+            if d is not None:
+                self._duty = d
+            return self._duty
+
+        def deinit(self):
+            pass
+
     machine_stub.Timer = _Timer
+    machine_stub.Pin = _Pin
+    machine_stub.PWM = _PWM
     sys.modules["machine"] = machine_stub
 
 # Sensor driver deps (only available on-device). Provide minimal stubs so
-# importing `sensors.bme690` works under CPython unit tests.
+# importing `services.sensors.pimoroni_bme690` works under CPython unit tests.
 if "pimoroni" not in sys.modules:
     pimoroni_stub = types.ModuleType("pimoroni")
     pimoroni_stub.PICO_EXPLORER_I2C_PINS = {"sda": 0, "scl": 1}  # type: ignore[attr-defined]
+    # Note: __path__ is NOT set here — the built-in pimoroni module is not a
+    # package. Explorer-specific code lives under pico/services/ with naming
+
+    class _Button:
+        def __init__(self, pin):
+            self._pin = pin
+
+        def read(self):
+            return False
+
+    pimoroni_stub.Button = _Button
     sys.modules["pimoroni"] = pimoroni_stub
 
 if "pimoroni_i2c" not in sys.modules:

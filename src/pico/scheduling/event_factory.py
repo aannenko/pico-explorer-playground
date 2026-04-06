@@ -28,6 +28,7 @@ def work_week_loop(
         work_days (set[int]): Set of work days (0=Monday .. 6=Sunday)
         work_start_utc (tuple[int, int]): Work start time in UTC (hour, minute)
         work_end_utc (tuple[int, int]): Work end time in UTC (hour, minute)
+        now_timestamp (int | None): Current UTC timestamp (defaults to time.time())
 
     Returns:
         Iterator[Event]: A sequence of work, rest, and weekend events,
@@ -44,6 +45,7 @@ def work_week_loop(
     # 7. Rest time spanning over non-work days is weekend time.
     # 8. Each weekend event starts right after a work shift, spans > 24 hours, and finishes at the start of the next shift.
     # 9. There can be zero or more weekend days.
+
     work_start_hour, work_start_minute = work_start_utc
     if work_start_hour < 0 or work_start_hour > 23 or work_start_minute < 0 or work_start_minute > 59:
         raise ValueError("Work start time is invalid")

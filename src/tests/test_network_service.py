@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import utilities.network_service as ns_mod
-from utilities.network_service import NetworkService
+import services.network_service as ns_mod
+from services.network_service import NetworkService
 from utilities import ntp, wifi
 
 

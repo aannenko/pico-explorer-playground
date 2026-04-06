@@ -6,7 +6,7 @@ from pimoroni import PICO_EXPLORER_I2C_PINS  # type: ignore
 from pimoroni_i2c import PimoroniI2C  # type: ignore
 
 
-class BME690Reader:
+class PimoroniBME690:
     def __init__(
         self,
         temp_offset: float,

@@ -1,7 +1,7 @@
 import calendar
 import pytest
 from datetime import UTC, datetime
-from scheduling.eventfactory import work_week_loop
+from scheduling.event_factory import work_week_loop
 
 
 def _to_timestamp(dt: datetime) -> int:
@@ -21,7 +21,7 @@ def _mock_gmtime(monkeypatch: pytest.MonkeyPatch, dt: datetime) -> int:
         dt.weekday(),
         dt.timetuple().tm_yday,
     )
-    monkeypatch.setattr("scheduling.eventfactory.time.gmtime", lambda _: gmtime_tuple)
+    monkeypatch.setattr("scheduling.event_factory.time.gmtime", lambda _: gmtime_tuple)
     return timestamp
 
 

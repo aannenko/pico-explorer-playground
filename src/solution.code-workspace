@@ -8,6 +8,10 @@
 		}
 	],
 	"settings": {
+		"black-formatter.args": [
+			"--line-length",
+			"120"
+		],
 		"editor.defaultFormatter": "ms-python.black-formatter",
 		"micropico.openOnStart": true,
 		"micropico.pyIgnore": [
@@ -27,6 +31,7 @@
 			"**/venv"
 		],
 		"micropico.syncFolder": "pico",
+		"powershell.cwd": "src",
 		"python.analysis.diagnosticSeverityOverrides": {
 			"reportMissingModuleSource": "none"
 		},
