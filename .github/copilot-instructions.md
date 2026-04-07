@@ -17,32 +17,34 @@ Main behavior: show a ring-style timer UI, cycle through scheduled events, and p
 - Entry point: `pico/main.py`
   - Initializes PicoGraphics, creates display views and wires them together
   - Delegates WiFi/NTP to `NetworkService`, view switching to `DisplayManager`
+  - Creates a `TickScheduler` (single 100ms PERIODIC timer) and registers all service/display `tick()` methods as subscribers
   - Uses `ExplorerButtons` in the main loop to poll hardware buttons with edge detection and dispatch via `micropython.schedule()`
   - Buttons X/Y cycle views via `DisplayManager.cycle()`; buttons A/B forwarded to the active view via `DisplayManager` button handlers
 - Display views: `pico/displays/`
   - `status.py` — `StatusDisplay`: simple centered text screen (e.g. "wifi", "sync time")
-  - `events.py` — `Geometry`, `Renderer`, `Display`: ring-style event UI. `Display` polls `EventService` for current event state, calculates ring progress from elapsed time, detects event changes by identity. Owns one 1-second periodic timer for UI updates. Reuses `Geometry`/`Renderer`/`Colors` (shared with countdown display).
-  - `countdown.py` — `Display`: rendering-only countdown display that reads state from `CountdownTimer`. Owns display timers (seconds refresh, ring segment clearing), duration presets (`DURATIONS`/`LABELS`), and duration cycling. Bootstraps the timer with a default preset via `configure()`. `initialize()`/`deinitialize()` control rendering lifecycle without affecting the countdown engine. Display callbacks guard with `_active` to handle stale `micropython.schedule` deliveries. Reuses `events.Geometry`/`Renderer`/`Colors`.
-  - `sensors.py` — `Geometry`, `Renderer`, `Display`: BME690 sensor dashboard
-  - `manager.py` — `DisplayManager`: manages active view index, initialize/deinitialize cycling, and button A/B forwarding to the active display. All displays use no-arg `initialize()`.
+  - `events.py` — `Geometry`, `Renderer`, `Display`: ring-style event UI. `Display` polls `EventService` for current event state, calculates ring progress from elapsed time, detects event changes by identity. Has a `tick()` method (1s self-gated via `ticks_diff`) registered with the TickScheduler. Reuses `Geometry`/`Renderer`/`Colors` (shared with countdown display).
+  - `countdown.py` — `Display`: rendering-only countdown display that reads state from `CountdownTimer`. Has a `tick()` method (1s self-gated) for periodic UI updates, plus calculation-driven ring segment clearing. Owns duration presets (`DURATIONS`/`LABELS`) and cycling logic. Bootstraps the timer with a default preset via `configure()`. `initialize()`/`deinitialize()` control rendering lifecycle without affecting the countdown engine. Reuses `events.Geometry`/`Renderer`/`Colors`.
+  - `sensors.py` — `Geometry`, `Renderer`, `Display`: BME690 sensor dashboard. Has a `tick()` method (1s self-gated) for periodic UI updates.
+  - `manager.py` — `DisplayManager`: manages active view index, initialize/deinitialize cycling, button A/B forwarding to the active display, and automatic register/unregister of the active display's `tick()` with the TickScheduler. All displays use no-arg `initialize()`.
 - Scheduling: `pico/scheduling/*`
   - Event model + factories for iterators of events
 - Services: `pico/services/` — long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`) instead of folder convention.
-  - `countdown_timer.py` — `CountdownTimer`: pure countdown engine (state machine: INITIAL/RUNNING/PAUSED/DONE, done timer). Accepts `on_done`/`on_configure` callbacks. Exposes `configure(name, total_sec)`, `start()`, `pause()`, `resume()`, `reset()`. Properties: `state`, `name`, `total_sec`, `elapsed_sec`, `remaining_sec`. No buzzer or UI logic — lives forever; the display reads its state.
-  - `event_service.py` — `EventService`: wraps a `work_week_loop` iterator, owns a ONE_SHOT timer for auto-advancement between events. Exposes `current_event`, `name`, `elapsed_sec`, `remaining_sec`, `total_sec`. Created after NTP sync. Lives forever; the events display reads its state.
-  - `network_service.py` — `NetworkService`: encapsulates WiFi + NTP with status display, retry, and periodic timer scheduling
-  - `sensors/pimoroni_bme690.py` — `PimoroniBME690`: reads temperature, pressure, humidity, gas resistance from the BME690 sensor via Pimoroni I2C. Runs its own periodic timer forever.
-  - `utilities/explorer_buzzer.py` — `ExplorerBuzzer`: PWM-based buzzer driver for the Pico Explorer piezo on GP0. Public API: `play_alert(count, freq, interval_ms)` for toggle-based beep patterns and `stop_alert()` to cancel. Internal `_beep()`/`_off()` are private. Owns its own periodic timer for alert patterns. Note: pin must be bridged to the AUDIO header on Pico Explorer.
-  - `utilities/explorer_buttons.py` — `ExplorerButtons`: polls Pimoroni `Button` instances with edge detection in the main loop and dispatches presses via `micropython.schedule()`
+  - `countdown_timer.py` — `CountdownTimer`: pure countdown engine (state machine: INITIAL/RUNNING/PAUSED/DONE). Accepts `on_done`/`on_configure` callbacks. Exposes `configure(name, total_sec)`, `start()`, `pause()`, `resume()`, `reset()`. Properties: `state`, `name`, `total_sec`, `elapsed_sec`, `remaining_sec`. Has a `tick()` method that checks if `time >= end_timestamp` and transitions to DONE. No timers, no buzzer, no UI logic — lives forever; the display reads its state.
+  - `event_service.py` — `EventService`: wraps a `work_week_loop` iterator, auto-advances between events. Exposes `current_event`, `name`, `elapsed_sec`, `remaining_sec`, `total_sec`. Has a `tick()` method that checks if the current event has expired or a pending future event has started. Created after NTP sync. Lives forever; the events display reads its state.
+  - `network_service.py` — `NetworkService`: encapsulates WiFi + NTP with status display, retry. Has a `tick()` method that re-syncs WiFi/NTP when the configured `sync_interval_ms` elapses.
+  - `sensors/pimoroni_bme690.py` — `PimoroniBME690`: reads temperature, pressure, humidity, gas resistance from the BME690 sensor via Pimoroni I2C. Has a `tick()` method that re-reads the sensor when `sensor_read_delay_ms` elapses.
+  - `utilities/explorer_buzzer.py` — `ExplorerBuzzer`: PWM-based buzzer driver for the Pico Explorer piezo on GP0. Public API: `play_alert(count, freq, interval_ms)` for toggle-based beep patterns and `stop_alert()` to cancel. Internal `_beep()`/`_off()` are private. Owns its own periodic timer for alert patterns (150ms precision requires dedicated timer). Note: pin must be bridged to the AUDIO header on Pico Explorer.
+  - `utilities/explorer_buttons.py` — `ExplorerButtons`: polls `machine.Pin` instances (raw GPIO, active-low with pull-up) with edge detection in the main loop and dispatches presses via `micropython.schedule()`
 - Utilities: `pico/utilities/`
   - `wifi.py`, `ntp.py` — stateless WiFi connect and NTP time sync helpers
-  - `safe_timer.py` — `safe_init(timer, **kwargs)`: wraps `Timer.init()` with a retry after `gc.collect()` on ENOMEM. The RP2040 alarm pool frees slots asynchronously via the IRQ handler; this gives the handler time to run and also reclaims orphaned Timer objects.
+  - `tick_scheduler.py` — `TickScheduler`: single PERIODIC timer (100ms default) that drives all periodic work. Subscribers register/unregister callable `tick()` methods. Uses `micropython.schedule()` to run callbacks outside IRQ context. Only 1 alarm pool slot for ALL periodic work (except ExplorerBuzzer which keeps its own timer for audio precision).
 
 ## Testing expectations
 - Host-side tests exist under `tests/` (pytest).
 - `tests/conftest.py` provides shims/stubs for MicroPython-only modules (`micropython`, `machine`, `picographics`, `pimoroni`, `pimoroni_i2c`, `breakout_bme69x`, `ntptime`, `network`) and the `const()` builtin so that `pico/` code can be imported under CPython. The `machine` stub includes `Timer`, `Pin`, and `PWM`; the `pimoroni` stub includes `Button`. Explorer-specific code lives under `pico/services/` with naming convention (`Explorer*`, `Pimoroni*`) to avoid shadowing the built-in `pimoroni` module on MicroPython.
-- Individual tests use fakes (e.g., `FakeTimer`, `FakeRenderer`, `FakeBME69X`) to isolate logic from hardware.
-- Keep logic testable via dependency injection (e.g., `get_time`, `schedule`, `timer_factory`, `pwm_factory`, `pin_factory` patterns already used).
+- Individual tests use fakes (e.g., `FakeRenderer`, `FakeBME69X`, `FakeScheduler`) to isolate logic from hardware.
+- Keep logic testable via dependency injection (e.g., `get_time`, `pwm_factory`, `pin_factory` patterns already used).
+- Services and displays expose `tick()` methods tested directly — no timer/schedule mocking needed.
 - Don’t add heavy new dependencies unless necessary.
 
 ## Coding conventions for changes

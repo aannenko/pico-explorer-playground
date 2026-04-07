@@ -1,6 +1,7 @@
 import time
 import machine
 
+from micropython import const
 from network import (
     WLAN,
     STA_IF,

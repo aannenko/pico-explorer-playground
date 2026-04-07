@@ -1,5 +1,6 @@
 import builtins
 import sys
+import time as _time
 import types
 from pathlib import Path
 
@@ -13,6 +14,12 @@ if not hasattr(builtins, "const"):
 
 # Provide a minimal `picographics` stub so CPython unit tests
 # can import modules that only use it for typing/attribute access.
+# MicroPython provides `time.ticks_ms` / `time.ticks_diff`; CPython doesn't.
+if not hasattr(_time, "ticks_ms"):
+    _time.ticks_ms = lambda: 0  # type: ignore[attr-defined]
+if not hasattr(_time, "ticks_diff"):
+    _time.ticks_diff = lambda a, b: a - b  # type: ignore[attr-defined]
+
 if "picographics" not in sys.modules:
     picographics_stub = types.ModuleType("picographics")
     picographics_stub.PicoGraphics = object
@@ -31,6 +38,7 @@ if "micropython" not in sys.modules:
         # In unit tests we default to instantaneous execution.
         callback(arg)
 
+    micropython_stub.const = lambda x: x
     micropython_stub.native = _native
     micropython_stub.schedule = _schedule
     sys.modules["micropython"] = micropython_stub

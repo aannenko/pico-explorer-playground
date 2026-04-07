@@ -1,6 +1,7 @@
 import micropython
 
 from machine import Pin, PWM, Timer
+from micropython import const
 
 _BUZZER_PIN = const(0)  # Pico Explorer piezo is on GP0
 # Note: You must bridge the pin you use over to the AUDIO pin

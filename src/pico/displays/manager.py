@@ -12,13 +12,16 @@ class DisplayManager:
     def initialize_current(self) -> None:
         self._displays[self._current].initialize()
 
-    def next(self) -> None:
+    def _deinitialize_current(self) -> None:
         self._displays[self._current].deinitialize()
+
+    def next(self) -> None:
+        self._deinitialize_current()
         self._current = (self._current + 1) % len(self._displays)
         self.initialize_current()
 
     def previous(self) -> None:
-        self._displays[self._current].deinitialize()
+        self._deinitialize_current()
         self._current = (self._current - 1) % len(self._displays)
         self.initialize_current()
 

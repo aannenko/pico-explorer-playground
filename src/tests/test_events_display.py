@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import machine
 import pytest
 
 import displays.events as events
@@ -21,43 +18,11 @@ class FakeRenderer:
     def ring_clear_segments(self, count: int) -> None:
         self.calls.append(("ring_clear_segments", (count,), {}))
 
-    def ring_clear_next_segment(self) -> None:
-        self.calls.append(("ring_clear_next_segment", (), {}))
-
     def text_write(self, position: int, text: str) -> None:
         self.calls.append(("text_write", (position, text), {}))
 
     def update(self) -> None:
         self.update_calls += 1
-
-
-@dataclass
-class FakeTimer:
-    timer_id: int
-
-    init_calls: list[dict] = None  # type: ignore[assignment]
-    deinit_calls: int = 0
-
-    def __post_init__(self) -> None:
-        if self.init_calls is None:
-            self.init_calls = []
-
-    def init(self, **kwargs) -> None:
-        self.init_calls.append(dict(kwargs))
-
-    def deinit(self) -> None:
-        self.deinit_calls += 1
-
-
-def _mk_timer_factory():
-    created: list[FakeTimer] = []
-
-    def factory(timer_id: int) -> FakeTimer:
-        t = FakeTimer(timer_id)
-        created.append(t)
-        return t
-
-    return factory, created
 
 
 class FakeEventService:
@@ -95,17 +60,9 @@ def _mk_display(
         remaining_sec=remaining,
         total_sec=total,
     )
-    timer_factory, timers = _mk_timer_factory()
     renderer = FakeRenderer()
-
-    display = Display(
-        renderer=renderer,
-        event_service=service,
-        schedule=lambda fn, arg: fn(arg),
-        timer_factory=timer_factory,
-    )
-
-    return display, service, renderer, timers
+    display = Display(renderer=renderer, event_service=service)
+    return display, service, renderer
 
 
 # ── initialize ─────────────────────────────────────────────────────────
@@ -113,7 +70,7 @@ def _mk_display(
 
 def test_initialize_shows_current_event_with_ring_progress() -> None:
     event = _mk_event("Meeting", start=0, duration=200)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=100, remaining=100, total=200,
     )
 
@@ -132,7 +89,7 @@ def test_initialize_shows_current_event_with_ring_progress() -> None:
 
 
 def test_initialize_with_no_event_shows_no_events() -> None:
-    d, service, renderer, timers = _mk_display()
+    d, service, renderer = _mk_display()
 
     d.initialize()
 
@@ -144,7 +101,7 @@ def test_initialize_with_no_event_shows_no_events() -> None:
 
 def test_initialize_is_idempotent() -> None:
     event = _mk_event("Meeting", start=0, duration=200)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=50, remaining=150, total=200,
     )
 
@@ -157,27 +114,12 @@ def test_initialize_is_idempotent() -> None:
     assert renderer.update_calls == update_calls_after_first
 
 
-def test_initialize_starts_seconds_timer() -> None:
-    d, service, renderer, timers = _mk_display()
-
-    d.initialize()
-
-    seconds_timer = timers[0]
-    assert seconds_timer.init_calls == [
-        {
-            "mode": machine.Timer.PERIODIC,
-            "period": 1000,
-            "callback": d._schedule_update_each_second_ref,
-        }
-    ]
-
-
 # ── deinitialize ───────────────────────────────────────────────────────
 
 
-def test_deinitialize_stops_timer_and_resets_state() -> None:
+def test_deinitialize_resets_state() -> None:
     event = _mk_event("Meeting", start=0, duration=200)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=50, remaining=150, total=200,
     )
 
@@ -188,20 +130,20 @@ def test_deinitialize_stops_timer_and_resets_state() -> None:
     assert d._segments_cleared == 0
     assert d._last_event is None
 
-    seconds_timer = timers[0]
-    assert seconds_timer.deinit_calls == 1
-
 
 def test_deinitialize_is_idempotent() -> None:
-    d, service, renderer, timers = _mk_display()
+    d, service, renderer = _mk_display()
 
     d.initialize()
     d.deinitialize()
-    seconds_timer = timers[0]
-    deinit_count = seconds_timer.deinit_calls
+
+    assert d._active is False
 
     d.deinitialize()
-    assert seconds_timer.deinit_calls == deinit_count
+
+    assert d._active is False
+    assert d._segments_cleared == 0
+    assert d._last_event is None
 
 
 # ── incremental update ─────────────────────────────────────────────────
@@ -209,7 +151,7 @@ def test_deinitialize_is_idempotent() -> None:
 
 def test_incremental_update_advances_ring_segments() -> None:
     event = _mk_event("Meeting", start=0, duration=120)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=60, remaining=60, total=120,
     )
 
@@ -230,7 +172,7 @@ def test_incremental_update_advances_ring_segments() -> None:
 
 def test_incremental_update_writes_time_texts() -> None:
     event = _mk_event("Meeting", start=0, duration=7200)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=3661, remaining=3539, total=7200,
     )
 
@@ -246,7 +188,7 @@ def test_incremental_update_writes_time_texts() -> None:
 
 
 def test_incremental_update_skipped_when_no_event() -> None:
-    d, service, renderer, timers = _mk_display()
+    d, service, renderer = _mk_display()
 
     d.initialize()
     renderer.calls.clear()
@@ -258,20 +200,25 @@ def test_incremental_update_skipped_when_no_event() -> None:
     assert renderer.update_calls == 0
 
 
-# ── update each second ─────────────────────────────────────────────────
+# ── tick ───────────────────────────────────────────────────────────────
 
 
-def test_event_change_triggers_full_redraw() -> None:
+def test_tick_triggers_full_redraw_on_event_change(monkeypatch) -> None:
+    tick_time = [0]
+    monkeypatch.setattr(events.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(events.time, "ticks_diff", lambda a, b: a - b)
+
     event_a = _mk_event("Event A", start=0, duration=100)
     event_b = _mk_event("Event B", start=100, duration=200)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event_a, elapsed=50, remaining=50, total=100,
     )
 
+    tick_time[0] = 0
     d.initialize()
     assert d._last_event is event_a
 
-    # Event changes
+    # Change event and advance time
     service.current_event = event_b
     service.elapsed_sec = 10
     service.remaining_sec = 190
@@ -279,7 +226,8 @@ def test_event_change_triggers_full_redraw() -> None:
     renderer.calls.clear()
     renderer.update_calls = 0
 
-    d._update_each_second(0)
+    tick_time[0] = 1000
+    d._tick()
 
     assert d._last_event is event_b
     assert ("reset", (), {}) in renderer.calls
@@ -287,12 +235,17 @@ def test_event_change_triggers_full_redraw() -> None:
     assert renderer.update_calls >= 1
 
 
-def test_same_event_triggers_incremental_update() -> None:
+def test_tick_triggers_incremental_update_on_same_event(monkeypatch) -> None:
+    tick_time = [0]
+    monkeypatch.setattr(events.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(events.time, "ticks_diff", lambda a, b: a - b)
+
     event = _mk_event("Meeting", start=0, duration=120)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=60, remaining=60, total=120,
     )
 
+    tick_time[0] = 0
     d.initialize()
     renderer.calls.clear()
     renderer.update_calls = 0
@@ -301,54 +254,57 @@ def test_same_event_triggers_incremental_update() -> None:
     service.elapsed_sec = 90
     service.remaining_sec = 30
 
-    d._update_each_second(0)
+    tick_time[0] = 1000
+    d._tick()
 
     # Should NOT have reset (incremental, not full redraw)
     assert ("reset", (), {}) not in renderer.calls
     assert renderer.update_calls >= 1
 
 
-def test_update_each_second_ignored_when_inactive() -> None:
-    """Stale scheduled callback after deinitialize should be ignored."""
+def test_tick_ignored_when_inactive(monkeypatch) -> None:
+    tick_time = [0]
+    monkeypatch.setattr(events.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(events.time, "ticks_diff", lambda a, b: a - b)
+
     event = _mk_event("Meeting", start=0, duration=100)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=50, remaining=50, total=100,
     )
 
+    tick_time[0] = 0
     d.initialize()
     d.deinitialize()
     renderer.calls.clear()
     renderer.update_calls = 0
 
-    d._update_each_second(0)
+    tick_time[0] = 1000
+    d._tick()
 
     assert renderer.calls == []
     assert renderer.update_calls == 0
 
 
-# ── schedule wrapper ───────────────────────────────────────────────────
+def test_tick_skipped_when_interval_not_elapsed(monkeypatch) -> None:
+    tick_time = [0]
+    monkeypatch.setattr(events.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(events.time, "ticks_diff", lambda a, b: a - b)
 
-
-def test_schedule_update_each_second_forwards_to_schedule() -> None:
-    scheduled: list[tuple[object, int]] = []
-
-    def schedule(fn, arg):
-        scheduled.append((fn, arg))
-
-    timer_factory, timers = _mk_timer_factory()
-    renderer = FakeRenderer()
-    service = FakeEventService()
-
-    d = Display(
-        renderer=renderer,
-        event_service=service,
-        schedule=schedule,
-        timer_factory=timer_factory,
+    event = _mk_event("Meeting", start=0, duration=120)
+    d, service, renderer = _mk_display(
+        event=event, elapsed=60, remaining=60, total=120,
     )
 
-    d._schedule_update_each_second(None)  # type: ignore[arg-type]
+    tick_time[0] = 0
+    d.initialize()
+    renderer.calls.clear()
+    renderer.update_calls = 0
 
-    assert scheduled == [(d._update_each_second_ref, 0)]
+    tick_time[0] = 999
+    d._tick()
+
+    assert renderer.calls == []
+    assert renderer.update_calls == 0
 
 
 # ── time formatting ───────────────────────────────────────────────────
@@ -356,7 +312,7 @@ def test_schedule_update_each_second_forwards_to_schedule() -> None:
 
 def test_time_formatting_elapsed_and_remaining() -> None:
     event = _mk_event("Meeting", start=0, duration=10000)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=3661, remaining=6339, total=10000,
     )
 
@@ -368,7 +324,7 @@ def test_time_formatting_elapsed_and_remaining() -> None:
 
 def test_time_formatting_zero_elapsed() -> None:
     event = _mk_event("Fresh", start=0, duration=3600)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=0, remaining=3600, total=3600,
     )
 
@@ -393,7 +349,7 @@ def test_time_formatting_edge_cases(
     expected_below: str,
 ) -> None:
     event = _mk_event("Edge", start=0, duration=elapsed + remaining)
-    d, service, renderer, timers = _mk_display(
+    d, service, renderer = _mk_display(
         event=event, elapsed=elapsed, remaining=remaining, total=elapsed + remaining,
     )
 

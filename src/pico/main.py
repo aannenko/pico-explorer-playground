@@ -5,20 +5,23 @@ from displays import sensors, events, countdown
 from displays.manager import DisplayManager
 from displays.status import StatusDisplay
 from machine import Pin
+from micropython import const
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER  # type: ignore
 from scheduling import event_factory
-from services.sensors import pimoroni_bme690
+from services.sensors.pimoroni_bme690 import PimoroniBME690
 from services.countdown_timer import CountdownTimer
 from services.event_service import EventService
 from services.utilities.explorer_buttons import ExplorerButtons
 from services.utilities.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
+from utilities.tick_scheduler import TickScheduler
 
 try:
     import config
 except ImportError as exc:
-    raise RuntimeError("Missing required module: config;" \
-    " please create a config.py with your WiFi credentials.") from exc
+    raise RuntimeError(
+        "Missing required module: config; please create a config.py with your WiFi credentials."
+    ) from exc
 
 
 # Setup
@@ -39,11 +42,14 @@ STATUS_DISPLAY = StatusDisplay(
     subtext_color=GRAY,
 )
 
+TICK_SCHEDULER = TickScheduler()
+
 BUZZER = ExplorerBuzzer()
 
 COUNTDOWN_TIMER = CountdownTimer(
     on_done=BUZZER.play_alert,
     on_configure=BUZZER.stop_alert,
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 COUNTDOWN_DISPLAY = countdown.Display(
@@ -62,6 +68,14 @@ COUNTDOWN_DISPLAY = countdown.Display(
         ),
     ),
     countdown_timer=COUNTDOWN_TIMER,
+    tick_scheduler=TICK_SCHEDULER,
+)
+
+BME690_READER = PimoroniBME690(
+    temp_offset=config.BME690_TEMP_OFFSET,
+    hum_offset=config.BME690_HUM_OFFSET,
+    sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 SENSORS_DISPLAY = sensors.Display(
@@ -79,12 +93,9 @@ SENSORS_DISPLAY = sensors.Display(
             secondary_text=GRAY,
         ),
     ),
-    bme690_reader=pimoroni_bme690.PimoroniBME690(
-        temp_offset=config.BME690_TEMP_OFFSET,
-        hum_offset=config.BME690_HUM_OFFSET,
-        sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
-    ),
+    bme690_reader=BME690_READER,
     time_zone_offset=config.TIME_ZONE_OFFSET,
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 BUTTON_A = Pin(12, Pin.IN, Pin.PULL_UP)
@@ -97,14 +108,13 @@ NETWORK_SERVICE = NetworkService(
     password=config.WIFI_PASSWORD,
     time_zone_offset=config.TIME_ZONE_OFFSET,
     status_fn=STATUS_DISPLAY.show,
+    sync_interval_ms=const(12 * 60 * 60 * 1000),
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 
 # Main logic
 NETWORK_SERVICE.connect_and_sync_initial()
-
-TWELVE_HOURS_IN_MS = const(12 * 60 * 60 * 1000)
-NETWORK_SERVICE.start_periodic_sync(TWELVE_HOURS_IN_MS)
 
 # EventService must be created after NTP sync for correct timestamps
 EVENT_SERVICE = EventService(
@@ -113,6 +123,7 @@ EVENT_SERVICE = EventService(
         work_start_utc=(8, 0),
         work_end_utc=(17, 0),
     ),
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 EVENTS_DISPLAY = events.Display(
@@ -131,6 +142,7 @@ EVENTS_DISPLAY = events.Display(
         ),
     ),
     event_service=EVENT_SERVICE,
+    tick_scheduler=TICK_SCHEDULER,
 )
 
 DISPLAY_MANAGER = DisplayManager(
@@ -138,6 +150,7 @@ DISPLAY_MANAGER = DisplayManager(
 )
 
 DISPLAY_MANAGER.initialize_current()
+TICK_SCHEDULER.start()
 
 BUTTON_POLLER = ExplorerButtons(schedule=micropython.schedule)
 BUTTON_POLLER.add(BUTTON_A, DISPLAY_MANAGER.on_button_a_ref)

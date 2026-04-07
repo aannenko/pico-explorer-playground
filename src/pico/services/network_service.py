@@ -1,7 +1,5 @@
-import micropython
 import time
 
-from machine import Timer
 from utilities import ntp, wifi
 
 
@@ -12,18 +10,18 @@ class NetworkService:
         password: str,
         time_zone_offset: int,
         status_fn,
-        schedule=micropython.schedule,
+        sync_interval_ms: int = 12 * 60 * 60 * 1000,
+        tick_scheduler=None,
     ) -> None:
         self._ssid = ssid
         self._password = password
         self._tz_offset = time_zone_offset
         self._status = status_fn
-        self._schedule = schedule
+        self._sync_interval_ms = sync_interval_ms
+        self._last_sync_ticks: int = 0
 
-        self._connect_and_sync_ref = self._connect_and_sync
-        self._schedule_connect_and_sync_ref = self._schedule_connect_and_sync
-
-        self._sync_timer: Timer | None = None
+        if tick_scheduler is not None:
+            tick_scheduler.register(self._tick)
 
     def connect_wifi(self, throw_on_fail: bool = False) -> bool:
         self._status("wifi")
@@ -48,21 +46,14 @@ class NetworkService:
     def connect_and_sync_initial(self) -> None:
         self.connect_wifi(throw_on_fail=True)
         self.sync_time(throw_on_fail=True)
+        self._last_sync_ticks = time.ticks_ms()
 
-    def start_periodic_sync(self, period_ms: int, timer_factory=Timer) -> None:
-        self._sync_timer = timer_factory(
-            -1,
-            mode=Timer.PERIODIC,
-            period=period_ms,
-            callback=self._schedule_connect_and_sync_ref,
-        )
-
-    def _connect_and_sync(self, _: int) -> None:
-        if self.connect_wifi(throw_on_fail=False):
-            self.sync_time(throw_on_fail=False)
-
-    def _schedule_connect_and_sync(self, _: Timer) -> None:
-        self._schedule(self._connect_and_sync_ref, 0)
+    def _tick(self) -> None:
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._last_sync_ticks) >= self._sync_interval_ms:
+            self._last_sync_ticks = now
+            if self.connect_wifi(throw_on_fail=False):
+                self.sync_time(throw_on_fail=False)
 
     def _show_time_subtext(self, label: str) -> None:
         now = time.gmtime()

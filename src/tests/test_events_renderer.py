@@ -141,29 +141,6 @@ def test_ring_clear_segments_draws_polygon_for_increment() -> None:
     assert points[5] == (geom.x_inner_vertices[0], geom.y_inner_vertices[0])
 
 
-def test_ring_clear_next_segment_wraps_at_end() -> None:
-    tg, display, geom = _mk_timergraphics()
-
-    tg.ring_clear_segments(RING_SEGMENTS - 1)
-    display.calls.clear()
-
-    tg.ring_clear_next_segment()
-
-    assert display.calls[0] == ("set_pen", (1,), {})
-
-    method, args, _kwargs = display.calls[1]
-    assert method == "polygon"
-    (points,) = args
-
-    last = RING_SEGMENTS - 1
-    assert points == [
-        (geom.x_outer_vertices[last], geom.y_outer_vertices[last]),
-        (geom.x_outer_vertices[0], geom.y_outer_vertices[0]),
-        (geom.x_inner_vertices[0], geom.y_inner_vertices[0]),
-        (geom.x_inner_vertices[last], geom.y_inner_vertices[last]),
-    ]
-
-
 def test_text_write_centers_and_uses_primary_color_for_center() -> None:
     tg, display, geom = _mk_timergraphics()
 

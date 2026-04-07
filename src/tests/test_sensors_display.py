@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import machine
-
 import displays.sensors as sensors
 
 
@@ -40,35 +36,6 @@ class FakeBME690Reader:
         return self._reading
 
 
-@dataclass
-class FakeTimer:
-    timer_id: int
-
-    init_calls: list[dict] = None  # type: ignore[assignment]
-    deinit_calls: int = 0
-
-    def __post_init__(self) -> None:
-        if self.init_calls is None:
-            self.init_calls = []
-
-    def init(self, **kwargs) -> None:
-        self.init_calls.append(dict(kwargs))
-
-    def deinit(self) -> None:
-        self.deinit_calls += 1
-
-
-def _mk_timer_factory():
-    created: list[FakeTimer] = []
-
-    def factory(timer_id: int) -> FakeTimer:
-        t = FakeTimer(timer_id)
-        created.append(t)
-        return t
-
-    return factory, created
-
-
 def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     renderer = FakeRenderer()
 
@@ -85,11 +52,9 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
         bme690_reader=FakeBME690Reader(reading),
         time_zone_offset=0,
         get_time=lambda: 0,
-        schedule=lambda fn, arg: fn(arg),
-        timer_factory=lambda _id: FakeTimer(_id),
     )
 
-    d._update_display(0)
+    d._update_display()
 
     assert ("header_write", ("'26-01-04 13:05",), {}) in renderer.calls
     assert ("line_write", (0, "Temp: 22.4 C"), {"pen": 11}) in renderer.calls
@@ -100,8 +65,7 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     assert renderer.update_calls == 1
 
 
-def test_initialize_starts_timer_and_is_idempotent(monkeypatch) -> None:
-    timer_factory, timers = _mk_timer_factory()
+def test_initialize_renders_and_is_idempotent(monkeypatch) -> None:
     renderer = FakeRenderer()
 
     monkeypatch.setattr(
@@ -115,52 +79,43 @@ def test_initialize_starts_timer_and_is_idempotent(monkeypatch) -> None:
         bme690_reader=FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable")),
         time_zone_offset=0,
         get_time=lambda: 0,
-        schedule=lambda fn, arg: fn(arg),
-        timer_factory=timer_factory,
     )
 
     d.initialize()
 
-    assert len(timers) == 1
-    seconds_timer = timers[0]
+    assert d._active is True
+    assert ("reset", (), {}) in renderer.calls
+    assert renderer.update_calls == 1
 
-    assert seconds_timer.init_calls == [
-        {
-            "mode": machine.Timer.PERIODIC,
-            "period": 1000,
-            "callback": d._schedule_update_display_ref,
-        }
-    ]
-
-    # Idempotent
+    # Idempotent — second call should not reset or update again.
+    renderer.calls.clear()
+    renderer.update_calls = 0
     d.initialize()
-    assert seconds_timer.init_calls == [
-        {
-            "mode": machine.Timer.PERIODIC,
-            "period": 1000,
-            "callback": d._schedule_update_display_ref,
-        }
-    ]
+    assert renderer.calls == []
+    assert renderer.update_calls == 0
 
 
-def test_deinitialize_deinits_timer_and_is_idempotent() -> None:
-    timer_factory, timers = _mk_timer_factory()
+def test_deinitialize_sets_inactive_and_is_idempotent(monkeypatch) -> None:
     renderer = FakeRenderer()
+
+    monkeypatch.setattr(
+        sensors.time,
+        "gmtime",
+        lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0),
+    )
 
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader((0.0, 0.0, 0.0, 0.0, "Stable")),
         time_zone_offset=0,
         get_time=lambda: 0,
-        schedule=lambda fn, arg: fn(arg),
-        timer_factory=timer_factory,
     )
 
     d.initialize()
     d.deinitialize()
 
     assert d._active is False
-    assert [t.deinit_calls for t in timers] == [1]
 
+    # Idempotent
     d.deinitialize()
-    assert [t.deinit_calls for t in timers] == [1]
+    assert d._active is False

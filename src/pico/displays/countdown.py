@@ -1,6 +1,7 @@
 import micropython
+import time
 
-from machine import Timer
+from micropython import const
 from displays.events import (
     Renderer,
     RING_SEGMENTS,
@@ -8,8 +9,6 @@ from displays.events import (
     TEXT_ABOVE_CENTER,
     TEXT_BELOW_CENTER,
 )
-from utilities.safe_timer import safe_init
-
 from services.countdown_timer import (
     CountdownTimer,
     INITIAL,
@@ -46,29 +45,16 @@ def _fmt_time(sec: int) -> str:
 
 
 class Display:
-    def __init__(
-        self,
-        renderer: Renderer,
-        countdown_timer: CountdownTimer,
-        schedule=micropython.schedule,
-        timer_factory=Timer,
-    ) -> None:
-        self._renderer: Renderer = renderer
-        self._timer: CountdownTimer = countdown_timer
-        self._schedule = schedule
+    def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer, tick_scheduler=None) -> None:
+        self._renderer = renderer
+        self._timer = countdown_timer
+        self._scheduler = tick_scheduler
 
         self._duration_index: int = _DEFAULT_INDEX
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
-        self._update_each_second_ref = self._update_each_second
-        self._schedule_update_each_second_ref = self._schedule_update_each_second
-        self._clear_ring_segment_ref = self._clear_ring_segment
-        self._schedule_clear_ring_segment_ref = self._schedule_clear_ring_segment
-
-        self._seconds_timer = timer_factory(-1)
-        self._ring_timer = timer_factory(-1)
-
         self._segments_cleared: int = 0
+        self._last_tick: int = 0
         self._active: bool = False
 
     def on_button_a(self) -> None:
@@ -101,7 +87,6 @@ class Display:
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
     def _draw_idle(self) -> None:
-        self._stop_display_timers()
         self._segments_cleared = 0
         self._renderer.reset()
         self._renderer.text_write(TEXT_CENTER, self._timer.name)
@@ -122,24 +107,20 @@ class Display:
 
     def _draw_running(self) -> None:
         self._restore_ring_progress()
-        self._update_each_second(0)
-        self._start_display_timers()
+        self._update_display()
 
     def _draw_paused(self) -> None:
-        self._stop_display_timers()
         self._renderer.text_write(TEXT_ABOVE_CENTER, "Paused")
         self._renderer.update()
 
     def _draw_paused_full(self) -> None:
         """Full redraw for PAUSED state — restores ring progress and remaining time."""
-        self._stop_display_timers()
         self._restore_ring_progress()
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(self._timer.remaining_sec)}")
         self._renderer.text_write(TEXT_ABOVE_CENTER, "Paused")
         self._renderer.update()
 
     def _draw_done(self) -> None:
-        self._stop_display_timers()
         self._segments_cleared = RING_SEGMENTS
         self._renderer.reset()
         self._renderer.ring_clear_segments(RING_SEGMENTS)
@@ -148,64 +129,42 @@ class Display:
         self._renderer.text_write(TEXT_BELOW_CENTER, "-00:00:00")
         self._renderer.update()
 
-    def _start_display_timers(self) -> None:
-        remaining = self._timer.remaining_sec
-        remaining_segments = RING_SEGMENTS - self._segments_cleared
-
-        if remaining_segments > 0 and remaining > 0:
-            safe_init(
-                self._ring_timer,
-                mode=Timer.PERIODIC,
-                period=remaining * 1000 // remaining_segments,
-                callback=self._schedule_clear_ring_segment_ref,
-            )
-
-        safe_init(
-            self._seconds_timer,
-            mode=Timer.PERIODIC,
-            period=1000,
-            callback=self._schedule_update_each_second_ref,
-        )
-
-    def _stop_display_timers(self) -> None:
-        self._seconds_timer.deinit()
-        self._ring_timer.deinit()
-
-    def _update_each_second(self, _: int) -> None:
-        if not self._active:
-            return
+    def _update_display(self) -> None:
         timer = self._timer
         state = timer.state
         if state == DONE:
-            self._draw_done()
+            if self._segments_cleared < RING_SEGMENTS:
+                self._draw_done()
             return
         if state != RUNNING:
             return
 
-        renderer = self._renderer
-        renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(timer.elapsed_sec))
-        renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
-        renderer.update()
+        total = timer.total_sec
+        elapsed = timer.elapsed_sec
+        if total > 0:
+            expected = elapsed * RING_SEGMENTS // total
+            if expected > self._segments_cleared:
+                self._renderer.ring_clear_segments(expected)
+                self._segments_cleared = expected
 
-    def _schedule_update_each_second(self, _: Timer) -> None:
-        self._schedule(self._update_each_second_ref, 0)
-
-    def _clear_ring_segment(self, _: int) -> None:
-        if not self._active:
-            return
-        if self._timer.state != RUNNING:
-            return
-        self._segments_cleared += 1
-        self._renderer.ring_clear_next_segment()
+        self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed))
+        self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
         self._renderer.update()
 
-    def _schedule_clear_ring_segment(self, _: Timer) -> None:
-        self._schedule(self._clear_ring_segment_ref, 0)
+    def _tick(self) -> None:
+        if not self._active:
+            return
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._last_tick) < 1000:
+            return
+        self._last_tick = now
+        self._update_display()
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
+        self._last_tick = time.ticks_ms()
 
         state = self._timer.state
         if state == RUNNING:
@@ -217,9 +176,13 @@ class Display:
         else:
             self._draw_idle()
 
+        if self._scheduler is not None:
+            self._scheduler.register(self._tick)
+
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
-        self._stop_display_timers()
         self._segments_cleared = 0
+        if self._scheduler is not None:
+            self._scheduler.unregister(self._tick)

@@ -1,34 +1,22 @@
-import micropython
 import time
-
-from machine import Timer
-from utilities.safe_timer import safe_init
 
 
 class EventService:
     """Long-lived service that wraps an event iterator and auto-advances."""
 
-    def __init__(
-        self,
-        events_iter,
-        get_time=time.time,
-        schedule=micropython.schedule,
-        timer_factory=Timer,
-    ) -> None:
+    def __init__(self, events_iter, get_time=time.time, tick_scheduler=None) -> None:
         self._events = events_iter
         self._get_time = get_time
-        self._schedule = schedule
 
         self._current_event = None  # Event | None
         self._pending_event = None  # Event | None
         self._event_start: int = 0
         self._event_end: int = 0
 
-        self._advance_ref = self._advance
-        self._schedule_advance_ref = self._schedule_advance
-        self._event_timer = timer_factory(-1)
-
         self._advance()
+
+        if tick_scheduler is not None:
+            tick_scheduler.register(self._tick)
 
     @property
     def current_event(self):  # -> Event | None
@@ -57,11 +45,16 @@ class EventService:
             return 0
         return self._current_event.duration_sec
 
-    def _advance(self, _: int = 0) -> None:
-        self._event_timer.deinit()
+    def _tick(self) -> None:
+        now = self._get_time()
+        if self._current_event is not None and now >= self._event_end:
+            self._advance()
+        elif self._pending_event is not None and now >= self._pending_event.start_timestamp:
+            self._advance()
+
+    def _advance(self) -> None:
         now = self._get_time()
 
-        # Use pending future event if available, otherwise consume from iterator
         event = self._pending_event
         self._pending_event = None
 
@@ -76,32 +69,15 @@ class EventService:
             self._event_end = 0
             return
 
-        # Future event — store it and wait for its start
+        # Future event — store it and wait
         if event.start_timestamp > now:
             self._pending_event = event
             self._current_event = None
             self._event_start = 0
             self._event_end = 0
-            safe_init(
-                self._event_timer,
-                mode=Timer.ONE_SHOT,
-                period=(event.start_timestamp - now) * 1000,
-                callback=self._schedule_advance_ref,
-            )
             return
 
-        # Active event — schedule advance at expiry
+        # Active event
         self._current_event = event
         self._event_start = event.start_timestamp
         self._event_end = event.start_timestamp + event.duration_sec
-        remaining_ms = (self._event_end - now) * 1000
-        if remaining_ms > 0:
-            safe_init(
-                self._event_timer,
-                mode=Timer.ONE_SHOT,
-                period=remaining_ms,
-                callback=self._schedule_advance_ref,
-            )
-
-    def _schedule_advance(self, _: Timer) -> None:
-        self._schedule(self._advance_ref, 0)

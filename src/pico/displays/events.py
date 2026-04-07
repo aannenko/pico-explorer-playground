@@ -1,11 +1,12 @@
 import math
 import micropython
+import time
+
 
 from array import array
-from machine import Timer
-from services.event_service import EventService
+from micropython import const
 from picographics import PicoGraphics  # type: ignore
-from utilities.safe_timer import safe_init
+from services.event_service import EventService
 
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
@@ -120,6 +121,9 @@ class Renderer:
         self._last_text_above_center = ""
         self._last_text_below_center = ""
 
+        # Pre-allocated buffer for single-segment clears (hot path)
+        self._seg_buf = [(0, 0), (0, 0), (0, 0), (0, 0)]
+
     def reset(self) -> None:
         self._segments_cleared: int = 0
         self._last_text_center: str = ""
@@ -134,12 +138,12 @@ class Renderer:
         self._gfx.set_pen(self._colors.background)
         self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.inner_circle_r)
 
-    def ring_clear_segments(self, count: int) -> None:
-        if count <= self._segments_cleared:
+    def ring_clear_segments(self, total_count: int) -> None:
+        if total_count <= self._segments_cleared:
             return
 
         self._gfx.set_pen(self._colors.background)
-        if count >= RING_SEGMENTS:
+        if total_count >= RING_SEGMENTS:
             self._segments_cleared = RING_SEGMENTS
             self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.outer_circle_r)
             self._gfx.set_pen(self._colors.primary_text)
@@ -154,7 +158,23 @@ class Renderer:
             self.text_write(TEXT_BELOW_CENTER, text_below_center_backup)
             return
 
-        count = count - self._segments_cleared
+        count = total_count - self._segments_cleared
+
+        # Fast path: single segment (common per-tick case) — no allocation
+        if count == 1:
+            idx = self._segments_cleared
+            nxt = idx + 1
+            geom = self._geom
+            buf = self._seg_buf
+            buf[0] = (geom.x_outer_vertices[idx], geom.y_outer_vertices[idx])
+            buf[1] = (geom.x_outer_vertices[nxt], geom.y_outer_vertices[nxt])
+            buf[2] = (geom.x_inner_vertices[nxt], geom.y_inner_vertices[nxt])
+            buf[3] = (geom.x_inner_vertices[idx], geom.y_inner_vertices[idx])
+            self._gfx.polygon(buf)
+            self._segments_cleared += 1
+            return
+
+        # Multi-segment path (rare — initialize with progress)
         total_points = (count + 1) * 2
         points = [(0, 0)] * total_points
 
@@ -166,25 +186,6 @@ class Renderer:
         self._gfx.polygon(points)
 
         self._segments_cleared += count
-
-    def ring_clear_next_segment(self) -> None:
-        if self._segments_cleared >= RING_SEGMENTS:
-            return
-
-        from_segment = self._segments_cleared
-        to_segment = (from_segment + 1) % RING_SEGMENTS  # wrap around to 0 after the last segment
-
-        self._gfx.set_pen(self._colors.background)
-        self._gfx.polygon(
-            [
-                (self._geom.x_outer_vertices[from_segment], self._geom.y_outer_vertices[from_segment]),
-                (self._geom.x_outer_vertices[to_segment], self._geom.y_outer_vertices[to_segment]),
-                (self._geom.x_inner_vertices[to_segment], self._geom.y_inner_vertices[to_segment]),
-                (self._geom.x_inner_vertices[from_segment], self._geom.y_inner_vertices[from_segment]),
-            ]
-        )
-
-        self._segments_cleared += 1
 
     def text_clear(self, position: int) -> None:
         if position == TEXT_CENTER:
@@ -258,23 +259,14 @@ class Renderer:
 
 
 class Display:
-    def __init__(
-        self,
-        renderer: Renderer,
-        event_service: EventService,
-        schedule=micropython.schedule,
-        timer_factory=Timer,
-    ) -> None:
+    def __init__(self, renderer: Renderer, event_service: EventService, tick_scheduler=None) -> None:
         self._renderer = renderer
         self._service = event_service
-        self._schedule = schedule
+        self._scheduler = tick_scheduler
 
-        self._update_each_second_ref = self._update_each_second
-        self._schedule_update_each_second_ref = self._schedule_update_each_second
-
-        self._seconds_timer = timer_factory(-1)
         self._segments_cleared: int = 0
         self._last_event = None
+        self._last_tick: int = 0
         self._active: bool = False
 
     def _full_redraw(self) -> None:
@@ -321,9 +313,14 @@ class Display:
         self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed_sec))
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(remaining_sec)}")
 
-    def _update_each_second(self, _: int) -> None:
+    def _tick(self) -> None:
         if not self._active:
             return
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._last_tick) < 1000:
+            return
+        self._last_tick = now
+
         event = self._service.current_event
         if event is not self._last_event:
             self._last_event = event
@@ -331,26 +328,21 @@ class Display:
         else:
             self._incremental_update()
 
-    def _schedule_update_each_second(self, _: Timer) -> None:
-        self._schedule(self._update_each_second_ref, 0)
-
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
         self._last_event = self._service.current_event
+        self._last_tick = time.ticks_ms()
         self._full_redraw()
-        safe_init(
-            self._seconds_timer,
-            mode=Timer.PERIODIC,
-            period=1000,
-            callback=self._schedule_update_each_second_ref,
-        )
+        if self._scheduler is not None:
+            self._scheduler.register(self._tick)
 
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
-        self._seconds_timer.deinit()
         self._segments_cleared = 0
         self._last_event = None
+        if self._scheduler is not None:
+            self._scheduler.unregister(self._tick)

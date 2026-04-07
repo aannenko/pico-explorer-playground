@@ -1,10 +1,8 @@
 import micropython
 import time
 
-from machine import Timer
 from picographics import PicoGraphics  # type: ignore
 from services.sensors.pimoroni_bme690 import PimoroniBME690
-from utilities.safe_timer import safe_init
 
 
 class Colors:
@@ -114,27 +112,18 @@ class Display:
         renderer: Renderer,
         bme690_reader: PimoroniBME690,
         time_zone_offset: int,
-        get_time = time.time,
-        schedule = micropython.schedule,
-        timer_factory = Timer,
+        get_time=time.time,
+        tick_scheduler=None,
     ) -> None:
         self._renderer = renderer
-
         self._get_time = get_time
-        self._schedule = schedule
-        self._timer_factory = timer_factory
-
         self._bme690_reader = bme690_reader
-
         self._time_zone_offset = time_zone_offset
-
-        self._update_display_ref = self._update_display
-        self._schedule_update_display_ref = self._schedule_update_display
-
-        self._seconds_timer = self._timer_factory(-1)
+        self._scheduler = tick_scheduler
+        self._last_tick: int = 0
         self._active = False
 
-    def _update_display(self, _: int) -> None:
+    def _update_display(self) -> None:
         now = self._get_time()
         year, month, mday, hour, minute = time.gmtime(now + self._time_zone_offset * 3600)[0:5]
         local_str = f"'{(year % 100):02}-{month:02}-{mday:02} {hour:02}:{minute:02}"
@@ -149,26 +138,28 @@ class Display:
 
         self._renderer.update()
 
-    def _schedule_update_display(self, _: Timer) -> None:
-        self._schedule(self._update_display_ref, 0)
+    def _tick(self) -> None:
+        if not self._active:
+            return
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._last_tick) < 1000:
+            return
+        self._last_tick = now
+        self._update_display()
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
+        self._last_tick = time.ticks_ms()
         self._renderer.reset()
-
-        self._update_display(0)
-
-        safe_init(
-            self._seconds_timer,
-            mode=Timer.PERIODIC,
-            period=1000,
-            callback=self._schedule_update_display_ref,
-        )
+        self._update_display()
+        if self._scheduler is not None:
+            self._scheduler.register(self._tick)
 
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
-        self._seconds_timer.deinit()
+        if self._scheduler is not None:
+            self._scheduler.unregister(self._tick)
