@@ -113,13 +113,11 @@ class Display:
         bme690_reader: PimoroniBME690,
         time_zone_offset: int,
         get_time=time.time,
-        tick_scheduler=None,
     ) -> None:
         self._renderer = renderer
         self._get_time = get_time
         self._bme690_reader = bme690_reader
         self._time_zone_offset = time_zone_offset
-        self._scheduler = tick_scheduler
         self._last_tick: int = 0
         self._active = False
 
@@ -138,9 +136,7 @@ class Display:
 
         self._renderer.update()
 
-    def _tick(self) -> None:
-        if not self._active:
-            return
+    def tick(self) -> None:
         now = time.ticks_ms()
         if time.ticks_diff(now, self._last_tick) < 1000:
             return
@@ -154,12 +150,8 @@ class Display:
         self._last_tick = time.ticks_ms()
         self._renderer.reset()
         self._update_display()
-        if self._scheduler is not None:
-            self._scheduler.register(self._tick)
 
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
-        if self._scheduler is not None:
-            self._scheduler.unregister(self._tick)

@@ -255,7 +255,7 @@ def test_tick_updates_ring_segments_while_running(monkeypatch) -> None:
 
     # Advance tick clock past 1s interval
     tick_time[0] = 1500
-    d._tick()
+    d.tick()
 
     # expected cleared: 600 * 120 // 7200 = 10
     assert ("ring_clear_segments", (10,), {}) in renderer.calls
@@ -278,28 +278,10 @@ def test_tick_detects_done_state(monkeypatch) -> None:
 
     # Advance tick clock past 1s interval
     tick_time[0] = 1500
-    d._tick()
+    d.tick()
 
     assert ("text_write", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
     assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
-
-
-def test_tick_ignored_when_inactive(monkeypatch) -> None:
-    tick_time = [0]
-    monkeypatch.setattr(countdown_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(countdown_mod.time, "ticks_diff", lambda a, b: a - b)
-
-    d, engine, renderer, *_, clock = _mk_display()
-    d.initialize()
-    d.on_button_a()
-    d.deinitialize()
-    renderer.calls.clear()
-    renderer.update_calls = 0
-
-    tick_time[0] = 5000
-    d._tick()
-
-    assert renderer.update_calls == 0
 
 
 def test_tick_skipped_within_1s_interval(monkeypatch) -> None:
@@ -315,7 +297,7 @@ def test_tick_skipped_within_1s_interval(monkeypatch) -> None:
 
     # tick_time hasn't advanced enough (still 0, diff < 1000)
     tick_time[0] = 500
-    d._tick()
+    d.tick()
 
     assert renderer.update_calls == 0
 

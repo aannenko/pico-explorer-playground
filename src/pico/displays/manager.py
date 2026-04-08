@@ -36,6 +36,12 @@ class DisplayManager:
         if hasattr(display, 'on_button_a'):
             display.on_button_a()
 
+    def tick(self) -> None:
+        display = self._displays[self._current]
+        tick_fn = getattr(display, 'tick', None)
+        if tick_fn is not None:
+            tick_fn()
+
     def _do_on_button_b(self, _: int) -> None:
         display = self._displays[self._current]
         if hasattr(display, 'on_button_b'):

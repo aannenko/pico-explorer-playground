@@ -227,7 +227,7 @@ def test_tick_triggers_full_redraw_on_event_change(monkeypatch) -> None:
     renderer.update_calls = 0
 
     tick_time[0] = 1000
-    d._tick()
+    d.tick()
 
     assert d._last_event is event_b
     assert ("reset", (), {}) in renderer.calls
@@ -255,34 +255,11 @@ def test_tick_triggers_incremental_update_on_same_event(monkeypatch) -> None:
     service.remaining_sec = 30
 
     tick_time[0] = 1000
-    d._tick()
+    d.tick()
 
     # Should NOT have reset (incremental, not full redraw)
     assert ("reset", (), {}) not in renderer.calls
     assert renderer.update_calls >= 1
-
-
-def test_tick_ignored_when_inactive(monkeypatch) -> None:
-    tick_time = [0]
-    monkeypatch.setattr(events.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(events.time, "ticks_diff", lambda a, b: a - b)
-
-    event = _mk_event("Meeting", start=0, duration=100)
-    d, service, renderer = _mk_display(
-        event=event, elapsed=50, remaining=50, total=100,
-    )
-
-    tick_time[0] = 0
-    d.initialize()
-    d.deinitialize()
-    renderer.calls.clear()
-    renderer.update_calls = 0
-
-    tick_time[0] = 1000
-    d._tick()
-
-    assert renderer.calls == []
-    assert renderer.update_calls == 0
 
 
 def test_tick_skipped_when_interval_not_elapsed(monkeypatch) -> None:
@@ -301,7 +278,7 @@ def test_tick_skipped_when_interval_not_elapsed(monkeypatch) -> None:
     renderer.update_calls = 0
 
     tick_time[0] = 999
-    d._tick()
+    d.tick()
 
     assert renderer.calls == []
     assert renderer.update_calls == 0

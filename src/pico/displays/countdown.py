@@ -45,10 +45,9 @@ def _fmt_time(sec: int) -> str:
 
 
 class Display:
-    def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer, tick_scheduler=None) -> None:
+    def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
         self._timer = countdown_timer
-        self._scheduler = tick_scheduler
 
         self._duration_index: int = _DEFAULT_INDEX
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
@@ -151,9 +150,7 @@ class Display:
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
         self._renderer.update()
 
-    def _tick(self) -> None:
-        if not self._active:
-            return
+    def tick(self) -> None:
         now = time.ticks_ms()
         if time.ticks_diff(now, self._last_tick) < 1000:
             return
@@ -176,13 +173,8 @@ class Display:
         else:
             self._draw_idle()
 
-        if self._scheduler is not None:
-            self._scheduler.register(self._tick)
-
     def deinitialize(self) -> None:
         if not self._active:
             return
         self._active = False
         self._segments_cleared = 0
-        if self._scheduler is not None:
-            self._scheduler.unregister(self._tick)
