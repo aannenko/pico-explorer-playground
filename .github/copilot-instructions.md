@@ -16,7 +16,7 @@ Main behavior: show a ring-style timer UI, cycle through scheduled events, and p
 ```mermaid
 graph TD
     main.py --> DisplayManager
-    main.py --> ExplorerButtons
+    main.py --> ButtonPoller
     main.py --> TickScheduler
     main.py --> NetworkService
 
@@ -38,14 +38,14 @@ graph TD
     NetworkService --> ntp.py
     EventService --> scheduling["scheduling/event + event_factory"]
 
-    ExplorerButtons -- "X/Y: cycle views" --> DisplayManager
-    ExplorerButtons -- "A/B: forward to active view" --> DisplayManager
+    ButtonPoller -- "X/Y: cycle views" --> DisplayManager
+    ButtonPoller -- "A/B: forward to active view" --> DisplayManager
 ```
 
 **Key patterns:**
 - **Entry point:** `src/pico/main.py` wires everything at startup; `TickScheduler` (single 100ms PERIODIC timer) drives all `tick()` methods via `micropython.schedule()`.
 - **Display lifecycle:** `DisplayManager` handles view init/deinit on cycle, auto-registers/unregisters the active view's `tick()` with the scheduler.
-- **Button handling:** `ExplorerButtons` polls `machine.Pin` instances in the main loop with edge detection; presses dispatched via `micropython.schedule()`. X/Y cycle views; A/B forwarded to active view.
+- **Button handling:** `ButtonPoller` polls `machine.Pin` instances in the main loop with edge detection; presses dispatched via `micropython.schedule()`. X/Y cycle views; A/B forwarded to active view.
 - **Services** (`services/`) are long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`).
 - **Displays** (`displays/`) are view-specific, each following a `Geometry`/`Renderer`/`Display` pattern where applicable.
 - **Utilities** (`utilities/`) provide low-level WiFi and NTP functionality.
@@ -74,7 +74,7 @@ graph TD
 ## Planned direction (non-binding)
 These are goals/intent to guide design choices. They are not requirements unless explicitly requested in a task.
 
-- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views via `ExplorerButtons` (polled in main loop). Currently three views exist: Sensors, Events, and Countdown. Each view has `initialize()` / `deinitialize()` lifecycle methods; `DisplayManager` manages the active view index, switching, and forwarding A/B button presses to the active display. Views that handle buttons implement `on_button_a()` / `on_button_b()` methods.
+- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views via `ButtonPoller` (polled in main loop). Currently three views exist: Sensors, Events, and Countdown. Each view has `initialize()` / `deinitialize()` lifecycle methods; `DisplayManager` manages the active view index, switching, and forwarding A/B button presses to the active display. Views that handle buttons implement `on_button_a()` / `on_button_b()` methods.
 - Countdown timer (**implemented**): `CountdownTimer` service is a pure timer engine with `on_done`/`on_configure` callbacks. Accepts `configure(name, total_sec)` to set/reset presets, `start()`/`pause()`/`resume()`/`reset()` for state transitions. The display owns duration presets (`DURATIONS`/`LABELS`) and cycling logic, and bootstraps the timer via `configure()` in its constructor. `ExplorerBuzzer.play_alert` is wired as `on_done`; `stop_alert` as `on_configure`. The countdown keeps ticking (and buzzer fires) even when the user switches to another display. `countdown.Display` is a rendering-only view that reads engine state on `initialize()` and renders accordingly.
 - Sensor dashboard view (**partially implemented**): shows BME690 readings (temperature, pressure, humidity, gas resistance, heater status) and a header with local time. `PimoroniBME690` service runs independently, continuously reading sensor data. History graphs are planned but not yet implemented. Show current time/date at the top.
 - Calendar view: an Outlook-like calendar in horizontal mode where time progresses left-to-right. Show current time/date at the top.
