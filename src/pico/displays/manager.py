@@ -38,8 +38,9 @@ class DisplayManager:
 
     def tick(self) -> None:
         display = self._displays[self._current]
-        if hasattr(display, 'tick'):
-            display.tick()
+        tick_fn = getattr(display, 'tick', None)
+        if tick_fn is not None:
+            tick_fn()
 
     def _do_on_button_b(self, _: int) -> None:
         display = self._displays[self._current]
