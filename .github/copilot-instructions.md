@@ -19,6 +19,7 @@ graph TD
     main.py --> ButtonPoller
     main.py --> TickScheduler
     main.py --> NetworkService
+    main.py --> StatusDisplay
 
     TickScheduler -- "100ms tick()" --> EventService
     TickScheduler -- "100ms tick()" --> NetworkService
@@ -27,15 +28,15 @@ graph TD
     DisplayManager --> EventsDisplay
     DisplayManager --> CountdownDisplay
     DisplayManager --> SensorsDisplay
-    DisplayManager --> StatusDisplay
 
     EventsDisplay --> EventService
     CountdownDisplay --> CountdownTimer
     SensorsDisplay --> PimoroniBME690
 
     CountdownTimer -- "on_done" --> ExplorerBuzzer
-    NetworkService --> wifi.py
-    NetworkService --> ntp.py
+    NetworkService -- "status_fn" --> StatusDisplay
+    NetworkService --> utilities/wifi.py
+    NetworkService --> utilities/ntp.py
     EventService --> scheduling["scheduling/event + event_factory"]
 
     ButtonPoller -- "X/Y: cycle views" --> DisplayManager
@@ -44,13 +45,13 @@ graph TD
 
 **Key patterns:**
 - **Entry point:** `src/pico/main.py` wires everything at startup; `TickScheduler` (single 100ms PERIODIC timer) drives all `tick()` methods via `micropython.schedule()`.
-- **Display lifecycle:** `DisplayManager` handles view init/deinit on cycle, auto-registers/unregisters the active view's `tick()` with the scheduler.
+- **Display lifecycle:** `DisplayManager` controls view init/deinit on cycle; each display registers/unregisters its own `_tick` with the scheduler inside its `initialize()`/`deinitialize()` methods.
 - **Button handling:** `ButtonPoller` polls `machine.Pin` instances in the main loop with edge detection; presses dispatched via `micropython.schedule()`. X/Y cycle views; A/B forwarded to active view.
 - **Services** (`services/`) are long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`).
 - **Displays** (`displays/`) are view-specific, each following a `Geometry`/`Renderer`/`Display` pattern where applicable.
 - **Utilities** (`utilities/`) provide low-level WiFi and NTP functionality.
 - **Scheduling** (`scheduling/`) contains the event model and factory iterators.
-- **Tests** (`tests/`) run on the host with CPython + pytest; `conftest.py` provides shims for MicroPython-only modules.
+- **Tests** (`src/tests/`) run on the host with CPython + pytest; `src/tests/conftest.py` provides shims for MicroPython-only modules.
 
 ## Testing expectations
 - Host-side tests exist under `tests/` (pytest).
