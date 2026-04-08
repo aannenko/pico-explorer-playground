@@ -259,10 +259,9 @@ class Renderer:
 
 
 class Display:
-    def __init__(self, renderer: Renderer, event_service: EventService, tick_scheduler=None) -> None:
+    def __init__(self, renderer: Renderer, event_service: EventService) -> None:
         self._renderer = renderer
         self._service = event_service
-        self._scheduler = tick_scheduler
 
         self._segments_cleared: int = 0
         self._last_event = None
@@ -313,9 +312,7 @@ class Display:
         self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed_sec))
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(remaining_sec)}")
 
-    def _tick(self) -> None:
-        if not self._active:
-            return
+    def tick(self) -> None:
         now = time.ticks_ms()
         if time.ticks_diff(now, self._last_tick) < 1000:
             return
@@ -335,8 +332,6 @@ class Display:
         self._last_event = self._service.current_event
         self._last_tick = time.ticks_ms()
         self._full_redraw()
-        if self._scheduler is not None:
-            self._scheduler.register(self._tick)
 
     def deinitialize(self) -> None:
         if not self._active:
@@ -344,5 +339,3 @@ class Display:
         self._active = False
         self._segments_cleared = 0
         self._last_event = None
-        if self._scheduler is not None:
-            self._scheduler.unregister(self._tick)

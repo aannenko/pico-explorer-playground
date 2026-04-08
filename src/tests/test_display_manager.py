@@ -79,6 +79,9 @@ class FakeDisplayWithButtons:
     def deinitialize(self) -> None:
         self.calls.append("deinitialize")
 
+    def tick(self) -> None:
+        self.calls.append("tick")
+
     def on_button_a(self) -> None:
         self.calls.append("on_button_a")
 
@@ -187,3 +190,46 @@ def test_do_previous_ref_works_with_schedule_signature() -> None:
 
     assert "deinitialize" in d0.calls
     assert "initialize" in d1.calls  # wraps to last
+
+
+# ── tick delegation ───────────────────────────────────────────────────
+
+
+def test_tick_delegates_to_current_display_with_tick() -> None:
+    d0 = FakeDisplayWithButtons("d0")
+
+    mgr = DisplayManager(displays=[d0])
+    mgr.initialize_current()
+
+    mgr.tick()
+
+    assert "tick" in d0.calls
+
+
+def test_tick_ignored_for_display_without_tick() -> None:
+    d0 = FakeDisplay("d0")  # No tick method
+
+    mgr = DisplayManager(displays=[d0])
+    mgr.initialize_current()
+
+    # Should not raise
+    mgr.tick()
+
+    assert "tick" not in d0.calls
+
+
+def test_tick_follows_cycle() -> None:
+    d0 = FakeDisplay("d0")  # No tick
+    d1 = FakeDisplayWithButtons("d1")  # Has tick
+
+    mgr = DisplayManager(displays=[d0, d1])
+    mgr.initialize_current()
+
+    mgr.tick()  # d0 has no tick — no-op
+    assert "tick" not in d0.calls
+
+    mgr.next()  # switch to d1
+    d1.calls.clear()
+
+    mgr.tick()
+    assert "tick" in d1.calls

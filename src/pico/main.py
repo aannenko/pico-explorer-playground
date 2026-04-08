@@ -68,7 +68,6 @@ COUNTDOWN_DISPLAY = countdown.Display(
         ),
     ),
     countdown_timer=COUNTDOWN_TIMER,
-    tick_scheduler=TICK_SCHEDULER,
 )
 
 BME690_READER = PimoroniBME690(
@@ -95,7 +94,6 @@ SENSORS_DISPLAY = sensors.Display(
     ),
     bme690_reader=BME690_READER,
     time_zone_offset=config.TIME_ZONE_OFFSET,
-    tick_scheduler=TICK_SCHEDULER,
 )
 
 BUTTON_A = Pin(12, Pin.IN, Pin.PULL_UP)
@@ -142,7 +140,6 @@ EVENTS_DISPLAY = events.Display(
         ),
     ),
     event_service=EVENT_SERVICE,
-    tick_scheduler=TICK_SCHEDULER,
 )
 
 DISPLAY_MANAGER = DisplayManager(
@@ -150,6 +147,7 @@ DISPLAY_MANAGER = DisplayManager(
 )
 
 DISPLAY_MANAGER.initialize_current()
+TICK_SCHEDULER.register(DISPLAY_MANAGER.tick)
 TICK_SCHEDULER.start()
 
 BUTTON_POLLER = ButtonPoller(schedule=micropython.schedule)
