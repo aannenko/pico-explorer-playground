@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from utilities.tick_scheduler import TickScheduler
+from services.tick_scheduler import TickScheduler
 
 
 class FakeTimer:

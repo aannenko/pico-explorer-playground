@@ -14,7 +14,7 @@ from services.event_service import EventService
 from services.button_poller import ButtonPoller
 from services.utilities.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
-from utilities.tick_scheduler import TickScheduler
+from services.tick_scheduler import TickScheduler
 
 try:
     import config
