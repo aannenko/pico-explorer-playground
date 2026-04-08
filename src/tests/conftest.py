@@ -19,6 +19,10 @@ if not hasattr(_time, "ticks_ms"):
     _time.ticks_ms = lambda: 0  # type: ignore[attr-defined]
 if not hasattr(_time, "ticks_diff"):
     _time.ticks_diff = lambda a, b: a - b  # type: ignore[attr-defined]
+if not hasattr(_time, "ticks_add"):
+    _time.ticks_add = lambda a, b: a + b  # type: ignore[attr-defined]
+if not hasattr(_time, "sleep_ms"):
+    _time.sleep_ms = lambda ms: None  # type: ignore[attr-defined]
 
 if "picographics" not in sys.modules:
     picographics_stub = types.ModuleType("picographics")
