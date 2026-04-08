@@ -1,6 +1,13 @@
 import time
 
-from breakout_bme69x import BreakoutBME69X, STATUS_HEATER_STABLE, FILTER_COEFF_3, OVERSAMPLING_1X, OVERSAMPLING_2X, STANDBY_TIME_1000_MS  # type: ignore
+from breakout_bme69x import (  # type: ignore
+    BreakoutBME69X,
+    STATUS_HEATER_STABLE,
+    FILTER_COEFF_3,
+    OVERSAMPLING_1X,
+    OVERSAMPLING_2X,
+    STANDBY_TIME_1000_MS,
+)
 from pimoroni import PICO_EXPLORER_I2C_PINS  # type: ignore
 from pimoroni_i2c import PimoroniI2C  # type: ignore
 

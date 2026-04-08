@@ -1,7 +1,7 @@
 from machine import Pin
 
 
-class ExplorerButtons:
+class ButtonPoller:
     """Edge-detecting button poller using raw Pin levels (active-low).
 
     Uses machine.Pin instead of pimoroni.Button to avoid the

@@ -11,7 +11,7 @@ from scheduling import event_factory
 from services.sensors.pimoroni_bme690 import PimoroniBME690
 from services.countdown_timer import CountdownTimer
 from services.event_service import EventService
-from services.utilities.explorer_buttons import ExplorerButtons
+from services.button_poller import ButtonPoller
 from services.utilities.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from utilities.tick_scheduler import TickScheduler
@@ -152,7 +152,7 @@ DISPLAY_MANAGER = DisplayManager(
 DISPLAY_MANAGER.initialize_current()
 TICK_SCHEDULER.start()
 
-BUTTON_POLLER = ExplorerButtons(schedule=micropython.schedule)
+BUTTON_POLLER = ButtonPoller(schedule=micropython.schedule)
 BUTTON_POLLER.add(BUTTON_A, DISPLAY_MANAGER.on_button_a_ref)
 BUTTON_POLLER.add(BUTTON_B, DISPLAY_MANAGER.on_button_b_ref)
 BUTTON_POLLER.add(BUTTON_X, DISPLAY_MANAGER.previous_ref)

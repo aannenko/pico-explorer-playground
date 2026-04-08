@@ -45,8 +45,8 @@ class TickScheduler:
             pass
 
     def _tick(self, _: int) -> None:
-        for cb in self._subscribers:
-            cb()
+        for callback in self._subscribers:
+            callback()
         self._pending = False
 
     def _schedule_tick(self, _: Timer) -> None:
