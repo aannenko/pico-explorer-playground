@@ -24,6 +24,13 @@ if not hasattr(_time, "ticks_add"):
 if not hasattr(_time, "sleep_ms"):
     _time.sleep_ms = lambda ms: None  # type: ignore[attr-defined]
 
+# MicroPython's time.mktime() accepts an 8-tuple and treats it as UTC.
+# CPython's time.mktime() accepts a 9-tuple and applies local timezone.
+# Stub to match MicroPython behavior for cross-platform tests.
+import calendar as _calendar  # noqa: E402
+_original_mktime = _time.mktime
+_time.mktime = lambda t: int(_calendar.timegm(t[:6]))  # type: ignore[assignment]
+
 if "picographics" not in sys.modules:
     picographics_stub = types.ModuleType("picographics")
     picographics_stub.PicoGraphics = object

@@ -4,15 +4,33 @@ from scheduling.event import Event
 from services.event_service import EventService
 
 
-def _mk_event(name: str, start: int, duration: int) -> Event:
-    return Event(name=name, start_timestamp=start, duration_sec=duration)
+class _FakeTime:
+    def __init__(self, fn, utc_fn=None):
+        self.now = fn
+        self.utc_now = utc_fn if utc_fn is not None else fn
+
+    def to_utc(self, local_epoch):
+        return local_epoch
+
+
+def _mk_event(name: str, start: int, duration: int, real_duration: int = -1) -> Event:
+    return Event(name=name, start_timestamp=start, duration_sec=duration, real_duration_sec=real_duration)
+
+
+class _FakeScheduler:
+    def __init__(self):
+        self.callbacks = []
+
+    def register(self, cb):
+        self.callbacks.append(cb)
 
 
 def _mk_service(events, now=1000, **overrides):
     time_val = [now]
     defaults = dict(
         events_iter=iter(events),
-        get_time=lambda: time_val[0],
+        time_service=_FakeTime(lambda: time_val[0]),
+        tick_scheduler=_FakeScheduler(),
     )
     defaults.update(overrides)
     svc = EventService(**defaults)

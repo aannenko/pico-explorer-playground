@@ -8,6 +8,18 @@ def _to_timestamp(dt: datetime) -> int:
     return calendar.timegm(dt.utctimetuple())
 
 
+class _FakeTimeService:
+    """Minimal stand-in for TimeService in factory tests."""
+    def __init__(self, now_value: int):
+        self._now = now_value
+    def now(self) -> int:
+        return self._now
+    def to_utc(self, local_epoch: int) -> int:
+        return local_epoch  # identity: tests assume local == UTC
+    def real_duration(self, local_start: int, wall_clock_sec: int) -> int:
+        return wall_clock_sec  # no DST correction in legacy tests
+
+
 def _mock_gmtime(monkeypatch: pytest.MonkeyPatch, dt: datetime) -> int:
     """Freeze gmtime() to a MicroPython-like 8-tuple and return the matching timestamp."""
     timestamp = _to_timestamp(dt)
@@ -29,7 +41,8 @@ def test_work_week_loop_daytime_schedule_sequence(monkeypatch: pytest.MonkeyPatc
     now_dt = datetime(2024, 1, 3, 10, 30, tzinfo=UTC)
     now_timestamp = _mock_gmtime(monkeypatch, now_dt)
 
-    gen = work_week_loop({0, 1, 2, 3, 4}, (9, 0), (17, 0), now_timestamp=now_timestamp)
+    ts = _FakeTimeService(now_timestamp)
+    gen = work_week_loop({0, 1, 2, 3, 4}, (9, 0), (17, 0), time_service=ts)
     events = [next(gen) for _ in range(6)]
 
     expected = [
@@ -51,7 +64,8 @@ def test_work_week_loop_midnight_shift_weekend(monkeypatch: pytest.MonkeyPatch) 
     now_dt = datetime(2024, 1, 8, 12, 0, tzinfo=UTC)
     now_timestamp = _mock_gmtime(monkeypatch, now_dt)
 
-    gen = work_week_loop({4, 5}, (22, 0), (6, 0), now_timestamp=now_timestamp)
+    ts = _FakeTimeService(now_timestamp)
+    gen = work_week_loop({4, 5}, (22, 0), (6, 0), time_service=ts)
 
     weekend_event = next(gen)
     assert weekend_event.name == "weekend"
@@ -73,6 +87,7 @@ def test_work_week_loop_validates_input(monkeypatch: pytest.MonkeyPatch) -> None
     now_dt = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
     now_timestamp = _mock_gmtime(monkeypatch, now_dt)
 
-    gen = work_week_loop(set(), (9, 0), (17, 0), now_timestamp=now_timestamp)
+    ts = _FakeTimeService(now_timestamp)
+    gen = work_week_loop(set(), (9, 0), (17, 0), time_service=ts)
     with pytest.raises(ValueError, match="Work days must be one or more"):
         next(gen)

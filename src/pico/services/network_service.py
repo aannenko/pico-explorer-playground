@@ -13,14 +13,12 @@ class NetworkService:
         self,
         ssid: str,
         password: str,
-        time_zone_offset: int,
         status_fn,
         sync_interval_ms: int = 12 * 60 * 60 * 1000,
         tick_scheduler=None,
     ) -> None:
         self._ssid = ssid
         self._password = password
-        self._tz_offset = time_zone_offset
         self._status = status_fn
         self._sync_interval_ms = sync_interval_ms
         self._last_sync_ticks: int = 0

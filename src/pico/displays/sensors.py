@@ -111,19 +111,16 @@ class Display:
         self,
         renderer: Renderer,
         bme690_reader: PimoroniBME690,
-        time_zone_offset: int,
-        get_time=time.time,
+        time_service,
     ) -> None:
         self._renderer = renderer
-        self._get_time = get_time
+        self._time_service = time_service
         self._bme690_reader = bme690_reader
-        self._time_zone_offset = time_zone_offset
         self._last_tick: int = 0
         self._active = False
 
     def _update_display(self) -> None:
-        now = self._get_time()
-        year, month, mday, hour, minute = time.gmtime(now + self._time_zone_offset * 3600)[0:5]
+        year, month, mday, hour, minute = time.gmtime(self._time_service.now())[0:5]
         local_str = f"'{(year % 100):02}-{month:02}-{mday:02} {hour:02}:{minute:02}"
         self._renderer.header_write(local_str)
 

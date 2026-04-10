@@ -9,6 +9,11 @@ class FakeColors:
         self.secondary_text = secondary_text
 
 
+class _FakeTime:
+    def __init__(self, fn):
+        self.now = fn
+
+
 class FakeRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
@@ -50,8 +55,7 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader(reading),
-        time_zone_offset=0,
-        get_time=lambda: 0,
+        time_service=_FakeTime(lambda: 0),
     )
 
     d._update_display()
@@ -77,8 +81,7 @@ def test_initialize_renders_and_is_idempotent(monkeypatch) -> None:
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable")),
-        time_zone_offset=0,
-        get_time=lambda: 0,
+        time_service=_FakeTime(lambda: 0),
     )
 
     d.initialize()
@@ -107,8 +110,7 @@ def test_deinitialize_sets_inactive_and_is_idempotent(monkeypatch) -> None:
     d = sensors.Display(
         renderer=renderer,
         bme690_reader=FakeBME690Reader((0.0, 0.0, 0.0, 0.0, "Stable")),
-        time_zone_offset=0,
-        get_time=lambda: 0,
+        time_service=_FakeTime(lambda: 0),
     )
 
     d.initialize()

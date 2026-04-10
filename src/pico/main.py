@@ -15,6 +15,7 @@ from services.button_poller import ButtonPoller
 from services.utilities.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.tick_scheduler import TickScheduler
+from services.time_service import TimeService
 
 try:
     import config
@@ -77,6 +78,32 @@ BME690_READER = PimoroniBME690(
     tick_scheduler=TICK_SCHEDULER,
 )
 
+BUTTON_A = Pin(12, Pin.IN, Pin.PULL_UP)
+BUTTON_B = Pin(13, Pin.IN, Pin.PULL_UP)
+BUTTON_X = Pin(14, Pin.IN, Pin.PULL_UP)
+BUTTON_Y = Pin(15, Pin.IN, Pin.PULL_UP)
+
+NETWORK_SERVICE = NetworkService(
+    ssid=config.WIFI_SSID,
+    password=config.WIFI_PASSWORD,
+    status_fn=STATUS_DISPLAY.show,
+    sync_interval_ms=const(12 * 60 * 60 * 1000),
+    tick_scheduler=TICK_SCHEDULER,
+)
+
+
+# Main logic
+NETWORK_SERVICE.connect_and_sync_initial()
+
+# TimeService must be created after NTP sync for accurate time.time()
+TIME_SERVICE = TimeService(
+    tz_offset=config.TIME_ZONE_OFFSET,
+    dst_start=config.DST_START,
+    dst_end=config.DST_END,
+    dst_offset=config.DST_OFFSET,
+    tick_scheduler=TICK_SCHEDULER,
+)
+
 SENSORS_DISPLAY = sensors.Display(
     renderer=sensors.Renderer(
         geometry=sensors.Geometry(
@@ -93,34 +120,17 @@ SENSORS_DISPLAY = sensors.Display(
         ),
     ),
     bme690_reader=BME690_READER,
-    time_zone_offset=config.TIME_ZONE_OFFSET,
+    time_service=TIME_SERVICE,
 )
 
-BUTTON_A = Pin(12, Pin.IN, Pin.PULL_UP)
-BUTTON_B = Pin(13, Pin.IN, Pin.PULL_UP)
-BUTTON_X = Pin(14, Pin.IN, Pin.PULL_UP)
-BUTTON_Y = Pin(15, Pin.IN, Pin.PULL_UP)
-
-NETWORK_SERVICE = NetworkService(
-    ssid=config.WIFI_SSID,
-    password=config.WIFI_PASSWORD,
-    time_zone_offset=config.TIME_ZONE_OFFSET,
-    status_fn=STATUS_DISPLAY.show,
-    sync_interval_ms=const(12 * 60 * 60 * 1000),
-    tick_scheduler=TICK_SCHEDULER,
-)
-
-
-# Main logic
-NETWORK_SERVICE.connect_and_sync_initial()
-
-# EventService must be created after NTP sync for correct timestamps
 EVENT_SERVICE = EventService(
     events_iter=event_factory.work_week_loop(
         work_days={0, 1, 2, 3, 4},
-        work_start_utc=(8, 0),
-        work_end_utc=(17, 0),
+        work_start=(9, 0),
+        work_end=(18, 0),
+        time_service=TIME_SERVICE,
     ),
+    time_service=TIME_SERVICE,
     tick_scheduler=TICK_SCHEDULER,
 )
 

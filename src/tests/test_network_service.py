@@ -16,7 +16,6 @@ def _mk_service(**kwargs):
     svc = NetworkService(
         ssid="TestSSID",
         password="TestPass",
-        time_zone_offset=1,
         status_fn=status_fn,
         **kwargs,
     )
