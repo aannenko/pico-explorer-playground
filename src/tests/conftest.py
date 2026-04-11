@@ -31,6 +31,12 @@ import calendar as _calendar  # noqa: E402
 _original_mktime = _time.mktime
 _time.mktime = lambda t: int(_calendar.timegm(t[:6]))  # type: ignore[assignment]
 
+# MicroPython's time.gmtime() returns an 8-tuple (no tm_isdst).
+# CPython's returns a 9-element struct_time.
+# Stub to match MicroPython behavior so 8-value unpacking works.
+_original_gmtime = _time.gmtime
+_time.gmtime = lambda *args: _original_gmtime(*args)[:8]  # type: ignore[assignment]
+
 if "picographics" not in sys.modules:
     picographics_stub = types.ModuleType("picographics")
     picographics_stub.PicoGraphics = object

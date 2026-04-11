@@ -14,7 +14,7 @@ class _FakeTime:
 
 
 def _mk_event(name: str, start: int, duration: int, real_duration: int = -1) -> Event:
-    return Event(name=name, start_timestamp=start, duration_sec=duration, real_duration_sec=real_duration)
+    return Event(name=name, start_timestamp=start, wall_clock_duration_sec=duration, real_duration_sec=real_duration)
 
 
 class _FakeScheduler:

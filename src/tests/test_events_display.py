@@ -45,7 +45,7 @@ class FakeEventService:
 
 
 def _mk_event(name: str = "test", start: int = 0, duration: int = 100) -> Event:
-    return Event(name=name, start_timestamp=start, duration_sec=duration)
+    return Event(name=name, start_timestamp=start, wall_clock_duration_sec=duration)
 
 
 def _mk_display(

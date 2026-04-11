@@ -26,7 +26,7 @@ def test_event_requires_non_negative_duration() -> None:
 
 def test_event_repr_is_stable() -> None:
     e = Event("rest", 10, 20)
-    assert repr(e) == "Event(name=rest, start_timestamp=10, duration_sec=20, real_duration_sec=20)"
+    assert repr(e) == "Event(name=rest, start_timestamp=10, wall_clock_duration_sec=20, real_duration_sec=20)"
 
 
 def test_event_real_duration_defaults_to_duration() -> None:
