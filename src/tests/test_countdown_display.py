@@ -3,7 +3,7 @@ from __future__ import annotations
 import displays.countdown as countdown_mod
 
 from displays.countdown import Display, DURATIONS, LABELS
-from displays.events import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
+from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from services.countdown_timer import (
     CountdownTimer,
     INITIAL,

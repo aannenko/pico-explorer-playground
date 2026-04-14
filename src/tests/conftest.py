@@ -105,7 +105,7 @@ if "machine" not in sys.modules:
     sys.modules["machine"] = machine_stub
 
 # Sensor driver deps (only available on-device). Provide minimal stubs so
-# importing `services.sensors.pimoroni_bme690` works under CPython unit tests.
+# importing `services.pimoroni_bme690` works under CPython unit tests.
 if "pimoroni" not in sys.modules:
     pimoroni_stub = types.ModuleType("pimoroni")
     pimoroni_stub.PICO_EXPLORER_I2C_PINS = {"sda": 0, "scl": 1}  # type: ignore[attr-defined]

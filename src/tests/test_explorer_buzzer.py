@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import machine
 
-from services.utilities.explorer_buzzer import ExplorerBuzzer
+from services.explorer_buzzer import ExplorerBuzzer
 
 
 class FakePin:

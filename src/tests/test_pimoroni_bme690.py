@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import services.sensors.pimoroni_bme690 as pimoroni_bme690
+import services.pimoroni_bme690 as pimoroni_bme690
 
 
 class FakeI2C:

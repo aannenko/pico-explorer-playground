@@ -2,7 +2,7 @@ import micropython
 import time
 
 from micropython import const
-from displays.events import (
+from displays.ring import (
     Renderer,
     RING_SEGMENTS,
     TEXT_CENTER,

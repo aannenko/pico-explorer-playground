@@ -2,7 +2,7 @@
 
 ## Project summary
 This is a MicroPython app for the Pimoroni Pico Explorer (RP2040) using PicoGraphics.
-Main behavior: show a ring-style timer UI, cycle through scheduled events, and provide a configurable countdown timer with buzzer notification.
+Main behavior: show sensor readings, a configurable countdown timer with buzzer notification, and a horizontal calendar timeline of scheduled events.
 
 ## Hardware / runtime constraints
 - Target runtime: MicroPython 1.27.0 on RP2040 (Pimoroni build from https://github.com/pimoroni/pimoroni-pico).
@@ -23,25 +23,24 @@ graph TD
     main.py --> StatusDisplay
 
     TickScheduler -- "100ms tick()" --> TimeService
-    TickScheduler -- "100ms tick()" --> EventService
     TickScheduler -- "100ms tick()" --> NetworkService
     TickScheduler -- "tick() registered per active view" --> DisplayManager
 
-    DisplayManager --> EventsDisplay
     DisplayManager --> CountdownDisplay
     DisplayManager --> SensorsDisplay
+    DisplayManager --> CalendarDisplay
 
-    EventsDisplay --> EventService
     CountdownDisplay --> CountdownTimer
     SensorsDisplay --> PimoroniBME690
     SensorsDisplay -- "get_time" --> TimeService
-    EventService -- "now() + utc_now() + to_utc()" --> TimeService
+    CalendarDisplay -- "get_time" --> TimeService
+    CalendarDisplay --> EventWindow
 
     CountdownTimer -- "on_done" --> ExplorerBuzzer
     NetworkService -- "status_fn" --> StatusDisplay
     NetworkService --> utilities/wifi.py
     NetworkService --> utilities/ntp.py
-    EventService --> scheduling["scheduling/event + event_factory"]
+    EventWindow --> scheduling["scheduling/event + event_factory"]
 
     ButtonPoller -- "X/Y: cycle views" --> DisplayManager
     ButtonPoller -- "A/B: forward to active view" --> DisplayManager
@@ -53,9 +52,9 @@ graph TD
 - **Button handling:** `ButtonPoller` polls `machine.Pin` instances in the main loop with edge detection; presses dispatched via `micropython.schedule()`. X/Y cycle views; A/B forwarded to active view.
 - **Services** (`src/pico/services/`) are long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`).
 - **TimeService** (`src/pico/services/time_service.py`) is the central time authority. The RTC holds UTC (set by NTP via `NetworkService`). `TimeService` computes local time by adding the timezone + DST offset. It exposes `now()` (local epoch), `utc_now()` (UTC epoch), `total_offset(utc_timestamp)` (offset in seconds at a given UTC instant), `to_utc(local_epoch)` (local→UTC conversion), and `real_duration(local_start, wall_clock_sec)` (DST-corrected real seconds). DST transitions are detected automatically on each `_tick()` via a cached threshold. Must be created after NTP sync. All time-displaying consumers use `TimeService.now` as their `get_time` source.
-- **Displays** (`src/pico/displays/`) are view-specific, each following a `Geometry`/`Renderer`/`Display` pattern where applicable.
+- **Displays** (`src/pico/displays/`) are view-specific, each following a `Geometry`/`Renderer`/`Display` pattern where applicable. Shared display helpers live in `src/pico/displays/shared/` (e.g., `header.py` for common time formatting).
 - **Utilities** (`src/pico/utilities/`) provide low-level WiFi and NTP functionality.
-- **Scheduling** (`src/pico/scheduling/`) contains the event model (`Event` with wall-clock `duration_sec` and DST-corrected `real_duration_sec`) and factory iterators. The factory (`event_factory.work_week_loop`) operates in local-epoch, accepting local work hours and a `TimeService` instance. At yield time it computes `real_duration_sec` via `TimeService.real_duration()`. Cursor advances by wall-clock duration to keep local boundaries aligned.
+- **Scheduling** (`src/pico/scheduling/`) contains the event model (`Event` with wall-clock `wall_clock_duration_sec` and DST-corrected `real_duration_sec`), factory iterators, and `EventWindow` (a passive sliding-buffer with peek-slot over a forward-only event iterator, used by the calendar display to query visible events in a time window without per-call list allocation). The factory (`event_factory.work_week_loop`) operates in local-epoch, accepting local work hours and a `TimeService` instance. At yield time it computes `real_duration_sec` via `TimeService.real_duration()`. Cursor advances by wall-clock duration to keep local boundaries aligned.
 - **Tests** (`src/tests/`) run on the host with CPython + pytest; `src/tests/conftest.py` provides shims for MicroPython-only modules.
 
 ## Testing expectations
@@ -95,16 +94,16 @@ graph TD
 ## Planned direction (non-binding)
 These are goals/intent to guide design choices. They are not requirements unless explicitly requested in a task.
 
-- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views via `ButtonPoller` (polled in main loop). Currently three views exist: Sensors, Events, and Countdown. Each view has `initialize()` / `deinitialize()` lifecycle methods; `DisplayManager` manages the active view index, switching, and forwarding A/B button presses to the active display. Views that handle buttons implement `on_button_a()` / `on_button_b()` methods.
-- Countdown timer (**implemented**): `CountdownTimer` service is a pure timer engine with `on_done`/`on_configure` callbacks. Accepts `configure(name, total_sec)` to set/reset presets, `start()`/`pause()`/`resume()`/`reset()` for state transitions. The display owns duration presets (`DURATIONS`/`LABELS`) and cycling logic, and bootstraps the timer via `configure()` in its constructor. `ExplorerBuzzer.play_alert` is wired as `on_done`; `stop_alert` as `on_configure`. The countdown keeps ticking (and buzzer fires) even when the user switches to another display. `countdown.Display` is a rendering-only view that reads engine state on `initialize()` and renders accordingly.
+- Multi-screen UI (**implemented, evolving**): hardware buttons (X/Y) cycle between independent display views via `ButtonPoller` (polled in main loop). Currently three views exist: Sensors, Countdown, and Calendar. Each view has `initialize()` / `deinitialize()` lifecycle methods; `DisplayManager` manages the active view index, switching, and forwarding A/B button presses to the active display. Views that handle buttons implement `on_button_a()` / `on_button_b()` methods.
+- Countdown timer (**implemented**): `CountdownTimer` service is a pure timer engine with `on_done`/`on_configure` callbacks. Accepts `configure(name, total_sec)` to set/reset presets, `start()`/`pause()`/`resume()`/`reset()` for state transitions. The display owns duration presets (`DURATIONS`/`LABELS`) and cycling logic, and bootstraps the timer via `configure()` in its constructor. `ExplorerBuzzer.play_alert` is wired as `on_done`; `stop_alert` as `on_configure`. The countdown keeps ticking (and buzzer fires) even when the user switches to another display. `countdown.Display` is a rendering-only view that reads engine state on `initialize()` and renders accordingly. Ring rendering lives in `displays/ring.py` as a reusable module.
 - Sensor dashboard view (**partially implemented**): shows BME690 readings (temperature, pressure, humidity, gas resistance, heater status) and a header with local time (via `TimeService.now`). `PimoroniBME690` service runs independently, continuously reading sensor data. History graphs are planned but not yet implemented. Show current time/date at the top.
-- Calendar view: an Outlook-like calendar in horizontal mode where time progresses left-to-right. Show current time/date at the top.
+- Calendar view (**implemented**): a horizontal timeline display where time progresses left-to-right. Shows a 2-hour sliding window (30 min past + 90 min future) with a "now" marker at 25% from the left. Up to 5 event streams rendered as horizontal bar rows with two alternating colors per stream. Labels use binary-search truncation to fit narrow bars (bitmap6 x2 scale, 2px margins). Right-aligned remaining-time labels (format `-HH:mm`) shown when an event's end extends beyond the visible window. 15-minute tick marks on the baseline, hour labels below. Static overlay (now-line segments, baseline) drawn once on init; rows and time axis redrawn each minute. `@micropython.native` on hot draw methods. The "now" line is drawn as short segments in the gaps between rows. Each stream is backed by an `EventWindow` (in `scheduling/event_window.py`). Currently wired with one `work_week_loop` stream; future web server will allow users to define up to 5 streams. No A/B button interaction; purely auto-scrolling.
 - Web configuration: add a tiny web server to define one-shot and repeated (daily/weekly/…) timers. One-shot timers map to a single event; repeated timers map to multiple events repeating in a circle (similar to the current ring timer behavior).
 
 Design implications:
 - Keep views modular (separate rendering + state per view) and avoid hard-coding assumptions that there is only one screen.
 - Due to the 240×240 display constraint, only the Sensors and Calendar views should share a common header (time/date); other views may use the full screen.
-- Header typography (Sensors/Calendar): use `bitmap6` at x3 scale, single line, plus ~3px bottom margin.
+- Header typography (Sensors/Calendar): use `bitmap6` at x3 scale, single line, plus 6px bottom margin.
 - Prefer clean boundaries between data acquisition (sensors/network), scheduling, and rendering.
 - Be mindful of MicroPython constraints: small memory footprint and minimal allocations in tight refresh/update loops.
 

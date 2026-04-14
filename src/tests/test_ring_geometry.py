@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from array import array
 
-import displays.events as events
-from displays.events import Geometry, RING_SEGMENTS
+import displays.ring as ring
+from displays.ring import Geometry, RING_SEGMENTS
 
 
 class FakeDisplay:
@@ -28,7 +28,7 @@ def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     assert g.y_center == 120
 
     assert g.ring_thickness == 8  # min(240,240)//30
-    assert g.outer_circle_r == min(g.x_center, g.y_center) - events._RING_OUTER_MARGIN
+    assert g.outer_circle_r == min(g.x_center, g.y_center) - ring._RING_OUTER_MARGIN
     assert g.inner_circle_r == g.outer_circle_r - g.ring_thickness
     assert g.outer_poly_r == g.outer_circle_r + 2
     assert g.inner_poly_r == g.inner_circle_r - 1

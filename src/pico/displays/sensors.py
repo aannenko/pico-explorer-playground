@@ -1,8 +1,9 @@
 import micropython
 import time
 
+from displays.shared.header import format_header_time
 from picographics import PicoGraphics  # type: ignore
-from services.sensors.pimoroni_bme690 import PimoroniBME690
+from services.pimoroni_bme690 import PimoroniBME690
 
 
 class Colors:
@@ -120,9 +121,7 @@ class Display:
         self._active = False
 
     def _update_display(self) -> None:
-        year, month, mday, hour, minute = time.gmtime(self._time_service.now())[0:5]
-        local_str = f"'{(year % 100):02}-{month:02}-{mday:02} {hour:02}:{minute:02}"
-        self._renderer.header_write(local_str)
+        self._renderer.header_write(format_header_time(self._time_service.now()))
 
         temp, press, hum, gas_r, status = self._bme690_reader.read()
         self._renderer.line_write(0, f"Temp: {temp:0.1f} C", pen=self._renderer._colors.value_text)

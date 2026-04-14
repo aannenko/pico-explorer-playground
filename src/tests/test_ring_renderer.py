@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from displays.events import Colors, Renderer, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
+from displays.ring import Colors, Renderer, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
 
 
 class FakePicoGraphics:

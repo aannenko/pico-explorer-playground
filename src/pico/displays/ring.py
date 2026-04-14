@@ -1,12 +1,10 @@
 import math
 import micropython
-import time
 
 
 from array import array
 from micropython import const
 from picographics import PicoGraphics  # type: ignore
-from services.event_service import EventService
 
 RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
@@ -18,17 +16,6 @@ TEXT_BELOW_CENTER = const(56)  # 5,6
 
 _RING_THICKNESS_DIVISOR = const(30)
 _RING_OUTER_MARGIN = const(2)
-_MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
-
-
-@micropython.native
-def _fmt_time(sec: int) -> str:
-    hours = sec // 3600
-    if 0 <= sec <= _MAX_PRINTED_SEC:
-        minutes = sec // 60 % 60
-        seconds = sec % 60
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
-    return f"{hours} h"
 
 
 class Colors:
@@ -256,86 +243,3 @@ class Renderer:
 
     def update(self) -> None:
         self._gfx.update()
-
-
-class Display:
-    def __init__(self, renderer: Renderer, event_service: EventService) -> None:
-        self._renderer = renderer
-        self._service = event_service
-
-        self._segments_cleared: int = 0
-        self._last_event = None
-        self._last_tick: int = 0
-        self._active: bool = False
-
-    def _full_redraw(self) -> None:
-        self._segments_cleared = 0
-        self._renderer.reset()
-
-        service = self._service
-        event = service.current_event
-        if event is None:
-            self._renderer.text_write(TEXT_CENTER, "No events")
-            self._renderer.update()
-            return
-
-        self._renderer.text_write(TEXT_CENTER, event.name)
-
-        total = service.total_sec
-        elapsed = service.elapsed_sec
-        if total > 0:
-            expected = elapsed * RING_SEGMENTS // total
-            if expected > 0:
-                self._renderer.ring_clear_segments(expected)
-                self._segments_cleared = expected
-
-        self._write_time_texts(elapsed, service.remaining_sec)
-        self._renderer.update()
-
-    def _incremental_update(self) -> None:
-        service = self._service
-        if service.current_event is None:
-            return
-
-        total = service.total_sec
-        elapsed = service.elapsed_sec
-        if total > 0:
-            expected = elapsed * RING_SEGMENTS // total
-            if expected > self._segments_cleared:
-                self._renderer.ring_clear_segments(expected)
-                self._segments_cleared = expected
-
-        self._write_time_texts(elapsed, service.remaining_sec)
-        self._renderer.update()
-
-    def _write_time_texts(self, elapsed_sec: int, remaining_sec: int) -> None:
-        self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed_sec))
-        self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(remaining_sec)}")
-
-    def tick(self) -> None:
-        now = time.ticks_ms()
-        if time.ticks_diff(now, self._last_tick) < 1000:
-            return
-        self._last_tick = now
-
-        event = self._service.current_event
-        if event is not self._last_event:
-            self._last_event = event
-            self._full_redraw()
-        else:
-            self._incremental_update()
-
-    def initialize(self) -> None:
-        if self._active:
-            return
-        self._active = True
-        self._last_event = self._service.current_event
-        self._last_tick = time.ticks_ms()
-        self._full_redraw()
-
-    def deinitialize(self) -> None:
-        if not self._active:
-            return
-        self._active = False
-        self._segments_cleared = 0
-        self._last_event = None
