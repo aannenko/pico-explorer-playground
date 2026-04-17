@@ -53,12 +53,22 @@ class TickScheduler:
             pass
 
     def _tick(self, _: int) -> None:
-        for callback in self._subscribers:
-            callback()
-        self._pending = False
+        try:
+            for callback in self._subscribers:
+                callback()
+        finally:
+            # Always clear _pending so one bad subscriber can't wedge
+            # the scheduler permanently.
+            self._pending = False
 
     def _schedule_tick(self, _: Timer) -> None:
         if self._pending:
             return
         self._pending = True
-        self._schedule(self._tick_ref, 0)
+        try:
+            self._schedule(self._tick_ref, 0)
+        except Exception:
+            # If the schedule queue is full (or any other failure),
+            # roll back _pending so the next timer IRQ can try again.
+            # Runs in IRQ context; swallowing is intentional.
+            self._pending = False
