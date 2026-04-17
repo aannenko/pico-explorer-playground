@@ -45,8 +45,8 @@ class NetworkService:
     def _tick(self) -> None:
         try:
             self._tick_inner()
-        except Exception:
-            pass
+        except Exception as e:
+            print("[net] tick err:", e)
 
     def _tick_inner(self) -> None:
         if self._phase == _IDLE:

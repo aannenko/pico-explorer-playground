@@ -196,7 +196,7 @@ def test_tick_updates_last_sync_on_wifi_fail(monkeypatch):
     assert svc._last_sync_ticks == 200
 
 
-def test_tick_exception_safety(monkeypatch):
+def test_tick_exception_safety(monkeypatch, capsys):
     ticks = [200]
     monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
@@ -209,6 +209,11 @@ def test_tick_exception_safety(monkeypatch):
     svc, _ = _mk_service(sync_interval_ms=100)
     # Should not raise — _tick wraps in try/except
     svc._tick()
+
+    # Error surfaced on stdout rather than silently swallowed
+    captured = capsys.readouterr()
+    assert "[net] tick err:" in captured.out
+    assert "boom" in captured.out
 
 
 def test_tick_full_cycle(monkeypatch):
