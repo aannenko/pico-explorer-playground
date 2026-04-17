@@ -28,18 +28,6 @@ def _fmt_remaining(sec: int) -> str:
     m = sec % 3600 // 60
     return f"-{h:02}:{m:02}"
 
-# Predefined stream color pairs (color_a, color_b) as RGB tuples.
-# Based on the Okabe-Ito palette, brightened for black-text contrast.
-# Color-blind safe: avoids red-green confusion; distinguishable under
-# protanopia and deuteranopia.  Within-stream pairs use analogous hue shift.
-STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = [
-    ((240, 180, 50), (255, 210, 90)),    # orange / amber
-    ((100, 190, 245), (150, 210, 255)),  # sky blue / light blue
-    ((180, 200, 50), (210, 240, 130)),   # yellow / chartreuse
-    ((230, 150, 190), (245, 185, 215)),  # pink / light pink
-    ((80, 200, 160), (130, 240, 230)),   # teal / aqua
-]
-
 
 class Colors:
     def __init__(
