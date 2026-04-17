@@ -3,11 +3,35 @@ from __future__ import annotations
 import pytest
 
 import services.network_service as ns_mod
+from services import wifi_client
 from services.network_service import NetworkService
-from utilities import ntp, wifi
+from utilities import ntp
 
 
-def _mk_service(**kwargs):
+class FakeWifiClient:
+    """Minimal stand-in for WifiClient — exposes the subset used by NetworkService."""
+
+    def __init__(self, *, connect_result=None, is_connected=False, state=None):
+        self._connect_result = (
+            wifi_client.CONNECTED if connect_result is None else connect_result
+        )
+        self._is_connected = is_connected
+        self.state = wifi_client.IDLE if state is None else state
+        self.connect_calls: list[tuple[str, str]] = []
+        self.start_connect_calls: list[tuple[str, str]] = []
+
+    def connect(self, ssid, pw):
+        self.connect_calls.append((ssid, pw))
+        return self._connect_result
+
+    def start_connect(self, ssid, pw):
+        self.start_connect_calls.append((ssid, pw))
+
+    def is_connected(self):
+        return self._is_connected
+
+
+def _mk_service(wifi=None, **kwargs):
     status_calls: list[tuple[str, ...]] = []
 
     def status_fn(text: str, subtext: str = "") -> None:
@@ -16,28 +40,29 @@ def _mk_service(**kwargs):
     svc = NetworkService(
         ssid="TestSSID",
         password="TestPass",
+        wifi=wifi if wifi is not None else FakeWifiClient(),
         **kwargs,
     )
-
     return svc, status_fn, status_calls
 
 
 # --- connect_and_sync_initial ---
 
 def test_connect_and_sync_initial_success(monkeypatch):
-    monkeypatch.setattr(wifi, "connect", lambda ssid, pw: wifi.CONNECTED)
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, status_fn, status_calls = _mk_service()
+    svc, status_fn, status_calls = _mk_service(
+        wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
+    )
     svc.connect_and_sync_initial(status_fn=status_fn)
 
     assert status_calls == [("wifi", ""), ("sync time", "")]
 
 
 def test_connect_and_sync_initial_wifi_fail(monkeypatch):
-    monkeypatch.setattr(wifi, "connect", lambda ssid, pw: wifi.FAILED)
-
-    svc, status_fn, status_calls = _mk_service()
+    svc, status_fn, status_calls = _mk_service(
+        wifi=FakeWifiClient(connect_result=wifi_client.FAILED),
+    )
 
     with pytest.raises(RuntimeError, match="Could not connect to WiFi"):
         svc.connect_and_sync_initial(status_fn=status_fn)
@@ -46,10 +71,11 @@ def test_connect_and_sync_initial_wifi_fail(monkeypatch):
 
 
 def test_connect_and_sync_initial_ntp_fail(monkeypatch):
-    monkeypatch.setattr(wifi, "connect", lambda ssid, pw: wifi.CONNECTED)
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.FAILED)
 
-    svc, status_fn, status_calls = _mk_service()
+    svc, status_fn, status_calls = _mk_service(
+        wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
+    )
 
     with pytest.raises(RuntimeError, match="Could not sync time"):
         svc.connect_and_sync_initial(status_fn=status_fn)
@@ -58,10 +84,11 @@ def test_connect_and_sync_initial_ntp_fail(monkeypatch):
 
 
 def test_connect_and_sync_initial_no_status_fn(monkeypatch):
-    monkeypatch.setattr(wifi, "connect", lambda ssid, pw: wifi.CONNECTED)
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, _status_fn, _status_calls = _mk_service()
+    svc, _status_fn, _status_calls = _mk_service(
+        wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
+    )
     svc.connect_and_sync_initial()  # must not raise
 
 
@@ -71,117 +98,92 @@ def test_tick_does_nothing_before_interval(monkeypatch):
     monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 0)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    start_connect_calls = [0]
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: _inc(start_connect_calls))
-
-    svc, _, _ = _mk_service(sync_interval_ms=1000)
+    wifi = FakeWifiClient()
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=1000)
     svc._tick()
 
-    assert start_connect_calls[0] == 0
+    assert wifi.start_connect_calls == []
 
 
 def test_tick_starts_wifi_when_not_connected(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    start_connect_calls = [0]
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: _inc(start_connect_calls))
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTING)
-
-    svc, _, _ = _mk_service(sync_interval_ms=100)
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
-    assert start_connect_calls[0] == 1
+    assert len(wifi.start_connect_calls) == 1
     assert svc._phase == 1  # _WIFI
 
 
 def test_tick_skips_wifi_when_connected(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
-
-    start_connect_calls = [0]
-    monkeypatch.setattr(wifi, "is_connected", lambda: True)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: _inc(start_connect_calls))
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, _, _ = _mk_service(sync_interval_ms=100)
+    wifi = FakeWifiClient(is_connected=True)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
-    assert start_connect_calls[0] == 0  # WiFi not reconnected
+    assert wifi.start_connect_calls == []
     assert svc._phase == 0  # _IDLE (NTP completed in same tick)
 
 
 def test_tick_wifi_connecting_stays_in_wifi_phase(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: None)
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTING)
-
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
     ntp_calls = [0]
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: _inc_and_return(ntp_calls, ntp.SYNCED))
 
-    svc, _, _ = _mk_service(sync_interval_ms=100)
-    svc._tick()  # enters _WIFI, state CONNECTING
-    svc._tick()  # still CONNECTING
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
+    svc._tick()
+    svc._tick()
 
     assert ntp_calls[0] == 0
     assert svc._phase == 1  # _WIFI
 
 
 def test_tick_wifi_connected_transitions_to_ntp(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: None)
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTING)
-
-    svc, _, _ = _mk_service(sync_interval_ms=100)
-    svc._tick()  # enters _WIFI, CONNECTING
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
+    svc._tick()
     assert svc._phase == 1  # _WIFI
 
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTED)
+    wifi.state = wifi_client.CONNECTED
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
-    svc._tick()  # CONNECTED → _NTP → sync → _IDLE
+    svc._tick()
 
     assert svc._phase == 0  # _IDLE
 
 
 def test_tick_wifi_failed_resets_to_idle(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: None)
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTING)
-
-    svc, _, _ = _mk_service(sync_interval_ms=100)
-    svc._tick()  # enters _WIFI
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
+    svc._tick()
     assert svc._phase == 1  # _WIFI
 
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.FAILED)
+    wifi.state = wifi_client.FAILED
     svc._tick()
 
     assert svc._phase == 0  # _IDLE
 
 
 def test_tick_ntp_sync_resets_to_idle(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
-
-    monkeypatch.setattr(wifi, "is_connected", lambda: True)
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, _, _ = _mk_service(sync_interval_ms=100)
+    wifi = FakeWifiClient(is_connected=True)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
     assert svc._phase == 0  # _IDLE
@@ -189,35 +191,27 @@ def test_tick_ntp_sync_resets_to_idle(monkeypatch):
 
 
 def test_tick_updates_last_sync_on_wifi_fail(monkeypatch):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: None)
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.FAILED)
-
-    svc, _, _ = _mk_service(sync_interval_ms=100)
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.FAILED)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
     assert svc._last_sync_ticks == 200
 
 
 def test_tick_exception_safety(monkeypatch, capsys):
-    ticks = [200]
-    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: 200)
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    def boom():
-        raise RuntimeError("boom")
+    class BoomWifi(FakeWifiClient):
+        def is_connected(self):
+            raise RuntimeError("boom")
 
-    monkeypatch.setattr(wifi, "is_connected", boom)
+    svc, _, _ = _mk_service(wifi=BoomWifi(), sync_interval_ms=100)
+    svc._tick()  # must not raise — _tick wraps in try/except
 
-    svc, _, _ = _mk_service(sync_interval_ms=100)
-    # Should not raise — _tick wraps in try/except
-    svc._tick()
-
-    # Error surfaced on stdout rather than silently swallowed
     captured = capsys.readouterr()
     assert "[net] tick err:" in captured.out
     assert "boom" in captured.out
@@ -229,46 +223,28 @@ def test_tick_full_cycle(monkeypatch):
     monkeypatch.setattr(ns_mod.time, "ticks_ms", lambda: ticks[0])
     monkeypatch.setattr(ns_mod.time, "ticks_diff", lambda a, b: a - b)
 
-    wifi_states = iter([wifi.CONNECTING, wifi.CONNECTING, wifi.CONNECTED])
-    monkeypatch.setattr(wifi, "is_connected", lambda: False)
-    monkeypatch.setattr(wifi, "start_connect", lambda ssid, pw: None)
-
-    # Use a class to make wifi.state dynamic
-    class WiFiState:
-        current = wifi.CONNECTING
-
-    monkeypatch.setattr(
-        type(wifi), "state",
-        property(lambda self: WiFiState.current),
-    ) if False else None  # Can't property-patch a module; use getattr approach
-
-    # Patch wifi module's state attribute dynamically
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTING)
+    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
 
     ntp_calls = [0]
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: _inc_and_return(ntp_calls, ntp.SYNCED))
 
-    svc, _, _ = _mk_service(sync_interval_ms=100)
+    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
 
     ticks[0] = 200
     svc._tick()  # IDLE → WIFI, wifi CONNECTING
     assert svc._phase == 1  # _WIFI
 
-    svc._tick()  # wifi CONNECTING
+    svc._tick()  # wifi still CONNECTING
     assert svc._phase == 1  # _WIFI
 
-    monkeypatch.setattr(wifi._DEFAULT, "state", wifi.CONNECTED)
-    svc._tick()  # wifi CONNECTED → NTP → sync → IDLE
+    wifi.state = wifi_client.CONNECTED
+    svc._tick()  # CONNECTED → NTP → sync → IDLE
     assert svc._phase == 0  # _IDLE
     assert svc._last_sync_ticks == 200
     assert ntp_calls[0] == 1
 
 
 # --- Helpers ---
-
-def _inc(counter: list[int]) -> None:
-    counter[0] += 1
-
 
 def _inc_and_return(counter: list[int], value):
     counter[0] += 1

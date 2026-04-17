@@ -29,6 +29,7 @@ from services.network_service import NetworkService
 from services.pimoroni_bme690 import PimoroniBME690
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
+from services.wifi_client import WifiClient
 
 
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
@@ -149,9 +150,11 @@ def build_app(pico_graphics, schedule_fn) -> App:
 
     tick_scheduler = TickScheduler()
 
+    wifi_client = WifiClient()
     network_service = NetworkService(
         ssid=config.WIFI_SSID,
         password=config.WIFI_PASSWORD,
+        wifi=wifi_client,
         sync_interval_ms=_NET_SYNC_INTERVAL_MS,
         tick_scheduler=tick_scheduler,
     )

@@ -27,8 +27,12 @@ class WifiClient:
     """Encapsulates a single WiFi connection state machine.
 
     Each instance owns its own ``WLAN`` handle, timer, and state, so
-    multiple clients (or a test double) can coexist without touching
-    module-level globals.
+    multiple clients (or a test double) can coexist.
+
+    Timer ownership: ``_timer`` is transient — created in
+    ``start_connect()`` and destroyed as soon as the state machine leaves
+    CONNECTING (on ``STAT_GOT_IP`` / ``STAT_WRONG_PASSWORD`` or via
+    ``reset()``). See copilot-instructions.md virtual-timer budget.
     """
 
     def __init__(self) -> None:
@@ -199,38 +203,3 @@ class WifiClient:
             # heap is locked.  Either way, clear _pending so the next
             # timer tick can retry instead of wedging the state machine.
             self._pending = False
-
-
-# ── Module-level default instance + thin wrappers ─────────────────────────
-#
-# Kept so existing callers (NetworkService) and tests can continue to use
-# ``wifi.connect(...)`` / ``wifi.state`` without instantiating a client.
-# New code should instantiate ``WifiClient`` directly for better isolation.
-
-_DEFAULT = WifiClient()
-
-
-def start_connect(ssid: str, password: str) -> None:
-    _DEFAULT.start_connect(ssid, password)
-
-
-def connect(ssid: str, password: str, timeout_ms: int = 300_000) -> int:
-    return _DEFAULT.connect(ssid, password, timeout_ms)
-
-
-def is_connected() -> bool:
-    return _DEFAULT.is_connected()
-
-
-def reset() -> None:
-    _DEFAULT.reset()
-
-
-def __getattr__(name):
-    # Forward module-level attribute reads to the default client so
-    # existing callers (e.g. ``wifi.state``, ``wifi._tick``) and tests
-    # that poke internals continue to work without explicit plumbing.
-    try:
-        return getattr(_DEFAULT, name)
-    except AttributeError:
-        raise AttributeError(name)

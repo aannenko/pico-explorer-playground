@@ -1,7 +1,9 @@
 import time
 
 from micropython import const
-from utilities import ntp, wifi
+from services import wifi_client
+from services.wifi_client import WifiClient
+from utilities import ntp
 
 _IDLE = const(0)
 _WIFI = const(1)
@@ -13,11 +15,13 @@ class NetworkService:
         self,
         ssid: str,
         password: str,
+        wifi: WifiClient,
         sync_interval_ms: int = 12 * 60 * 60 * 1000,
         tick_scheduler=None,
     ) -> None:
         self._ssid = ssid
         self._password = password
+        self._wifi = wifi
         self._sync_interval_ms = sync_interval_ms
         self._last_sync_ticks: int = 0
         self._phase: int = _IDLE
@@ -34,8 +38,8 @@ class NetworkService:
                 status_fn(msg)
 
         _notify("wifi")
-        result = wifi.connect(self._ssid, self._password)
-        if result != wifi.CONNECTED:
+        result = self._wifi.connect(self._ssid, self._password)
+        if result != wifi_client.CONNECTED:
             _notify("wifi fail")
             raise RuntimeError("Could not connect to WiFi")
 
@@ -58,17 +62,17 @@ class NetworkService:
             now = time.ticks_ms()
             if time.ticks_diff(now, self._last_sync_ticks) < self._sync_interval_ms:
                 return
-            if wifi.is_connected():
+            if self._wifi.is_connected():
                 self._phase = _NTP
             else:
-                wifi.start_connect(self._ssid, self._password)
+                self._wifi.start_connect(self._ssid, self._password)
                 self._phase = _WIFI
 
         if self._phase == _WIFI:
-            s = wifi.state
-            if s == wifi.CONNECTED:
+            s = self._wifi.state
+            if s == wifi_client.CONNECTED:
                 self._phase = _NTP
-            elif s == wifi.FAILED:
+            elif s == wifi_client.FAILED:
                 self._last_sync_ticks = time.ticks_ms()
                 self._phase = _IDLE
             else:

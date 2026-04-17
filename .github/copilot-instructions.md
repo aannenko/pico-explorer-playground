@@ -21,7 +21,7 @@ MicroPython's `machine.Timer(-1)` allocates a *virtual* (software) timer slot.  
 | `TickScheduler._timer` | `services/tick_scheduler.py` | permanent — drives all periodic subscribers |
 | `PimoroniBME690._timer` | `services/pimoroni_bme690.py` | permanent — constant-interval gas-safe reads |
 | `ExplorerBuzzer._alert_timer` | `services/explorer_buzzer.py` | permanent object, cycled via `init()` / `deinit()` per alert |
-| `WifiClient._timer` | `utilities/wifi.py` | transient — only during `CONNECTING`; destroyed on `STAT_GOT_IP` / `STAT_WRONG_PASSWORD` / `reset()` |
+| `WifiClient._timer` | `services/wifi_client.py` | transient — only during `CONNECTING`; destroyed on `STAT_GOT_IP` / `STAT_WRONG_PASSWORD` / `reset()` |
 
 Steady state: 3 permanent + ≤1 transient = 4 max.
 
@@ -53,7 +53,7 @@ graph TD
 
     CountdownTimer -- "on_done" --> ExplorerBuzzer
     NetworkService -- "status_fn (bootstrap only)" --> StatusDisplay
-    NetworkService --> utilities/wifi.py
+    NetworkService --> services/wifi_client.py
     NetworkService --> utilities/ntp.py
     EventWindow --> scheduling["scheduling/event + event_factory + stream"]
     app --> demo_streams
@@ -73,7 +73,7 @@ graph TD
 - **Hardware boundary:** `src/pico/hardware/explorer.py` centralizes GPIO pin constants.
 - **TimeService:** central time authority; RTC holds UTC, `now()` returns local epoch (TZ + DST).  Must be created after NTP sync.  Exposes `to_utc()`, `total_offset()`, `real_duration()` for DST-aware math.  Consumers pass `time_service.now` as `get_time`.
 - **NetworkService:** `status_fn` kwarg is only on `connect_and_sync_initial(...)`, not the constructor — periodic resyncs are silent so they never clobber the active view.
-- **WiFi:** state lives in `WifiClient`; module-level `_DEFAULT` + PEP 562 `__getattr__` preserve the legacy `utilities.wifi.connect(...)` API for existing callers and tests.
+- **WiFi:** `WifiClient` is a service instantiated in `app.py` and injected into `NetworkService`. It owns its own `machine.Timer` (transient — only during CONNECTING) and state machine.
 - **Services** (`src/pico/services/`) are long-lived stateful objects created at startup, independent of display lifecycle.  Explorer- / Pimoroni-specific services use `Explorer*` / `Pimoroni*` naming to avoid shadowing built-in MicroPython modules.
 - **Scheduling** (`src/pico/scheduling/`): `Event` carries wall-clock + DST-corrected durations; `EventWindow` is a passive sliding buffer over a forward-only event iterator; `Stream` bundles an `events_iter` + two RGB color tuples that `app.py` maps to pens.  `event_factory.work_week_loop` operates in local-epoch and advances its cursor by wall-clock duration to keep local boundaries aligned.
 - **Demo streams** (`src/pico/demo_streams.py`) is temporary — slated for removal once the web configuration server lands.
