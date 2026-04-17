@@ -150,11 +150,12 @@ def build_app(pico_graphics, schedule_fn) -> App:
     network_service = NetworkService(
         ssid=config.WIFI_SSID,
         password=config.WIFI_PASSWORD,
-        status_fn=status_display.show,
         sync_interval_ms=_NET_SYNC_INTERVAL_MS,
         tick_scheduler=tick_scheduler,
     )
-    network_service.connect_and_sync_initial()
+    network_service.connect_and_sync_initial(status_fn=status_display.show)
+    # status_display is not retained; it was a boot-time overlay only.
+    del status_display
 
     # TimeService must be created after NTP sync for accurate time.time().
     time_service = TimeService(

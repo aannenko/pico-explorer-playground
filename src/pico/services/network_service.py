@@ -13,13 +13,11 @@ class NetworkService:
         self,
         ssid: str,
         password: str,
-        status_fn,
         sync_interval_ms: int = 12 * 60 * 60 * 1000,
         tick_scheduler=None,
     ) -> None:
         self._ssid = ssid
         self._password = password
-        self._status = status_fn
         self._sync_interval_ms = sync_interval_ms
         self._last_sync_ticks: int = 0
         self._phase: int = _IDLE
@@ -27,17 +25,24 @@ class NetworkService:
         if tick_scheduler is not None:
             tick_scheduler.register(self._tick)
 
-    def connect_and_sync_initial(self) -> None:
-        self._status("wifi")
+    def connect_and_sync_initial(self, status_fn=None) -> None:
+        # status_fn is only used during the initial blocking bootstrap;
+        # it is not retained, so the boot-time StatusDisplay does not need
+        # to live beyond this call.
+        def _notify(msg: str) -> None:
+            if status_fn is not None:
+                status_fn(msg)
+
+        _notify("wifi")
         result = wifi.connect(self._ssid, self._password)
         if result != wifi.CONNECTED:
-            self._status("wifi fail")
+            _notify("wifi fail")
             raise RuntimeError("Could not connect to WiFi")
 
-        self._status("sync time")
+        _notify("sync time")
         result = ntp.sync_time(attempts=5)
         if result != ntp.SYNCED:
-            self._status("ntp fail")
+            _notify("ntp fail")
             raise RuntimeError("Could not sync time")
 
         self._last_sync_ticks = time.ticks_ms()
