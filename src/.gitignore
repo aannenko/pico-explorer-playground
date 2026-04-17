@@ -195,3 +195,4 @@ cython_debug/
 
 # Local-only secrets for the Pico runtime.
 config.py
+!config.sample.py
