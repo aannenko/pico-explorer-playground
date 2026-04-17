@@ -172,7 +172,6 @@ def build_app(pico_graphics, schedule_fn) -> App:
         temp_offset=config.BME690_TEMP_OFFSET,
         hum_offset=config.BME690_HUM_OFFSET,
         sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
-        tick_scheduler=tick_scheduler,
     )
 
     sensors_display = _build_sensors_display(pico_graphics, palette, bme690_reader, time_service)

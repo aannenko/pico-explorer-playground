@@ -1,4 +1,6 @@
-import time
+import micropython
+
+from machine import Timer
 
 from breakout_bme69x import (  # type: ignore
     BreakoutBME69X,
@@ -13,16 +15,30 @@ from pimoroni_i2c import PimoroniI2C  # type: ignore
 
 
 class PimoroniBME690:
+    """BME690 reader paced by a dedicated hardware Timer.
+
+    The gas-resistance sensor is sensitive to inter-read spacing: if
+    reads come too close, the hot plate doesn't cool fully between
+    measurements and the gas baseline drifts.  Using the shared
+    ``TickScheduler`` would make the effective interval depend on
+    whatever other subscribers ran first, so this service owns its own
+    ``machine.Timer`` running at ``sensor_read_delay_ms``.  The Timer
+    IRQ only schedules ``_do_read`` via ``micropython.schedule`` — the
+    actual blocking I2C read runs in normal context.
+    """
+
     def __init__(
         self,
         temp_offset: float,
         hum_offset: float,
         sensor_read_delay_ms: int = 5000,
-        tick_scheduler=None,
+        schedule=micropython.schedule,
+        timer_factory=Timer,
     ) -> None:
         self._temp_offset = temp_offset
         self._hum_offset = hum_offset
         self._read_interval_ms = sensor_read_delay_ms
+        self._schedule = schedule
 
         self._bme = BreakoutBME69X(PimoroniI2C(**PICO_EXPLORER_I2C_PINS))
         self._bme.configure(
@@ -34,16 +50,27 @@ class PimoroniBME690:
         )
 
         self._last_reading: tuple[float, float, float, float, str] = (0.0, 0.0, 0.0, 0.0, "Unstable")
-        self._last_read_ticks: int = 0
+        self._pending: bool = False
+
+        # Cache bound methods used from IRQ context to avoid heap
+        # allocation (and possible MemoryError) inside the timer callback.
+        self._timer_callback_ref = self._timer_callback
+        self._do_read_scheduled_ref = self._do_read_scheduled
+
         self._do_read()
 
-        if tick_scheduler is not None:
-            tick_scheduler.register(self._tick)
+        self._timer = timer_factory(-1)
+        self._timer.init(
+            mode=Timer.PERIODIC,
+            period=self._read_interval_ms,
+            callback=self._timer_callback_ref,
+        )
 
-    def _tick(self) -> None:
-        now = time.ticks_ms()
-        if time.ticks_diff(now, self._last_read_ticks) >= self._read_interval_ms:
-            self._do_read()
+    def read(self) -> tuple[float, float, float, float, str]:
+        return self._last_reading
+
+    def deinit(self) -> None:
+        self._timer.deinit()
 
     def _do_read(self) -> None:
         temp, press, hum, gas_r, status = self._bme.read()[0:5]
@@ -51,7 +78,22 @@ class PimoroniBME690:
         hum += self._hum_offset
         heater = "Stable" if status & STATUS_HEATER_STABLE else "Unstable"
         self._last_reading = (temp, press / 100, hum, gas_r / 1000, heater)
-        self._last_read_ticks = time.ticks_ms()
 
-    def read(self) -> tuple[float, float, float, float, str]:
-        return self._last_reading
+    def _do_read_scheduled(self, _: int) -> None:
+        try:
+            self._do_read()
+        finally:
+            self._pending = False
+
+    def _timer_callback(self, _: Timer) -> None:
+        """Timer IRQ handler. Defers the blocking I2C read to main thread."""
+        if self._pending:
+            return
+        self._pending = True
+        try:
+            self._schedule(self._do_read_scheduled_ref, 0)
+        except Exception:
+            # RuntimeError if schedule queue is full; MemoryError if the
+            # heap is locked.  Either way, clear _pending so the next
+            # timer tick can retry instead of wedging the reader.
+            self._pending = False
