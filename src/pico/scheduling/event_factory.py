@@ -170,19 +170,13 @@ def random_weather_loop(
     time_service: TimeService,
 ):  # Iterator[Event]
     """Yield random weather events with occasional gaps, starting from *start_timestamp*."""
-    cursor = start_timestamp
-
-    while True:
-        dur = random.choice(_WEATHER_DURATIONS)
-
-        if random.randint(1, 100) <= _WEATHER_GAP_CHANCE:
-            cursor += dur
-            continue
-
-        name = random.choice(_WEATHER_NAMES)
-        real_dur = time_service.real_duration(cursor, dur)
-        yield Event(name, cursor, dur, real_dur)
-        cursor += dur
+    return random_event_loop(
+        names=_WEATHER_NAMES,
+        durations=_WEATHER_DURATIONS,
+        gap_chance=_WEATHER_GAP_CHANCE,
+        start_timestamp=start_timestamp,
+        time_service=time_service,
+    )
 
 
 def random_event_loop(
