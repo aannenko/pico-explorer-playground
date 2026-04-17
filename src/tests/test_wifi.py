@@ -311,7 +311,7 @@ def test_connect_success(fake_wlan, monkeypatch):
 
     call_count = [0]
 
-    original_tick = wifi._tick
+    original_tick = wifi._DEFAULT._tick
 
     def patched_tick(gen):
         original_tick(gen)
@@ -319,8 +319,7 @@ def test_connect_success(fake_wlan, monkeypatch):
         if call_count[0] >= 2:
             fake_wlan._status_value = STAT_GOT_IP
 
-    monkeypatch.setattr(wifi, "_tick", patched_tick)
-    monkeypatch.setattr(wifi, "_tick_ref", patched_tick)
+    monkeypatch.setattr(wifi._DEFAULT, "_tick", patched_tick)
     result = wifi.connect("MySSID", "pass")
     assert result == wifi.CONNECTED
 
