@@ -171,7 +171,7 @@ class Renderer:
 
             for event, use_alt in visible:
                 ev_start = event.start_timestamp
-                ev_end = ev_start + event.duration_sec
+                ev_end = ev_start + event.wall_clock_duration_sec
 
                 # Clip to window
                 x0 = max(0, (ev_start - window_start) * width // _WINDOW_TOTAL_SEC)

@@ -6,7 +6,7 @@ def test_event_init_sets_fields() -> None:
     e = Event("work", 123, 45)
     assert e.name == "work"
     assert e.start_timestamp == 123
-    assert e.duration_sec == 45
+    assert e.wall_clock_duration_sec == 45
 
 
 def test_event_requires_name() -> None:
@@ -37,4 +37,4 @@ def test_event_real_duration_defaults_to_duration() -> None:
 def test_event_real_duration_explicit() -> None:
     e = Event("rest", 100, 3600, real_duration_sec=3000)
     assert e.real_duration_sec == 3000
-    assert e.duration_sec == 3600
+    assert e.wall_clock_duration_sec == 3600

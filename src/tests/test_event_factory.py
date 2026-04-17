@@ -71,7 +71,7 @@ def test_events_are_contiguous():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 20)
     for i in range(len(events) - 1):
-        assert events[i].start_timestamp + events[i].duration_sec == events[i + 1].start_timestamp, \
+        assert events[i].start_timestamp + events[i].wall_clock_duration_sec == events[i + 1].start_timestamp, \
             f"gap between event {i} ({events[i].name}) and {i+1} ({events[i+1].name})"
 
 
@@ -82,7 +82,7 @@ def test_work_duration_is_9h():
     events = _collect(gen, 10)
     for e in events:
         if e.name == "work":
-            assert e.duration_sec == 9 * 3600
+            assert e.wall_clock_duration_sec == 9 * 3600
 
 
 def test_rest_duration_is_15h():
@@ -92,7 +92,7 @@ def test_rest_duration_is_15h():
     events = _collect(gen, 10)
     for e in events:
         if e.name == "rest":
-            assert e.duration_sec == 15 * 3600
+            assert e.wall_clock_duration_sec == 15 * 3600
 
 
 def test_weekend_duration_is_63h():
@@ -103,7 +103,7 @@ def test_weekend_duration_is_63h():
     events = _collect(gen, 10)
     for e in events:
         if e.name == "weekend":
-            assert e.duration_sec == 63 * 3600
+            assert e.wall_clock_duration_sec == 63 * 3600
 
 
 # ── local-epoch positioning ──────────────────────────────────────────
@@ -132,8 +132,8 @@ def test_no_dst_crossing_real_equals_wall():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:
-        assert e.real_duration_sec == e.duration_sec, \
-            f"{e.name}: real={e.real_duration_sec} != wall={e.duration_sec}"
+        assert e.real_duration_sec == e.wall_clock_duration_sec, \
+            f"{e.name}: real={e.real_duration_sec} != wall={e.wall_clock_duration_sec}"
 
 
 # ── DST correction: spring forward ──────────────────────────────────
@@ -155,8 +155,8 @@ def test_spring_forward_rest_shorter():
         utc_end = utc_start + e.real_duration_sec
         if utc_start < spring_utc < utc_end:
             # This event crosses spring-forward
-            assert e.real_duration_sec == e.duration_sec - 3600, \
-                f"{e.name}: expected real = wall - 3600, got real={e.real_duration_sec}, wall={e.duration_sec}"
+            assert e.real_duration_sec == e.wall_clock_duration_sec - 3600, \
+                f"{e.name}: expected real = wall - 3600, got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
             break
     else:
         pytest.fail("No event found crossing spring-forward transition")
@@ -179,8 +179,8 @@ def test_fall_back_weekend_longer():
         utc_start = ts.to_utc(e.start_timestamp)
         utc_end = utc_start + e.real_duration_sec
         if utc_start < fall_utc < utc_end:
-            assert e.real_duration_sec == e.duration_sec + 3600, \
-                f"{e.name}: expected real = wall + 3600, got real={e.real_duration_sec}, wall={e.duration_sec}"
+            assert e.real_duration_sec == e.wall_clock_duration_sec + 3600, \
+                f"{e.name}: expected real = wall + 3600, got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
             break
     else:
         pytest.fail("No event found crossing fall-back transition")
@@ -196,7 +196,7 @@ def test_no_dst_config_real_equals_wall():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:
-        assert e.real_duration_sec == e.duration_sec
+        assert e.real_duration_sec == e.wall_clock_duration_sec
 
 
 # ── validation ──────────────────────────────────────────────────────

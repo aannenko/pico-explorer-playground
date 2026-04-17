@@ -58,7 +58,7 @@ class EventWindow:
             # Buffer covers window when last event extends past window_end
             if self._buffer:
                 last = self._buffer[-1][0]
-                if last.start_timestamp + last.duration_sec > window_end:
+                if last.start_timestamp + last.wall_clock_duration_sec > window_end:
                     break
 
             # Get next event from peek slot or iterator
@@ -85,6 +85,6 @@ class EventWindow:
         buf = self._buffer
         while buf:
             event = buf[0][0]
-            if event.start_timestamp + event.duration_sec > window_start:
+            if event.start_timestamp + event.wall_clock_duration_sec > window_start:
                 break
             buf.pop(0)

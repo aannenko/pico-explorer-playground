@@ -27,13 +27,13 @@ class Event:
 
         self.name = name
         self.start_timestamp = start_timestamp
-        self.duration_sec = wall_clock_duration_sec
+        self.wall_clock_duration_sec = wall_clock_duration_sec
         self.real_duration_sec = real_duration_sec if real_duration_sec >= 0 else wall_clock_duration_sec
 
     def __repr__(self) -> str:
         return (
             f"Event(name={self.name}, "
             f"start_timestamp={self.start_timestamp}, "
-            f"wall_clock_duration_sec={self.duration_sec}, "
+            f"wall_clock_duration_sec={self.wall_clock_duration_sec}, "
             f"real_duration_sec={self.real_duration_sec})"
         )
