@@ -38,6 +38,13 @@ class EventWindow:
         Each item is ``(Event, use_alt_color)`` where ``use_alt_color``
         alternates between adjacent events so the caller can pick
         ``color_a`` or ``color_b``.
+
+        Note:
+            The returned list is the window's internal buffer, not a copy.
+            Callers must treat it as read-only; the buffer is mutated on
+            the next ``get_visible`` call (fill-forward + prune-past).
+            Returning the buffer directly avoids per-frame list
+            allocations in the calendar's hot draw path.
         """
         self._fill_to(window_end)
         self._prune_before(window_start)

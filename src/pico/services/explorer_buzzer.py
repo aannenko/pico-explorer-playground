@@ -63,8 +63,8 @@ class ExplorerBuzzer:
     def _off(self) -> None:
         self._pwm.duty_u16(0)
 
-    def _toggle_alert(self, _: int) -> None:
-        if _ != self._alert_generation:
+    def _toggle_alert(self, gen: int) -> None:
+        if gen != self._alert_generation:
             return
         self._alert_remaining -= 1
         if self._alert_remaining <= 0:
