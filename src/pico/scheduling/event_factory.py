@@ -1,6 +1,5 @@
 import struct
 import time
-import random
 
 from micropython import const
 from scheduling.event import Event
@@ -158,45 +157,3 @@ def work_week_loop(
 
         current_event_start_timestamp += event_duration_sec  # advance by wall-clock
         current_event_index = (current_event_index + 1) % num_events
-
-
-_WEATHER_NAMES = ("sun", "rain", "snow", "fog")
-_WEATHER_DURATIONS = (15 * 60, 30 * 60, 60 * 60, 120 * 60, 150 * 60)
-_WEATHER_GAP_CHANCE = const(20)  # percent chance of a gap
-
-
-def random_weather_loop(
-    start_timestamp: int,
-    time_service: TimeService,
-):  # Iterator[Event]
-    """Yield random weather events with occasional gaps, starting from *start_timestamp*."""
-    return random_event_loop(
-        names=_WEATHER_NAMES,
-        durations=_WEATHER_DURATIONS,
-        gap_chance=_WEATHER_GAP_CHANCE,
-        start_timestamp=start_timestamp,
-        time_service=time_service,
-    )
-
-
-def random_event_loop(
-    names: tuple,
-    durations: tuple,
-    gap_chance: int,
-    start_timestamp: int,
-    time_service: TimeService,
-):  # Iterator[Event]
-    """Yield random events from *names* with durations from *durations* and occasional gaps."""
-    cursor = start_timestamp
-
-    while True:
-        dur = random.choice(durations)
-
-        if random.randint(1, 100) <= gap_chance:
-            cursor += dur
-            continue
-
-        name = random.choice(names)
-        real_dur = time_service.real_duration(cursor, dur)
-        yield Event(name, cursor, dur, real_dur)
-        cursor += dur

@@ -14,8 +14,8 @@ from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
 from displays.palette import Palette, build_palette
 from displays.status import StatusDisplay
-from scheduling import event_factory
 from scheduling.event_window import EventWindow
+from scheduling.stream import Stream
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
@@ -94,20 +94,14 @@ def _build_sensors_display(pico_graphics, palette: Palette, bme690_reader, time_
 
 
 def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeService):
-    iterators = [
-        event_factory.work_week_loop(
-            work_days={0, 1, 2, 3, 4},
-            work_start=(9, 0),
-            work_end=(18, 0),
-            time_service=time_service,
-        ),
-    ]
-    iterators.extend(demo_streams.build_demo_streams(time_service))
+    streams: list[Stream] = [demo_streams.build_work_week_stream(time_service)]
+    streams.extend(demo_streams.build_demo_streams(time_service))
 
-    streams: list[EventWindow] = []
-    for i, it in enumerate(iterators):
-        pen_a, pen_b = palette.stream_pens[i]
-        streams.append(EventWindow(events_iter=it, color_a=pen_a, color_b=pen_b))
+    windows: list[EventWindow] = []
+    for s in streams:
+        pen_a = pico_graphics.create_pen(*s.color_a)
+        pen_b = pico_graphics.create_pen(*s.color_b)
+        windows.append(EventWindow(events_iter=s.events_iter, color_a=pen_a, color_b=pen_b))
 
     return calendar.Display(
         renderer=calendar.Renderer(
@@ -128,7 +122,7 @@ def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeS
                 now_line=palette.white,
             ),
         ),
-        streams=streams,
+        streams=windows,
         get_time=time_service.now,
     )
 

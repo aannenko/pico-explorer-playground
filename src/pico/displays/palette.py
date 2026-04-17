@@ -26,7 +26,6 @@ class Palette:
         green: int,
         orange: int,
         dark_gray: int,
-        stream_pens: list[tuple[int, int]],
     ) -> None:
         self.black = black
         self.gray = gray
@@ -34,14 +33,9 @@ class Palette:
         self.green = green
         self.orange = orange
         self.dark_gray = dark_gray
-        self.stream_pens = stream_pens
 
 
-def build_palette(gfx, stream_colors=None):  # gfx: PicoGraphics
-    colors = stream_colors if stream_colors is not None else DEFAULT_STREAM_COLORS
-    stream_pens: list[tuple[int, int]] = [
-        (gfx.create_pen(*a), gfx.create_pen(*b)) for a, b in colors
-    ]
+def build_palette(gfx):  # gfx: PicoGraphics
     return Palette(
         black=gfx.create_pen(0, 0, 0),
         gray=gfx.create_pen(190, 190, 190),
@@ -49,5 +43,4 @@ def build_palette(gfx, stream_colors=None):  # gfx: PicoGraphics
         green=gfx.create_pen(0, 255, 0),
         orange=gfx.create_pen(255, 165, 0),
         dark_gray=gfx.create_pen(40, 40, 40),
-        stream_pens=stream_pens,
     )
