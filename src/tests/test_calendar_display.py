@@ -1,36 +1,20 @@
 from __future__ import annotations
 
+import pytest
+
 import displays.calendar as calendar
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
+
+from conftest import RecordingRenderer
 
 
 # ---------------------------------------------------------------------------
 # Fakes / helpers
 # ---------------------------------------------------------------------------
 
-class FakeRenderer:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple, dict]] = []
-        self.update_count = 0
-
-    def reset(self) -> None:
-        self.calls.append(("reset", (), {}))
-
-    def header_write(self, text: str) -> None:
-        self.calls.append(("header_write", (text,), {}))
-
-    def draw_rows(self, streams, window_start, window_end) -> None:
-        self.calls.append(("draw_rows", (streams, window_start, window_end), {}))
-
-    def draw_time_axis(self, window_start, window_end) -> None:
-        self.calls.append(("draw_time_axis", (window_start, window_end), {}))
-
-    def draw_static_overlay(self) -> None:
-        self.calls.append(("draw_static_overlay", (), {}))
-
-    def update(self) -> None:
-        self.update_count += 1
+class FakeRenderer(RecordingRenderer):
+    pass
 
 
 def _make_event(name: str, start: int, duration: int) -> Event:
@@ -45,23 +29,31 @@ def _make_stream(*specs, color_a: int = 1, color_b: int = 2) -> EventWindow:
     )
 
 
+def _mk_display(streams=None, now: int = 0):
+    """Build a calendar.Display with a FakeRenderer and a fixed-now clock."""
+    renderer = FakeRenderer()
+    d = calendar.Display(
+        renderer=renderer,
+        streams=streams if streams is not None else [],
+        get_time=lambda: now,
+    )
+    return d, renderer
+
+
+@pytest.fixture(autouse=True)
+def _patch_header(monkeypatch):
+    """Patch `format_header_time` to a deterministic stand-in for every test."""
+    monkeypatch.setattr(calendar, "format_header_time", lambda t: f"HDR:{t}")
+
+
 # ---------------------------------------------------------------------------
 # Display lifecycle
 # ---------------------------------------------------------------------------
 
 class TestDisplayLifecycle:
-    def test_initialize_renders_and_calls_update(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: f"HDR:{t}")
-
+    def test_initialize_renders_and_calls_update(self):
         stream = _make_stream(("work", 0, 100_000))
-        now_val = 50_000
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[stream],
-            get_time=lambda: now_val,
-        )
+        d, renderer = _mk_display(streams=[stream], now=50_000)
 
         d.initialize()
 
@@ -73,51 +65,30 @@ class TestDisplayLifecycle:
         assert "draw_rows" in call_names
         assert "draw_time_axis" in call_names
         assert "draw_now_line" not in call_names
-        assert renderer.update_count == 1
+        assert renderer.update_calls == 1
 
-    def test_initialize_is_idempotent(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: 0,
-        )
+    def test_initialize_is_idempotent(self):
+        d, renderer = _mk_display()
 
         d.initialize()
         renderer.calls.clear()
-        renderer.update_count = 0
+        renderer.update_calls = 0
 
         d.initialize()
 
         assert renderer.calls == []
-        assert renderer.update_count == 0
+        assert renderer.update_calls == 0
 
-    def test_deinitialize_sets_inactive(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: 0,
-        )
+    def test_deinitialize_sets_inactive(self):
+        d, _ = _mk_display()
 
         d.initialize()
         d.deinitialize()
 
         assert d._active is False
 
-    def test_deinitialize_is_idempotent(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: 0,
-        )
+    def test_deinitialize_is_idempotent(self):
+        d, _ = _mk_display()
 
         d.deinitialize()
         assert d._active is False
@@ -128,24 +99,17 @@ class TestDisplayLifecycle:
 # ---------------------------------------------------------------------------
 
 class TestRender:
-    def test_render_redraws(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: 100_000,
-        )
+    def test_render_redraws(self):
+        d, renderer = _mk_display(now=100_000)
 
         d.initialize()
         renderer.calls.clear()
-        renderer.update_count = 0
+        renderer.update_calls = 0
 
         d.render()
 
-        assert renderer.update_count == 1
-        assert ("header_write", ("HDR",), {}) in renderer.calls
+        assert renderer.update_calls == 1
+        assert ("header_write", ("HDR:100000",), {}) in renderer.calls
 
 
 # ---------------------------------------------------------------------------
@@ -153,15 +117,11 @@ class TestRender:
 # ---------------------------------------------------------------------------
 
 class TestWindowCalculation:
-    def test_window_passes_correct_range(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
+    def test_window_passes_correct_range(self):
         now_val = 100_000
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
+        d, renderer = _mk_display(
             streams=[_make_stream(("work", 0, 200_000))],
-            get_time=lambda: now_val,
+            now=now_val,
         )
 
         d.initialize()
@@ -187,12 +147,7 @@ class TestHeaderFormatting:
         )
 
         now_val = 42_000
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: now_val,
-        )
+        d, renderer = _mk_display(now=now_val)
 
         d.initialize()
 
@@ -325,8 +280,8 @@ class TestRemainingTime:
 
         renderer.draw_rows([stream], window_start, window_end)
 
-        # Should find a text call with the remaining time format
-        remaining = (now - 600 + ev_duration) - now  # 3h - 10min = 2h50m
+        # Should find a text call with the remaining time format.
+        # Event started 10 min ago, lasts 3 h → remaining = 2 h 50 min.
         expected_text = "-02:50"
         rem_texts = [t for t, *_ in gfx.text_calls if t == expected_text]
         assert len(rem_texts) == 1

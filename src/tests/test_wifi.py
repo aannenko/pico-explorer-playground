@@ -8,6 +8,8 @@ from network import STAT_GOT_IP, STAT_WRONG_PASSWORD, STAT_CONNECTING, STAT_NO_A
 from services import wifi_client
 from services.wifi_client import WifiClient
 
+from conftest import FakeTimer
+
 
 class FakeWLAN:
     """Configurable WLAN stub for wifi state machine tests."""
@@ -43,25 +45,6 @@ class FakeWLAN:
         self._disconnect_calls += 1
 
 
-class FakeTimer:
-    """Timer stub that tracks init/deinit calls."""
-    ONE_SHOT = 0
-    PERIODIC = 1
-
-    def __init__(self, _id=-1):
-        self.init_called = False
-        self.deinit_called = False
-        self._callback = None
-
-    def init(self, **kwargs):
-        self.init_called = True
-        self.deinit_called = False
-        self._callback = kwargs.get("callback")
-
-    def deinit(self):
-        self.deinit_called = True
-
-
 @pytest.fixture()
 def fake_wlan(monkeypatch):
     """Provide a FakeWLAN and patch the network.WLAN constructor."""
@@ -72,7 +55,7 @@ def fake_wlan(monkeypatch):
 
 @pytest.fixture()
 def fake_timer(monkeypatch):
-    """Provide a FakeTimer and patch machine.Timer."""
+    """Single FakeTimer instance patched in as services.wifi_client.Timer."""
     timer = FakeTimer()
 
     def timer_factory(_id=-1):
@@ -90,30 +73,35 @@ def wifi():
     return WifiClient()
 
 
+@pytest.fixture()
+def started_wifi(wifi, fake_wlan, fake_timer, fake_ticks):
+    """Wifi already in CONNECTING state with standard (SSID, password) used."""
+    wifi.start_connect("MySSID", "pass")
+    return wifi, fake_wlan, fake_timer, fake_ticks
+
+
 # --- start_connect() ---
 
-def test_start_connect_transitions_to_connecting(wifi, fake_wlan, fake_timer):
-    wifi.start_connect("MySSID", "pass")
+def test_start_connect_transitions_to_connecting(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     assert wifi.state == wifi_client.CONNECTING
     assert fake_wlan._connect_calls == [("MySSID", "pass")]
 
 
-def test_start_connect_starts_timer(wifi, fake_wlan, fake_timer):
-    wifi.start_connect("MySSID", "pass")
+def test_start_connect_starts_timer(started_wifi):
+    _, _, fake_timer, _ = started_wifi
     assert fake_timer.init_called
 
 
-def test_start_connect_idempotent_when_connecting(wifi, fake_wlan, fake_timer):
-    wifi.start_connect("MySSID", "pass")
+def test_start_connect_idempotent_when_connecting(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     connect_count = len(fake_wlan._connect_calls)
     wifi.start_connect("MySSID", "pass")
     assert len(fake_wlan._connect_calls) == connect_count
 
 
-def test_start_connect_resets_from_connected(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_start_connect_resets_from_connected(started_wifi):
+    wifi, fake_wlan, _, _ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     wifi._tick(wifi._generation)  # → CONNECTED
     assert wifi.state == wifi_client.CONNECTED
@@ -122,7 +110,7 @@ def test_start_connect_resets_from_connected(wifi, fake_wlan, fake_timer, monkey
     assert wifi.state == wifi_client.CONNECTING
 
 
-def test_start_connect_resets_from_failed(wifi, fake_wlan, fake_timer):
+def test_start_connect_resets_from_failed(wifi, fake_wlan, fake_timer, fake_ticks):
     wifi.start_connect("", "pass")  # FAILED (empty ssid)
     assert wifi.state == wifi_client.FAILED
 
@@ -130,7 +118,7 @@ def test_start_connect_resets_from_failed(wifi, fake_wlan, fake_timer):
     assert wifi.state == wifi_client.CONNECTING
 
 
-def test_start_connect_empty_ssid_fails(wifi, fake_wlan, fake_timer):
+def test_start_connect_empty_ssid_fails(wifi, fake_wlan, fake_timer, fake_ticks):
     wifi.start_connect("", "pass")
     assert wifi.state == wifi_client.FAILED
     assert not fake_timer.init_called
@@ -138,29 +126,23 @@ def test_start_connect_empty_ssid_fails(wifi, fake_wlan, fake_timer):
 
 # --- _tick() transitions ---
 
-def test_tick_connecting_to_connected(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_connecting_to_connected(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     wifi._tick(wifi._generation)
     assert wifi.state == wifi_client.CONNECTED
 
 
-def test_tick_connecting_wrong_password(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_connecting_wrong_password(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_WRONG_PASSWORD
     wifi._tick(wifi._generation)
     assert wifi.state == wifi_client.FAILED
     assert fake_wlan._disconnect_calls >= 1
 
 
-def test_tick_connecting_stays_connecting(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_connecting_stays_connecting(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_CONNECTING
     wifi._tick(wifi._generation)
     assert wifi.state == wifi_client.CONNECTING
@@ -168,11 +150,8 @@ def test_tick_connecting_stays_connecting(wifi, fake_wlan, fake_timer, monkeypat
 
 # --- _tick() retry on transient failure ---
 
-def test_tick_retry_on_no_ap_found(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_retry_on_no_ap_found(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
     fake_wlan._status_value = STAT_NO_AP_FOUND
@@ -180,11 +159,8 @@ def test_tick_retry_on_no_ap_found(wifi, fake_wlan, fake_timer, monkeypatch):
     assert len(fake_wlan._connect_calls) == connect_count + 1
 
 
-def test_tick_retry_on_connect_fail(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_retry_on_connect_fail(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
     fake_wlan._status_value = STAT_CONNECT_FAIL
@@ -192,12 +168,8 @@ def test_tick_retry_on_connect_fail(wifi, fake_wlan, fake_timer, monkeypatch):
     assert len(fake_wlan._connect_calls) == connect_count + 1
 
 
-def test_tick_retry_on_attempt_ttl_exceeded(wifi, fake_wlan, fake_timer, monkeypatch):
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_retry_on_attempt_ttl_exceeded(started_wifi):
+    wifi, fake_wlan, _, ticks = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
     fake_wlan._status_value = STAT_CONNECTING
@@ -207,13 +179,9 @@ def test_tick_retry_on_attempt_ttl_exceeded(wifi, fake_wlan, fake_timer, monkeyp
     assert len(fake_wlan._connect_calls) == connect_count + 1
 
 
-def test_tick_retry_on_unknown_status(wifi, fake_wlan, fake_timer, monkeypatch):
+def test_tick_retry_on_unknown_status(started_wifi):
     """Unknown WLAN status (e.g. STAT_IDLE=0) triggers retry after TTL."""
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+    wifi, fake_wlan, _, ticks = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
     fake_wlan._status_value = 0  # STAT_IDLE / CYW43_LINK_DOWN
@@ -228,12 +196,8 @@ def test_tick_retry_on_unknown_status(wifi, fake_wlan, fake_timer, monkeypatch):
 
 # --- Cooldown pacing ---
 
-def test_tick_cooldown_is_noop(wifi, fake_wlan, fake_timer, monkeypatch):
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_cooldown_is_noop(started_wifi):
+    wifi, fake_wlan, _, ticks = started_wifi
 
     fake_wlan._status_value = STAT_NO_AP_FOUND
     wifi._tick(wifi._generation)
@@ -245,12 +209,8 @@ def test_tick_cooldown_is_noop(wifi, fake_wlan, fake_timer, monkeypatch):
     assert len(fake_wlan._connect_calls) == connect_count
 
 
-def test_tick_after_cooldown_elapses(wifi, fake_wlan, fake_timer, monkeypatch):
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_after_cooldown_elapses(started_wifi):
+    wifi, fake_wlan, _, ticks = started_wifi
 
     fake_wlan._status_value = STAT_NO_AP_FOUND
     wifi._tick(wifi._generation)
@@ -263,19 +223,15 @@ def test_tick_after_cooldown_elapses(wifi, fake_wlan, fake_timer, monkeypatch):
 
 # --- Timer stop on terminal state ---
 
-def test_tick_stops_timer_on_connected(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_stops_timer_on_connected(started_wifi):
+    wifi, fake_wlan, fake_timer, _ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     wifi._tick(wifi._generation)
     assert fake_timer.deinit_called
 
 
-def test_tick_stops_timer_on_failed(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_stops_timer_on_failed(started_wifi):
+    wifi, fake_wlan, fake_timer, _ = started_wifi
     fake_wlan._status_value = STAT_WRONG_PASSWORD
     wifi._tick(wifi._generation)
     assert fake_timer.deinit_called
@@ -283,10 +239,8 @@ def test_tick_stops_timer_on_failed(wifi, fake_wlan, fake_timer, monkeypatch):
 
 # --- Generation counter ---
 
-def test_tick_stale_generation_ignored(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_tick_stale_generation_ignored(started_wifi):
+    wifi, *_ = started_wifi
     stale_gen = wifi._generation
 
     wifi.reset()
@@ -298,11 +252,7 @@ def test_tick_stale_generation_ignored(wifi, fake_wlan, fake_timer, monkeypatch)
 
 # --- connect() blocking ---
 
-def test_connect_success(wifi, fake_wlan, monkeypatch):
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
+def test_connect_success(wifi, fake_wlan, fake_ticks, monkeypatch):
     monkeypatch.setattr(time, "sleep_ms", lambda _: None)
 
     call_count = [0]
@@ -319,10 +269,7 @@ def test_connect_success(wifi, fake_wlan, monkeypatch):
     assert result == wifi_client.CONNECTED
 
 
-def test_connect_failure(wifi, fake_wlan, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
+def test_connect_failure(wifi, fake_wlan, fake_ticks, monkeypatch):
     monkeypatch.setattr(time, "sleep_ms", lambda _: None)
 
     fake_wlan._status_value = STAT_WRONG_PASSWORD
@@ -330,14 +277,9 @@ def test_connect_failure(wifi, fake_wlan, monkeypatch):
     assert result == wifi_client.FAILED
 
 
-def test_connect_timeout(wifi, fake_wlan, monkeypatch):
-    ticks = [0]
-    monkeypatch.setattr(time, "ticks_ms", lambda: ticks[0])
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    monkeypatch.setattr(time, "ticks_add", lambda a, b: a + b)
-
+def test_connect_timeout(wifi, fake_wlan, fake_ticks, monkeypatch):
     def fake_sleep_ms(_):
-        ticks[0] += 500_000
+        fake_ticks[0] += 500_000
 
     monkeypatch.setattr(time, "sleep_ms", fake_sleep_ms)
 
@@ -354,23 +296,21 @@ def test_connect_empty_ssid(wifi):
 
 # --- reset() ---
 
-def test_reset_stops_timer(wifi, fake_wlan, fake_timer):
-    wifi.start_connect("MySSID", "pass")
+def test_reset_stops_timer(started_wifi):
+    wifi, _, fake_timer, _ = started_wifi
     wifi.reset()
     assert fake_timer.deinit_called
 
 
-def test_reset_from_connecting(wifi, fake_wlan, fake_timer):
-    wifi.start_connect("MySSID", "pass")
+def test_reset_from_connecting(started_wifi):
+    wifi, *_ = started_wifi
     assert wifi.state == wifi_client.CONNECTING
     wifi.reset()
     assert wifi.state == wifi_client.IDLE
 
 
-def test_reset_from_connected(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_reset_from_connected(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     wifi._tick(wifi._generation)
     wifi.reset()
@@ -379,10 +319,8 @@ def test_reset_from_connected(wifi, fake_wlan, fake_timer, monkeypatch):
 
 # --- is_connected() ---
 
-def test_is_connected_true(wifi, fake_wlan, fake_timer, monkeypatch):
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+def test_is_connected_true(started_wifi):
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     fake_wlan._connected = True
     wifi._tick(wifi._generation)
@@ -393,11 +331,9 @@ def test_is_connected_false(wifi):
     assert wifi.is_connected() is False
 
 
-def test_is_connected_checks_hardware(wifi, fake_wlan, fake_timer, monkeypatch):
+def test_is_connected_checks_hardware(started_wifi):
     """is_connected() checks actual WLAN, not just state variable."""
-    monkeypatch.setattr(time, "ticks_ms", lambda: 0)
-    monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b)
-    wifi.start_connect("MySSID", "pass")
+    wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
     fake_wlan._connected = False
     wifi._tick(wifi._generation)

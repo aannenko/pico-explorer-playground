@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import machine
 
 from services.explorer_buzzer import ExplorerBuzzer
+
+from conftest import make_timer_factory
 
 
 class FakePin:
@@ -29,36 +29,8 @@ class FakePWM:
         return self._duty
 
 
-@dataclass
-class FakeTimer:
-    timer_id: int
-    init_calls: list[dict] = None  # type: ignore[assignment]
-    deinit_calls: int = 0
-
-    def __post_init__(self) -> None:
-        if self.init_calls is None:
-            self.init_calls = []
-
-    def init(self, **kwargs) -> None:
-        self.init_calls.append(dict(kwargs))
-
-    def deinit(self) -> None:
-        self.deinit_calls += 1
-
-
-def _mk_timer_factory():
-    created: list[FakeTimer] = []
-
-    def factory(timer_id: int) -> FakeTimer:
-        t = FakeTimer(timer_id)
-        created.append(t)
-        return t
-
-    return factory, created
-
-
 def _mk_buzzer():
-    timer_factory, timers = _mk_timer_factory()
+    timer_factory, timers = make_timer_factory()
     buzzer = ExplorerBuzzer(
         pin_id=0,
         pwm_factory=FakePWM,
@@ -203,7 +175,7 @@ def test_schedule_wrapper_forwards_generation() -> None:
     def schedule(fn, arg):
         scheduled.append((fn, arg))
 
-    timer_factory, _ = _mk_timer_factory()
+    timer_factory, _ = make_timer_factory()
     buzzer = ExplorerBuzzer(
         pin_id=0,
         pwm_factory=FakePWM,

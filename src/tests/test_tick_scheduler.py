@@ -2,26 +2,11 @@ from __future__ import annotations
 
 from services.tick_scheduler import TickScheduler
 
-
-class FakeTimer:
-    def __init__(self, timer_id: int) -> None:
-        self.init_calls: list[dict] = []
-        self.deinit_calls: int = 0
-
-    def init(self, **kwargs) -> None:
-        self.init_calls.append(dict(kwargs))
-
-    def deinit(self) -> None:
-        self.deinit_calls += 1
+from conftest import make_timer_factory
 
 
 def _mk_scheduler(**overrides):
-    timer_factory_created: list[FakeTimer] = []
-
-    def timer_factory(tid):
-        t = FakeTimer(tid)
-        timer_factory_created.append(t)
-        return t
+    timer_factory, timer_factory_created = make_timer_factory()
 
     scheduled: list[tuple] = []
     defaults = dict(

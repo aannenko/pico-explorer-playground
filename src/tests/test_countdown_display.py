@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from displays.countdown import Display, DURATIONS, LABELS
+from displays.countdown import Display, DURATIONS
 from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from services.countdown_timer import (
     CountdownTimer,
@@ -10,11 +10,14 @@ from services.countdown_timer import (
     DONE,
 )
 
+from conftest import RecordingRenderer
 
-class FakeRenderer:
+
+class FakeRenderer(RecordingRenderer):
+    """Recording renderer with countdown-specific segment tracking."""
+
     def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple, dict]] = []
-        self.update_calls = 0
+        super().__init__()
         self.segments_cleared = 0
 
     def reset(self) -> None:
@@ -25,12 +28,6 @@ class FakeRenderer:
         self.calls.append(("ring_clear_segments", (count,), {}))
         if count > self.segments_cleared:
             self.segments_cleared = count
-
-    def text_write(self, position: int, text: str) -> None:
-        self.calls.append(("text_write", (position, text), {}))
-
-    def update(self) -> None:
-        self.update_calls += 1
 
 
 def _mk_display(now=1000):

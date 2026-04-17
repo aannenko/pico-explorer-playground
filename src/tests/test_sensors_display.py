@@ -4,31 +4,16 @@ import time
 
 import displays.sensors as sensors
 
+from conftest import RecordingRenderer
+
 
 class _FakeTime:
     def __init__(self, fn):
         self.now = fn
 
 
-class FakeRenderer:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple, dict]] = []
-        self.update_calls = 0
-
-    def reset(self) -> None:
-        self.calls.append(("reset", (), {}))
-
-    def header_write(self, text: str) -> None:
-        self.calls.append(("header_write", (text,), {}))
-
-    def value_write(self, line_idx: int, text: str) -> None:
-        self.calls.append(("value_write", (line_idx, text), {}))
-
-    def secondary_write(self, line_idx: int, text: str) -> None:
-        self.calls.append(("secondary_write", (line_idx, text), {}))
-
-    def update(self) -> None:
-        self.update_calls += 1
+class FakeRenderer(RecordingRenderer):
+    pass
 
 
 class FakeBME690Reader:

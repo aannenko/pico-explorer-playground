@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 import services.pimoroni_bme690 as pimoroni_bme690
+
+from conftest import FakeTimer, make_timer_factory
 
 
 class FakeI2C:
@@ -26,18 +30,7 @@ class FakeBreakoutBME69X:
         return (temp, press, hum, gas_r, status, 123, 456)
 
 
-class FakeTimer:
-    def __init__(self, _timer_id: int = -1) -> None:
-        self.init_calls: list[dict] = []
-        self.deinit_calls: int = 0
-
-    def init(self, **kwargs) -> None:
-        self.init_calls.append(dict(kwargs))
-
-    def deinit(self) -> None:
-        self.deinit_calls += 1
-
-
+@pytest.fixture(autouse=True)
 def _patch_driver(monkeypatch) -> None:
     monkeypatch.setattr(pimoroni_bme690, "PimoroniI2C", FakeI2C)
     monkeypatch.setattr(pimoroni_bme690, "PICO_EXPLORER_I2C_PINS", {"sda": 4, "scl": 5})
@@ -49,9 +42,7 @@ def _patch_driver(monkeypatch) -> None:
     monkeypatch.setattr(pimoroni_bme690, "OVERSAMPLING_1X", 1)
 
 
-def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> None:
-    _patch_driver(monkeypatch)
-
+def test_read_applies_offsets_converts_units_and_stable_status() -> None:
     FakeBreakoutBME69X.next_reading = (
         20.0,  # C
         100_000.0,  # Pa
@@ -74,9 +65,7 @@ def test_read_applies_offsets_converts_units_and_stable_status(monkeypatch) -> N
     assert heater == "Stable"
 
 
-def test_read_maps_unstable_status(monkeypatch) -> None:
-    _patch_driver(monkeypatch)
-
+def test_read_maps_unstable_status() -> None:
     FakeBreakoutBME69X.next_reading = (
         0.0,
         101_325.0,
@@ -94,16 +83,10 @@ def test_read_maps_unstable_status(monkeypatch) -> None:
     assert heater == "Unstable"
 
 
-def test_init_starts_periodic_timer_at_configured_interval(monkeypatch) -> None:
-    _patch_driver(monkeypatch)
+def test_init_starts_periodic_timer_at_configured_interval() -> None:
     FakeBreakoutBME69X.next_reading = (0.0, 0.0, 0.0, 0.0, 0)
 
-    timers: list[FakeTimer] = []
-
-    def timer_factory(tid: int) -> FakeTimer:
-        t = FakeTimer(tid)
-        timers.append(t)
-        return t
+    timer_factory, timers = make_timer_factory()
 
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
@@ -122,8 +105,7 @@ def test_init_starts_periodic_timer_at_configured_interval(monkeypatch) -> None:
     assert reader._bme.read_count == 1
 
 
-def test_timer_callback_schedules_read_and_guards_reentry(monkeypatch) -> None:
-    _patch_driver(monkeypatch)
+def test_timer_callback_schedules_read_and_guards_reentry() -> None:
     FakeBreakoutBME69X.next_reading = (10.0, 100_000.0, 40.0, 1_000.0, 0)
 
     scheduled: list[tuple] = []
@@ -154,8 +136,7 @@ def test_timer_callback_schedules_read_and_guards_reentry(monkeypatch) -> None:
     assert len(scheduled) == 2
 
 
-def test_timer_callback_clears_pending_if_schedule_raises(monkeypatch) -> None:
-    _patch_driver(monkeypatch)
+def test_timer_callback_clears_pending_if_schedule_raises() -> None:
     FakeBreakoutBME69X.next_reading = (0.0, 0.0, 0.0, 0.0, 0)
 
     def raising_schedule(_fn, _arg):

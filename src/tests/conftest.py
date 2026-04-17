@@ -1,8 +1,11 @@
 import builtins
+import calendar as _calendar_mod
 import sys
 import time as _time
 import types
 from pathlib import Path
+
+import pytest
 
 PICO_SRC = Path(__file__).resolve().parent.parent / "pico"
 if str(PICO_SRC) not in sys.path:
@@ -27,9 +30,8 @@ if not hasattr(_time, "sleep_ms"):
 # MicroPython's time.mktime() accepts an 8-tuple and treats it as UTC.
 # CPython's time.mktime() accepts a 9-tuple and applies local timezone.
 # Stub to match MicroPython behavior for cross-platform tests.
-import calendar as _calendar  # noqa: E402
 _original_mktime = _time.mktime
-_time.mktime = lambda t: int(_calendar.timegm(t[:6]))  # type: ignore[assignment]
+_time.mktime = lambda t: int(_calendar_mod.timegm(t[:6]))  # type: ignore[assignment]
 
 # MicroPython's time.gmtime() returns an 8-tuple (no tm_isdst).
 # CPython's returns a 9-element struct_time.
@@ -187,3 +189,102 @@ if "network" not in sys.modules:
     network_stub.STAT_NO_AP_FOUND = 2
     network_stub.STAT_CONNECT_FAIL = 5
     sys.modules["network"] = network_stub
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Shared test helpers (available to every test module).
+# ─────────────────────────────────────────────────────────────────────
+
+
+class FakeTimer:
+    """Canonical Timer stub — tracks init/deinit calls.
+
+    Exposes both list/count attrs (``init_calls`` / ``deinit_calls``)
+    and boolean property aliases (``init_called`` / ``deinit_called``).
+    """
+    ONE_SHOT = 0
+    PERIODIC = 1
+
+    def __init__(self, timer_id: int = -1) -> None:
+        self.timer_id = timer_id
+        self.init_calls: list[dict] = []
+        self.deinit_calls: int = 0
+
+    def init(self, **kwargs) -> None:
+        self.init_calls.append(dict(kwargs))
+
+    def deinit(self) -> None:
+        self.deinit_calls += 1
+
+    @property
+    def init_called(self) -> bool:
+        return bool(self.init_calls)
+
+    @property
+    def deinit_called(self) -> bool:
+        return self.deinit_calls > 0
+
+
+def make_timer_factory():
+    """Return ``(factory, created)`` where ``factory(tid) -> FakeTimer`` and
+    ``created`` is a list of every FakeTimer the factory has produced."""
+    created: list[FakeTimer] = []
+
+    def factory(timer_id: int = -1) -> FakeTimer:
+        t = FakeTimer(timer_id)
+        created.append(t)
+        return t
+
+    factory.ONE_SHOT = FakeTimer.ONE_SHOT  # type: ignore[attr-defined]
+    factory.PERIODIC = FakeTimer.PERIODIC  # type: ignore[attr-defined]
+    return factory, created
+
+
+@pytest.fixture
+def fake_ticks(monkeypatch):
+    """Patch ``time.ticks_ms/diff/add`` to use a controllable counter.
+
+    Returns a one-element list; mutate ``ticks[0]`` to advance the clock.
+    """
+    ticks = [0]
+    monkeypatch.setattr(_time, "ticks_ms", lambda: ticks[0])
+    monkeypatch.setattr(_time, "ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(_time, "ticks_add", lambda a, b: a + b)
+    return ticks
+
+
+class RecordingRenderer:
+    """Generic call-recording renderer for display tests.
+
+    Unknown methods are auto-recorded as ``(name, args, kwargs)`` in
+    ``self.calls``. ``update()`` is explicit and increments
+    ``self.update_calls``.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, dict]] = []
+        self.update_calls: int = 0
+
+    def update(self) -> None:
+        self.update_calls += 1
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def recorder(*args, **kwargs) -> None:
+            self.calls.append((name, args, kwargs))
+
+        return recorder
+
+
+# DST test constants — shared between test_time_service and test_event_factory.
+CET_OFFSET = 1
+CEST_EXTRA = 1
+DST_START = (3, -1, 6, 2)   # Last Sun of Mar at 02:00 CET
+DST_END = (10, -1, 6, 3)    # Last Sun of Oct at 03:00 CEST
+
+
+def utc_epoch(*args) -> int:
+    """Helper: calendar-style args → UTC epoch (matches conftest mktime stub)."""
+    return int(_calendar_mod.timegm(args))

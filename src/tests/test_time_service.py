@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import calendar
-import time as _time
-
 import pytest
 
 from services.time_service import (
@@ -16,10 +13,13 @@ from services.time_service import (
     _weekday,
 )
 
-
-def _utc_epoch(*args) -> int:
-    """Helper: calendar-style args → UTC epoch (matches conftest mktime stub)."""
-    return int(calendar.timegm(args))
+from conftest import (
+    CEST_EXTRA as _CEST_EXTRA,
+    CET_OFFSET as _CET_OFFSET,
+    DST_END as _DST_END,
+    DST_START as _DST_START,
+    utc_epoch as _utc_epoch,
+)
 
 
 # ── _is_leap ─────────────────────────────────────────────────────────
@@ -123,12 +123,6 @@ def test_cest_dst_end_2026():
 
 
 # ── _is_dst ──────────────────────────────────────────────────────────
-
-
-_CET_OFFSET = 1
-_CEST_EXTRA = 1
-_DST_START = (3, -1, 6, 2)   # Last Sun of Mar at 02:00 CET
-_DST_END = (10, -1, 6, 3)    # Last Sun of Oct at 03:00 CEST
 
 
 def test_is_dst_winter():

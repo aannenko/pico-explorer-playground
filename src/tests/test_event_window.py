@@ -1,5 +1,3 @@
-import pytest
-
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
 

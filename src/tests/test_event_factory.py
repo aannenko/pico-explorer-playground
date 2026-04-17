@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-import calendar
 import time
 
 import pytest
 
 from scheduling import event_factory
 
-
-def _utc_epoch(*args) -> int:
-    """Helper: calendar-style args → UTC epoch (matches conftest mktime stub)."""
-    return int(calendar.timegm(args))
-
+from conftest import (
+    DST_END as _DST_END,
+    DST_START as _DST_START,
+    utc_epoch as _utc_epoch,
+)
 
 _CET_OFFSET = 1
 _CEST_EXTRA = 1
-_DST_START = (3, -1, 6, 2)   # Last Sun of Mar at 02:00 CET
-_DST_END = (10, -1, 6, 3)    # Last Sun of Oct at 03:00 CEST
 _WORK_DAYS = {0, 1, 2, 3, 4}
 
 
