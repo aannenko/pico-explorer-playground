@@ -3,12 +3,6 @@ from __future__ import annotations
 import displays.sensors as sensors
 
 
-class FakeColors:
-    def __init__(self, value_text: int, secondary_text: int) -> None:
-        self.value_text = value_text
-        self.secondary_text = secondary_text
-
-
 class _FakeTime:
     def __init__(self, fn):
         self.now = fn
@@ -18,7 +12,6 @@ class FakeRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
         self.update_calls = 0
-        self._colors = FakeColors(value_text=11, secondary_text=22)
 
     def reset(self) -> None:
         self.calls.append(("reset", (), {}))
@@ -26,8 +19,11 @@ class FakeRenderer:
     def header_write(self, text: str) -> None:
         self.calls.append(("header_write", (text,), {}))
 
-    def line_write(self, line_idx: int, text: str, *, pen: int) -> None:
-        self.calls.append(("line_write", (line_idx, text), {"pen": pen}))
+    def value_write(self, line_idx: int, text: str) -> None:
+        self.calls.append(("value_write", (line_idx, text), {}))
+
+    def secondary_write(self, line_idx: int, text: str) -> None:
+        self.calls.append(("secondary_write", (line_idx, text), {}))
 
     def update(self) -> None:
         self.update_calls += 1
@@ -61,11 +57,11 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     d._update_display()
 
     assert ("header_write", ("'26-01-04 13:05",), {}) in renderer.calls
-    assert ("line_write", (0, "Temp: 22.4 C"), {"pen": 11}) in renderer.calls
-    assert ("line_write", (1, "Prsr: 963 mb"), {"pen": 22}) in renderer.calls
-    assert ("line_write", (2, "Hum: 25.70 %"), {"pen": 22}) in renderer.calls
-    assert ("line_write", (3, "GasR: 65.7 kOhm"), {"pen": 22}) in renderer.calls
-    assert ("line_write", (4, "Stat: Stable"), {"pen": 22}) in renderer.calls
+    assert ("value_write", (0, "Temp: 22.4 C"), {}) in renderer.calls
+    assert ("secondary_write", (1, "Prsr: 963 mb"), {}) in renderer.calls
+    assert ("secondary_write", (2, "Hum: 25.70 %"), {}) in renderer.calls
+    assert ("secondary_write", (3, "GasR: 65.7 kOhm"), {}) in renderer.calls
+    assert ("secondary_write", (4, "Stat: Stable"), {}) in renderer.calls
     assert renderer.update_calls == 1
 
 

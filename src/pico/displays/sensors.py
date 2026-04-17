@@ -104,6 +104,14 @@ class Renderer:
 
         self._last_lines[line_idx] = text
 
+    def value_write(self, line_idx: int, text: str) -> None:
+        """Write a primary-value line (e.g. temperature) in the value-text color."""
+        self.line_write(line_idx, text, pen=self._colors.value_text)
+
+    def secondary_write(self, line_idx: int, text: str) -> None:
+        """Write a secondary-value line in the subdued secondary-text color."""
+        self.line_write(line_idx, text, pen=self._colors.secondary_text)
+
     def update(self) -> None:
         self._gfx.update()
 
@@ -125,11 +133,11 @@ class Display(_Display):
         self._renderer.header_write(format_header_time(self._time_service.now()))
 
         temp, press, hum, gas_r, status = self._bme690_reader.read()
-        self._renderer.line_write(0, f"Temp: {temp:0.1f} C", pen=self._renderer._colors.value_text)
-        self._renderer.line_write(1, f"Prsr: {press:0.0f} mb", pen=self._renderer._colors.secondary_text)
-        self._renderer.line_write(2, f"Hum: {hum:0.2f} %", pen=self._renderer._colors.secondary_text)
-        self._renderer.line_write(3, f"GasR: {gas_r:0.1f} kOhm", pen=self._renderer._colors.secondary_text)
-        self._renderer.line_write(4, f"Stat: {status}", pen=self._renderer._colors.secondary_text)
+        self._renderer.value_write(0, f"Temp: {temp:0.1f} C")
+        self._renderer.secondary_write(1, f"Prsr: {press:0.0f} mb")
+        self._renderer.secondary_write(2, f"Hum: {hum:0.2f} %")
+        self._renderer.secondary_write(3, f"GasR: {gas_r:0.1f} kOhm")
+        self._renderer.secondary_write(4, f"Stat: {status}")
 
         self._renderer.update()
 
