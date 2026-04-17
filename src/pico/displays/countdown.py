@@ -2,6 +2,7 @@ import micropython
 import time
 
 from micropython import const
+from displays.base import Display as _Display
 from displays.ring import (
     Renderer,
     RING_SEGMENTS,
@@ -44,7 +45,7 @@ def _fmt_time(sec: int) -> str:
     return f"{hours} h"
 
 
-class Display:
+class Display(_Display):
     def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
         self._timer = countdown_timer

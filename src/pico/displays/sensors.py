@@ -1,6 +1,7 @@
 import micropython
 import time
 
+from displays.base import Display as _Display
 from displays.shared.header import format_header_time
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
@@ -107,7 +108,7 @@ class Renderer:
         self._gfx.update()
 
 
-class Display:
+class Display(_Display):
     def __init__(
         self,
         renderer: Renderer,

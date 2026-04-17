@@ -4,6 +4,7 @@ import time
 from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
+from displays.base import Display as _Display
 from displays.shared.header import format_header_time
 from scheduling.event_window import EventWindow
 
@@ -279,7 +280,7 @@ class Renderer:
         self._gfx.update()
 
 
-class Display:
+class Display(_Display):
     def __init__(
         self,
         renderer: Renderer,

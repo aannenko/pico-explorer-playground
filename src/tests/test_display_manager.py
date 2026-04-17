@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from displays.base import Display
 from displays.manager import DisplayManager
 
 
-class FakeDisplay:
+class FakeDisplay(Display):
     def __init__(self, name: str) -> None:
         self.name = name
         self.calls: list[str] = []
@@ -68,7 +69,7 @@ def test_single_display_cycles_to_itself() -> None:
 # ── button forwarding ─────────────────────────────────────────────────
 
 
-class FakeDisplayWithButtons:
+class FakeDisplayWithButtons(Display):
     def __init__(self, name: str) -> None:
         self.name = name
         self.calls: list[str] = []
@@ -113,7 +114,7 @@ def test_on_button_b_forwards_to_current_display() -> None:
 
 
 def test_on_button_a_ignored_for_display_without_handler() -> None:
-    d0 = FakeDisplay("d0")  # No on_button_a method
+    d0 = FakeDisplay("d0")  # No on_button_a override — base no-op
 
     mgr = DisplayManager(displays=[d0])
     mgr.initialize_current()
@@ -125,7 +126,7 @@ def test_on_button_a_ignored_for_display_without_handler() -> None:
 
 
 def test_on_button_b_ignored_for_display_without_handler() -> None:
-    d0 = FakeDisplay("d0")  # No on_button_b method
+    d0 = FakeDisplay("d0")  # No on_button_b override — base no-op
 
     mgr = DisplayManager(displays=[d0])
     mgr.initialize_current()
@@ -207,7 +208,7 @@ def test_tick_delegates_to_current_display_with_tick() -> None:
 
 
 def test_tick_ignored_for_display_without_tick() -> None:
-    d0 = FakeDisplay("d0")  # No tick method
+    d0 = FakeDisplay("d0")  # No tick override — base no-op
 
     mgr = DisplayManager(displays=[d0])
     mgr.initialize_current()
@@ -219,13 +220,13 @@ def test_tick_ignored_for_display_without_tick() -> None:
 
 
 def test_tick_follows_cycle() -> None:
-    d0 = FakeDisplay("d0")  # No tick
+    d0 = FakeDisplay("d0")  # No tick override
     d1 = FakeDisplayWithButtons("d1")  # Has tick
 
     mgr = DisplayManager(displays=[d0, d1])
     mgr.initialize_current()
 
-    mgr.tick()  # d0 has no tick — no-op
+    mgr.tick()  # d0 has no tick override — base no-op
     assert "tick" not in d0.calls
 
     mgr.next()  # switch to d1

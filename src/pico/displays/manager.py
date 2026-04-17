@@ -1,6 +1,9 @@
+from displays.base import Display
+
+
 class DisplayManager:
-    def __init__(self, displays: list) -> None:
-        self._displays: list = displays
+    def __init__(self, displays: list[Display]) -> None:
+        self._displays: list[Display] = displays
         self._current: int = 0
 
         # Refs compatible with micropython.schedule(callback, arg)
@@ -25,6 +28,9 @@ class DisplayManager:
         self._current = (self._current - 1) % len(self._displays)
         self.initialize_current()
 
+    def tick(self) -> None:
+        self._displays[self._current].tick()
+
     def _do_next(self, _: int) -> None:
         self.next()
 
@@ -32,17 +38,7 @@ class DisplayManager:
         self.previous()
 
     def _do_on_button_a(self, _: int) -> None:
-        display = self._displays[self._current]
-        if hasattr(display, 'on_button_a'):
-            display.on_button_a()
-
-    def tick(self) -> None:
-        display = self._displays[self._current]
-        tick_fn = getattr(display, 'tick', None)
-        if tick_fn is not None:
-            tick_fn()
+        self._displays[self._current].on_button_a()
 
     def _do_on_button_b(self, _: int) -> None:
-        display = self._displays[self._current]
-        if hasattr(display, 'on_button_b'):
-            display.on_button_b()
+        self._displays[self._current].on_button_b()
