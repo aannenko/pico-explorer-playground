@@ -1,7 +1,6 @@
 import micropython
-import time
 
-from displays.base import Display as _Display
+from displays.base import Display as _Display, RefreshGate
 from displays.shared.header import format_header_time
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
@@ -126,7 +125,7 @@ class Display(_Display):
         self._renderer = renderer
         self._time_service = time_service
         self._bme690_reader = bme690_reader
-        self._last_tick: int = 0
+        self._gate = RefreshGate(1000)
         self._active = False
 
     def _update_display(self) -> None:
@@ -142,17 +141,15 @@ class Display(_Display):
         self._renderer.update()
 
     def tick(self) -> None:
-        now = time.ticks_ms()
-        if time.ticks_diff(now, self._last_tick) < 1000:
+        if not self._gate.ready():
             return
-        self._last_tick = now
         self._update_display()
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
-        self._last_tick = time.ticks_ms()
+        self._gate.reset()
         self._renderer.reset()
         self._update_display()
 

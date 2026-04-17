@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import displays.sensors as sensors
 
 
@@ -42,7 +44,7 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
 
     # Make gmtime deterministic.
     monkeypatch.setattr(
-        sensors.time,
+        time,
         "gmtime",
         lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0),
     )
@@ -69,7 +71,7 @@ def test_initialize_renders_and_is_idempotent(monkeypatch) -> None:
     renderer = FakeRenderer()
 
     monkeypatch.setattr(
-        sensors.time,
+        time,
         "gmtime",
         lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0),
     )
@@ -98,7 +100,7 @@ def test_deinitialize_sets_inactive_and_is_idempotent(monkeypatch) -> None:
     renderer = FakeRenderer()
 
     monkeypatch.setattr(
-        sensors.time,
+        time,
         "gmtime",
         lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0),
     )

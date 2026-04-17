@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import displays.countdown as countdown_mod
+import displays.base as base_mod
 
 from displays.countdown import Display, DURATIONS, LABELS
 from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
@@ -242,8 +243,8 @@ def test_update_display_detects_done_state() -> None:
 
 def test_tick_updates_ring_segments_while_running(monkeypatch) -> None:
     tick_time = [0]
-    monkeypatch.setattr(countdown_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(countdown_mod.time, "ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
 
     d, engine, renderer, *_, clock = _mk_display(now=1000)
     d.initialize()
@@ -265,8 +266,8 @@ def test_tick_updates_ring_segments_while_running(monkeypatch) -> None:
 
 def test_tick_detects_done_state(monkeypatch) -> None:
     tick_time = [0]
-    monkeypatch.setattr(countdown_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(countdown_mod.time, "ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
 
     d, engine, renderer, *_, clock = _mk_display(now=1000)
     d.initialize()
@@ -287,8 +288,8 @@ def test_tick_detects_done_state(monkeypatch) -> None:
 
 def test_tick_skipped_within_1s_interval(monkeypatch) -> None:
     tick_time = [0]
-    monkeypatch.setattr(countdown_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(countdown_mod.time, "ticks_diff", lambda a, b: a - b)
+    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
+    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
 
     d, engine, renderer, *_, clock = _mk_display(now=1000)
     d.initialize()
