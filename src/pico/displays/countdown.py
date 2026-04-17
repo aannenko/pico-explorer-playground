@@ -53,7 +53,6 @@ class Display(_Display):
         self._duration_index: int = _DEFAULT_INDEX
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
-        self._segments_cleared: int = 0
         self._last_tick: int = 0
         self._active: bool = False
 
@@ -87,14 +86,12 @@ class Display(_Display):
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
     def _draw_idle(self) -> None:
-        self._segments_cleared = 0
         self._renderer.reset()
         self._renderer.text_write(TEXT_CENTER, self._timer.name)
         self._renderer.update()
 
     def _restore_ring_progress(self) -> None:
         """Reset renderer and restore ring progress from elapsed time."""
-        self._segments_cleared = 0
         self._renderer.reset()
         self._renderer.text_write(TEXT_CENTER, self._timer.name)
 
@@ -103,7 +100,6 @@ class Display(_Display):
         expected_cleared = timer.elapsed_sec * RING_SEGMENTS // total if total > 0 else 0
         if expected_cleared > 0:
             self._renderer.ring_clear_segments(expected_cleared)
-            self._segments_cleared = expected_cleared
 
     def _draw_running(self) -> None:
         self._restore_ring_progress()
@@ -121,7 +117,6 @@ class Display(_Display):
         self._renderer.update()
 
     def _draw_done(self) -> None:
-        self._segments_cleared = RING_SEGMENTS
         self._renderer.reset()
         self._renderer.ring_clear_segments(RING_SEGMENTS)
         self._renderer.text_write(TEXT_CENTER, self._timer.name)
@@ -133,7 +128,7 @@ class Display(_Display):
         timer = self._timer
         state = timer.state
         if state == DONE:
-            if self._segments_cleared < RING_SEGMENTS:
+            if self._renderer.segments_cleared < RING_SEGMENTS:
                 self._draw_done()
             return
         if state != RUNNING:
@@ -143,9 +138,8 @@ class Display(_Display):
         elapsed = timer.elapsed_sec
         if total > 0:
             expected = elapsed * RING_SEGMENTS // total
-            if expected > self._segments_cleared:
+            if expected > self._renderer.segments_cleared:
                 self._renderer.ring_clear_segments(expected)
-                self._segments_cleared = expected
 
         self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed))
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
@@ -178,4 +172,3 @@ class Display(_Display):
         if not self._active:
             return
         self._active = False
-        self._segments_cleared = 0

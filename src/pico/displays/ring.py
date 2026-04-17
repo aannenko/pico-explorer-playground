@@ -125,6 +125,10 @@ class Renderer:
         self._gfx.set_pen(self._colors.background)
         self._gfx.circle(self._geom.x_center, self._geom.y_center, self._geom.inner_circle_r)
 
+    @property
+    def segments_cleared(self) -> int:
+        return self._segments_cleared
+
     def ring_clear_segments(self, total_count: int) -> None:
         if total_count <= self._segments_cleared:
             return

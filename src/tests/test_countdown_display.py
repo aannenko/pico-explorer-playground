@@ -17,12 +17,16 @@ class FakeRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
         self.update_calls = 0
+        self.segments_cleared = 0
 
     def reset(self) -> None:
         self.calls.append(("reset", (), {}))
+        self.segments_cleared = 0
 
     def ring_clear_segments(self, count: int) -> None:
         self.calls.append(("ring_clear_segments", (count,), {}))
+        if count > self.segments_cleared:
+            self.segments_cleared = count
 
     def text_write(self, position: int, text: str) -> None:
         self.calls.append(("text_write", (position, text), {}))
@@ -79,7 +83,6 @@ def test_deinitialize_resets_state() -> None:
     d.deinitialize()
 
     assert d._active is False
-    assert d._segments_cleared == 0
 
 
 def test_deinitialize_is_idempotent() -> None:
@@ -87,11 +90,9 @@ def test_deinitialize_is_idempotent() -> None:
     d.initialize()
     d.deinitialize()
     active_after_first = d._active
-    segments_after_first = d._segments_cleared
 
     d.deinitialize()
     assert d._active == active_after_first
-    assert d._segments_cleared == segments_after_first
 
 
 # ── button B: cycle duration ───────────────────────────────────────────
@@ -405,7 +406,7 @@ def test_countdown_survives_display_switch() -> None:
     assert engine.state == RUNNING
 
     # Ring segments should be recalculated: 600 * 120 // 7200 = 10
-    assert d._segments_cleared == 10
+    assert renderer.segments_cleared == 10
     assert ("ring_clear_segments", (10,), {}) in renderer.calls
     assert ("text_write", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
     assert renderer.update_calls >= 1
@@ -448,7 +449,7 @@ def test_paused_survives_display_switch() -> None:
     d.initialize()  # Come back
 
     # Ring progress restored: 60 * 120 // 7200 = 1 segment
-    assert d._segments_cleared == 1
+    assert renderer.segments_cleared == 1
     assert ("ring_clear_segments", (1,), {}) in renderer.calls
     assert ("text_write", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
     # Remaining time shown
