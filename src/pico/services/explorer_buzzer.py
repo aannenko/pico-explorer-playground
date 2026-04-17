@@ -3,7 +3,7 @@ import micropython
 from machine import Pin, PWM, Timer
 from micropython import const
 
-_BUZZER_PIN = const(0)  # Pico Explorer piezo is on GP0
+from hardware.explorer import BUZZER_PIN
 # Note: You must bridge the pin you use over to the AUDIO pin
 # on the Pico Explorer header in order to drive the onboard Piezo.
 
@@ -15,7 +15,7 @@ _DEFAULT_ALERT_FREQ = const(1000)
 class ExplorerBuzzer:
     def __init__(
         self,
-        pin_id: int = _BUZZER_PIN,
+        pin_id: int = BUZZER_PIN,
         pwm_factory=PWM,
         pin_factory=Pin,
         schedule=micropython.schedule,

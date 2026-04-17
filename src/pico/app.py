@@ -14,6 +14,12 @@ from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
 from displays.palette import Palette, build_palette
 from displays.status import StatusDisplay
+from hardware.explorer import (
+    BUTTON_A_PIN,
+    BUTTON_B_PIN,
+    BUTTON_X_PIN,
+    BUTTON_Y_PIN,
+)
 from scheduling.event_window import EventWindow
 from scheduling.stream import Stream
 from services.button_poller import ButtonPoller
@@ -26,10 +32,6 @@ from services.time_service import TimeService
 
 
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
-_BUTTON_A_PIN = const(12)
-_BUTTON_B_PIN = const(13)
-_BUTTON_X_PIN = const(14)
-_BUTTON_Y_PIN = const(15)
 
 
 class App:
@@ -184,10 +186,10 @@ def build_app(pico_graphics, schedule_fn) -> App:
     tick_scheduler.register(display_manager.tick)
 
     button_poller = ButtonPoller(schedule=schedule_fn)
-    button_poller.add(Pin(_BUTTON_A_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_a_ref)
-    button_poller.add(Pin(_BUTTON_B_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_b_ref)
-    button_poller.add(Pin(_BUTTON_X_PIN, Pin.IN, Pin.PULL_UP), display_manager.previous_ref)
-    button_poller.add(Pin(_BUTTON_Y_PIN, Pin.IN, Pin.PULL_UP), display_manager.next_ref)
+    button_poller.add(Pin(BUTTON_A_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_a_ref)
+    button_poller.add(Pin(BUTTON_B_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_b_ref)
+    button_poller.add(Pin(BUTTON_X_PIN, Pin.IN, Pin.PULL_UP), display_manager.previous_ref)
+    button_poller.add(Pin(BUTTON_Y_PIN, Pin.IN, Pin.PULL_UP), display_manager.next_ref)
 
     return App(
         display_manager=display_manager,
