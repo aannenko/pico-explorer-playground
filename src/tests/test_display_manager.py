@@ -289,6 +289,26 @@ def test_button_b_press_resets_gate() -> None:
     assert "render" not in d0.calls
 
 
+def test_noop_button_press_does_not_reset_gate() -> None:
+    # FakeDisplay inherits the base no-op on_button_a/on_button_b; the
+    # manager should leave the cadence alone so stray presses don't
+    # delay the next redraw on views that don't handle buttons.
+    d0 = FakeDisplay("d0", refresh_period_ms=30)
+
+    mgr = _mgr(d0, scheduler_period_ms=10)
+    mgr.initialize_current()
+    d0.calls.clear()
+
+    mgr.tick()
+    mgr.tick()  # gate at 2/3
+
+    mgr._do_on_button_a(0)
+    mgr._do_on_button_b(0)
+
+    mgr.tick()  # gate was not reset → this tick fires
+    assert d0.calls == ["render"]
+
+
 # ── RefreshGate unit tests ────────────────────────────────────────────
 
 

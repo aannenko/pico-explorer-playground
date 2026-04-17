@@ -53,13 +53,17 @@ class DisplayManager:
         self.previous()
 
     def _do_on_button_a(self, _: int) -> None:
-        self._displays[self._current].on_button_a()
-        # Button presses typically redraw inline; re-anchor the cadence
-        # so the next gated render is a full period away.
-        if self._gate is not None:
+        display = self._displays[self._current]
+        display.on_button_a()
+        # A display that overrides on_button_a is expected to redraw
+        # inline; re-anchor the cadence so the next gated render is a
+        # full period away.  Views that use the base no-op shouldn't
+        # have their cadence disturbed by stray presses.
+        if self._gate is not None and type(display).on_button_a is not Display.on_button_a:
             self._gate.reset()
 
     def _do_on_button_b(self, _: int) -> None:
-        self._displays[self._current].on_button_b()
-        if self._gate is not None:
+        display = self._displays[self._current]
+        display.on_button_b()
+        if self._gate is not None and type(display).on_button_b is not Display.on_button_b:
             self._gate.reset()
