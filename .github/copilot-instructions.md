@@ -23,8 +23,8 @@ graph TD
     app --> TimeService
     app --> StatusDisplay
 
-    TickScheduler -- "100ms tick()" --> TimeService
-    TickScheduler -- "100ms tick()" --> NetworkService
+    TickScheduler -- "periodic tick()" --> TimeService
+    TickScheduler -- "periodic tick()" --> NetworkService
     TickScheduler -- "tick() registered per active view" --> DisplayManager
 
     DisplayManager --> CountdownDisplay
@@ -53,11 +53,11 @@ graph TD
 **Key patterns:**
 - **Entry point:** `src/pico/main.py` is a thin entry (~20 lines): instantiates `PicoGraphics`, calls `app.build_app(pico_graphics, micropython.schedule)`, starts the tick scheduler, runs the button-poll loop.
 - **Composition:** `src/pico/app.py` owns all wiring.  `build_app` returns an `App` bag with `display_manager`, `tick_scheduler`, `button_poller`, and `network_service`.  A `Palette` (from `displays/palette.py`) provides named PicoGraphics pens; RGB constants come from `DEFAULT_STREAM_COLORS` in the same module.
-- **Display contract:** all displays inherit `displays.base.Display`, which provides no-op defaults for `initialize`/`deinitialize`/`render`/`on_button_a`/`on_button_b`. Each view declares its redraw cadence with the `refresh_period_ms` class attribute (`0` = render every scheduler tick).
-- **Display lifecycle:** `DisplayManager` controls view init/deinit on cycle; it owns a single `displays.base.RefreshGate` that is rebuilt on every view switch using the active display's `refresh_period_ms` and the scheduler period. Button presses reset the gate so the next cadenced render is a full period away from the inline redraw the handler already did. `tick()` is forwarded to `display.render()` only when the gate fires.
+- **Display contract:** all displays inherit `displays.base.Display`, which provides no-op defaults for `initialize`/`deinitialize`/`render`/`on_button_a`/`on_button_b`. Each view declares its redraw cadence with the `refresh_period_ms` class attribute (default `1000`; set `0` to render every scheduler tick).
+- **Display lifecycle:** `DisplayManager` controls view init/deinit on cycle; it owns a single `displays.base.RefreshGate` that is rebuilt on every view switch using the active display's `refresh_period_ms` and the scheduler's `ms_per_tick`. Button presses reset the gate so the next cadenced render is a full period away from the inline redraw the handler already did. `tick()` is forwarded to `display.render()` only when the gate fires.
 - **Button handling:** `ButtonPoller` polls `machine.Pin` instances in the main loop with edge detection; presses dispatched via `micropython.schedule()`.  X/Y cycle views; A/B forwarded to active view.
 - **Hardware boundary:** `src/pico/hardware/explorer.py` centralizes GPIO pin constants (`BUTTON_{A,B,X,Y}_PIN`, `BUZZER_PIN`).
-- **Services** (`src/pico/services/`) are long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`).
+- **Services** (`src/pico/services/`) are long-lived stateful objects created at startup, independent of display lifecycle. Explorer/Pimoroni-specific services use naming convention (`Explorer*`, `Pimoroni*`). `TickScheduler` exposes an `ms_per_tick` property so consumers can reason about cadence without poking internals; it clamps absurdly short periods to a safe floor.
 - **TimeService** (`src/pico/services/time_service.py`) is the central time authority. The RTC holds UTC (set by NTP via `NetworkService`). `TimeService` computes local time by adding the timezone + DST offset. It exposes `now()` (local epoch), `utc_now()` (UTC epoch), `total_offset(utc_timestamp)` (offset in seconds at a given UTC instant), `to_utc(local_epoch)` (local→UTC conversion), and `real_duration(local_start, wall_clock_sec)` (DST-corrected real seconds). DST transitions are detected automatically on each `_tick()` via a cached threshold. Must be created after NTP sync. All time-displaying consumers use `TimeService.now` as their `get_time` source.
 - **NetworkService** (`src/pico/services/network_service.py`) accepts `status_fn` only on `connect_and_sync_initial(status_fn=...)` (the boot-time overlay), not on the constructor.  Periodic resync `_tick`s are silent so they never clobber the active view.
 - **WiFi** (`src/pico/utilities/wifi.py`): connection state lives in a `WifiClient` class; a module-level `_DEFAULT` instance and thin wrappers (`connect`, `start_connect`, `is_connected`, `reset`) preserve the `utilities.wifi.connect(...)` API.  Module-level attribute reads (`wifi.state`, `wifi._tick`, etc.) are forwarded to `_DEFAULT` via PEP 562 `__getattr__`.

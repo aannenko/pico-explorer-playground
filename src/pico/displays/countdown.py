@@ -45,8 +45,6 @@ def _fmt_time(sec: int) -> str:
 
 
 class Display(_Display):
-    refresh_period_ms = 1000
-
     def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
         self._timer = countdown_timer

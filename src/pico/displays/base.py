@@ -3,8 +3,10 @@ class Display:
 
     Subclasses declare their redraw cadence via the ``refresh_period_ms``
     class attribute; the manager converts this to scheduler ticks and
-    calls ``render()`` on the correct cadence.  A value of ``0`` means
-    "I'm fine rendering on every scheduler tick" — no throttling.
+    calls ``render()`` on the correct cadence.  The default of ``1000``
+    (one redraw per second) is a sane choice for clock-style views; set
+    to ``0`` to render on every scheduler tick (no throttling), or to a
+    larger value for slow-changing views.
 
     ``initialize`` / ``deinitialize`` fire on view switch.  ``initialize``
     must produce a complete first render; ``render`` then updates
@@ -14,7 +16,7 @@ class Display:
     they need.
     """
 
-    refresh_period_ms: int = 0
+    refresh_period_ms: int = 1000
 
     def initialize(self) -> None:
         pass

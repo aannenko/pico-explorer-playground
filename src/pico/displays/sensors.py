@@ -116,8 +116,6 @@ class Renderer:
 
 
 class Display(_Display):
-    refresh_period_ms = 1000
-
     def __init__(
         self,
         renderer: Renderer,

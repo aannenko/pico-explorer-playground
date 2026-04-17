@@ -1,6 +1,10 @@
 import micropython
+from micropython import const
 
 from machine import Timer
+
+
+_MIN_PERIOD_MS = const(100)
 
 
 class TickScheduler:
@@ -8,7 +12,7 @@ class TickScheduler:
 
     def __init__(
         self,
-        period_ms: int = 100,
+        period_ms: int = 500,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
@@ -21,13 +25,17 @@ class TickScheduler:
         self._tick_ref = self._tick
         self._schedule_tick_ref = self._schedule_tick
         self._timer = timer_factory(-1)
-        self.period_ms = period_ms
+        self._period_ms: int = period_ms if period_ms > _MIN_PERIOD_MS else _MIN_PERIOD_MS
         self._pending = False
+
+    @property
+    def ms_per_tick(self) -> int:
+        return self._period_ms
 
     def start(self) -> None:
         self._timer.init(
             mode=Timer.PERIODIC,
-            period=self.period_ms,
+            period=self._period_ms,
             callback=self._schedule_tick_ref,
         )
 
