@@ -1,7 +1,7 @@
 import micropython
 
 from micropython import const
-from displays.base import Display as _Display, RefreshGate
+from displays.base import Display as _Display
 from displays.ring import (
     Renderer,
     RING_SEGMENTS,
@@ -45,6 +45,8 @@ def _fmt_time(sec: int) -> str:
 
 
 class Display(_Display):
+    refresh_period_ms = 1000
+
     def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
         self._timer = countdown_timer
@@ -52,7 +54,6 @@ class Display(_Display):
         self._duration_index: int = _DEFAULT_INDEX
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
-        self._gate = RefreshGate(1000)
         self._active: bool = False
 
     def on_button_a(self) -> None:
@@ -144,16 +145,13 @@ class Display(_Display):
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
         self._renderer.update()
 
-    def tick(self) -> None:
-        if not self._gate.ready():
-            return
+    def render(self) -> None:
         self._update_display()
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
-        self._gate.reset()
 
         state = self._timer.state
         if state == RUNNING:

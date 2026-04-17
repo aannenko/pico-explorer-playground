@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time as _time
-
 import displays.calendar as calendar
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
@@ -126,35 +124,12 @@ class TestDisplayLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Tick throttling
+# render()
 # ---------------------------------------------------------------------------
 
-class TestTickThrottling:
-    def test_tick_skipped_before_interval(self, monkeypatch):
+class TestRender:
+    def test_render_redraws(self, monkeypatch):
         monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        renderer = FakeRenderer()
-        d = calendar.Display(
-            renderer=renderer,
-            streams=[],
-            get_time=lambda: 0,
-        )
-
-        d.initialize()
-        renderer.calls.clear()
-        renderer.update_count = 0
-
-        # Tick immediately — should be throttled (< 60s since initialize)
-        d.tick()
-
-        assert renderer.update_count == 0
-
-    def test_tick_executes_after_interval(self, monkeypatch):
-        monkeypatch.setattr(calendar, "format_header_time", lambda t: "HDR")
-
-        ticks = [0]
-        monkeypatch.setattr(_time, "ticks_ms", lambda: ticks[0])
-        monkeypatch.setattr(_time, "ticks_diff", lambda a, b: a - b)
 
         renderer = FakeRenderer()
         d = calendar.Display(
@@ -167,11 +142,10 @@ class TestTickThrottling:
         renderer.calls.clear()
         renderer.update_count = 0
 
-        # Advance past 60s threshold
-        ticks[0] = 61_000
-        d.tick()
+        d.render()
 
         assert renderer.update_count == 1
+        assert ("header_write", ("HDR",), {}) in renderer.calls
 
 
 # ---------------------------------------------------------------------------

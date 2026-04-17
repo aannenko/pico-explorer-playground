@@ -21,13 +21,13 @@ class TickScheduler:
         self._tick_ref = self._tick
         self._schedule_tick_ref = self._schedule_tick
         self._timer = timer_factory(-1)
-        self._period_ms = period_ms
+        self.period_ms = period_ms
         self._pending = False
 
     def start(self) -> None:
         self._timer.init(
             mode=Timer.PERIODIC,
-            period=self._period_ms,
+            period=self.period_ms,
             callback=self._schedule_tick_ref,
         )
 

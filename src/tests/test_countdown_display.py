@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import displays.countdown as countdown_mod
-import displays.base as base_mod
-
 from displays.countdown import Display, DURATIONS, LABELS
 from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from services.countdown_timer import (
@@ -238,14 +235,10 @@ def test_update_display_detects_done_state() -> None:
     assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
 
 
-# ── tick() ─────────────────────────────────────────────────────────────
+# ── render() ───────────────────────────────────────────────────────────
 
 
-def test_tick_updates_ring_segments_while_running(monkeypatch) -> None:
-    tick_time = [0]
-    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
-
+def test_render_updates_ring_segments_while_running() -> None:
     d, engine, renderer, *_, clock = _mk_display(now=1000)
     d.initialize()
     d.on_button_a()  # Start 2-hour countdown
@@ -255,20 +248,14 @@ def test_tick_updates_ring_segments_while_running(monkeypatch) -> None:
     renderer.calls.clear()
     renderer.update_calls = 0
 
-    # Advance tick clock past 1s interval
-    tick_time[0] = 1500
-    d.tick()
+    d.render()
 
     # expected cleared: 600 * 120 // 7200 = 10
     assert ("ring_clear_segments", (10,), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
-def test_tick_detects_done_state(monkeypatch) -> None:
-    tick_time = [0]
-    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
-
+def test_render_detects_done_state() -> None:
     d, engine, renderer, *_, clock = _mk_display(now=1000)
     d.initialize()
     d.on_button_a()  # Start
@@ -278,30 +265,10 @@ def test_tick_detects_done_state(monkeypatch) -> None:
     engine._tick()  # Transitions engine to DONE
     renderer.calls.clear()
 
-    # Advance tick clock past 1s interval
-    tick_time[0] = 1500
-    d.tick()
+    d.render()
 
     assert ("text_write", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
     assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
-
-
-def test_tick_skipped_within_1s_interval(monkeypatch) -> None:
-    tick_time = [0]
-    monkeypatch.setattr(base_mod.time, "ticks_ms", lambda: tick_time[0])
-    monkeypatch.setattr(base_mod.time, "ticks_diff", lambda a, b: a - b)
-
-    d, engine, renderer, *_, clock = _mk_display(now=1000)
-    d.initialize()
-    d.on_button_a()  # Start
-    renderer.calls.clear()
-    renderer.update_calls = 0
-
-    # tick_time hasn't advanced enough (still 0, diff < 1000)
-    tick_time[0] = 500
-    d.tick()
-
-    assert renderer.update_calls == 0
 
 
 # ── ring segment calculation ──────────────────────────────────────────

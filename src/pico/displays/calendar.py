@@ -4,7 +4,7 @@ import time
 from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
-from displays.base import Display as _Display, RefreshGate
+from displays.base import Display as _Display
 from displays.shared.header import format_header_time
 from scheduling.event_window import EventWindow
 
@@ -269,6 +269,8 @@ class Renderer:
 
 
 class Display(_Display):
+    refresh_period_ms = 60_000
+
     def __init__(
         self,
         renderer: Renderer,
@@ -278,7 +280,6 @@ class Display(_Display):
         self._renderer = renderer
         self._streams = streams
         self._get_time = get_time
-        self._gate = RefreshGate(60_000)
         self._active: bool = False
 
     def _redraw(self) -> None:
@@ -291,16 +292,13 @@ class Display(_Display):
         self._renderer.draw_time_axis(window_start, window_end)
         self._renderer.update()
 
-    def tick(self) -> None:
-        if not self._gate.ready():
-            return
+    def render(self) -> None:
         self._redraw()
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
-        self._gate.reset()
         self._renderer.reset()
         self._renderer.draw_static_overlay()
         self._redraw()

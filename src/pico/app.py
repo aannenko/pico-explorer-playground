@@ -181,6 +181,7 @@ def build_app(pico_graphics, schedule_fn) -> App:
 
     display_manager = DisplayManager(
         displays=[sensors_display, countdown_display, calendar_display],
+        scheduler_period_ms=tick_scheduler.period_ms,
     )
     display_manager.initialize_current()
     tick_scheduler.register(display_manager.tick)
