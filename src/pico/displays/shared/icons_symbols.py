@@ -17,6 +17,8 @@ own (x, y) and scale and passes them in.
 
 import gc
 
+from micropython import const
+
 SPRITESHEET_PATH = "icons_symbols.rgb332"
 
 # Sprite cell coordinates (sx, sy) into the 16x16 cell grid.
@@ -36,7 +38,7 @@ UNIT_DEG_C = (2, 15)
 UNIT_PCT = (3, 15)
 
 # Native cell size in the sheet.
-CELL_PX = 8
+CELL_PX = const(8)
 
 
 def load(gfx) -> None:

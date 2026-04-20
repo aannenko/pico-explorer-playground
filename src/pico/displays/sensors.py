@@ -195,6 +195,7 @@ class Display(_Display):
         self._bme690_reader = bme690_reader
         self._active = False
         self._thermo_cell: tuple[int, int] | None = None
+        self._last_rendered_reading: tuple | None = None
 
     @classmethod
     def _thermo_cell_for(cls, temp: float) -> tuple[int, int]:
@@ -209,22 +210,28 @@ class Display(_Display):
     def _update_display(self) -> None:
         self._renderer.header_write(format_header_time(self._time_service.now()))
 
-        temp, press, hum, gas_r, status = self._bme690_reader.read()
+        reading = self._bme690_reader.read()
+        # PimoroniBME690 replaces _last_reading with a fresh tuple on each
+        # sensor read (~5 s); until then read() returns the same object.
+        # Identity-compare to skip the four f-string formats per tick.
+        if reading is not self._last_rendered_reading:
+            self._last_rendered_reading = reading
+            temp, press, hum, gas_r, status = reading
 
-        new_thermo = self._thermo_cell_for(temp)
-        if new_thermo != self._thermo_cell:
-            self._renderer.redraw_row_icon(0, new_thermo)
-            self._thermo_cell = new_thermo
+            new_thermo = self._thermo_cell_for(temp)
+            if new_thermo != self._thermo_cell:
+                self._renderer.redraw_row_icon(0, new_thermo)
+                self._thermo_cell = new_thermo
 
-        self._renderer.value_write(0, f"{temp:0.1f}")
-        self._renderer.value_write(1, f"{press:0.0f}")
-        self._renderer.value_write(2, f"{hum:0.1f}")
-        # Gas row fuses the heater status: show kOhm value only when stable,
-        # otherwise replace the number with a short "warming..." text.
-        if status == "Stable":
-            self._renderer.value_write(3, f"{gas_r:0.1f}")
-        else:
-            self._renderer.value_write(3, "warming...")
+            self._renderer.value_write(0, f"{temp:0.1f}")
+            self._renderer.value_write(1, f"{press:0.0f}")
+            self._renderer.value_write(2, f"{hum:0.1f}")
+            # Gas row fuses the heater status: show kOhm value only when stable,
+            # otherwise replace the number with a short "warming..." text.
+            if status == "Stable":
+                self._renderer.value_write(3, f"{gas_r:0.1f}")
+            else:
+                self._renderer.value_write(3, "warming...")
 
         self._renderer.update()
 
@@ -241,6 +248,9 @@ class Display(_Display):
         # ROWS[0] paints the green thermometer; track it so _update_display
         # only repaints when the band actually changes.
         self._thermo_cell = self.ROWS[0][0]
+        # Force first _update_display to paint values even if the reader
+        # returns the same tuple object as the last time we were active.
+        self._last_rendered_reading = None
         self._update_display()
 
     def deinitialize(self) -> None:

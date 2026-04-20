@@ -171,6 +171,70 @@ def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
     assert renderer.update_calls == 0
 
 
+def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -> None:
+    renderer = FakeRenderer()
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+
+    reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
+    d = sensors.Display(
+        renderer=renderer,
+        bme690_reader=reader,
+        time_service=_FakeTime(lambda: 0),
+    )
+
+    d._update_display()
+    first_value_writes = sum(1 for c in renderer.calls if c[0] == "value_write")
+    assert first_value_writes == 4
+
+    # Second tick with the exact same tuple object returned — value_write
+    # should be skipped entirely (identity compare).
+    renderer.calls.clear()
+    d._update_display()
+    assert not any(c[0] == "value_write" for c in renderer.calls)
+    # Header still writes every tick (time advances).
+    assert any(c[0] == "header_write" for c in renderer.calls)
+
+
+def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch) -> None:
+    renderer = FakeRenderer()
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+
+    reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
+    d = sensors.Display(
+        renderer=renderer,
+        bme690_reader=reader,
+        time_service=_FakeTime(lambda: 0),
+    )
+    d._update_display()
+
+    # Real PimoroniBME690._do_read swaps _last_reading for a fresh tuple;
+    # mimic that with tuple([...]) to defeat CPython's constant-tuple folding
+    # (on MicroPython each expression evaluates to a fresh tuple anyway).
+    reader._reading = tuple([22.4, 963.11, 25.7, 65.674, "Stable"])
+    renderer.calls.clear()
+    d._update_display()
+    assert sum(1 for c in renderer.calls if c[0] == "value_write") == 4
+
+
+def test_reinitialize_repaints_values_even_if_reader_returns_same_tuple(monkeypatch) -> None:
+    renderer = FakeRenderer()
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+
+    reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
+    d = sensors.Display(
+        renderer=renderer,
+        bme690_reader=reader,
+        time_service=_FakeTime(lambda: 0),
+    )
+    d.initialize()
+    d.deinitialize()
+    renderer.calls.clear()
+    d.initialize()
+    # Even though reader returns the same tuple object, re-entry must paint
+    # values (reset() blanked the screen).
+    assert sum(1 for c in renderer.calls if c[0] == "value_write") == 4
+
+
 def test_reinitialize_repaints_left_column(monkeypatch) -> None:
     renderer = FakeRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
