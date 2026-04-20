@@ -87,7 +87,7 @@ def _build_sensors_display(pico_graphics, palette: Palette, bme690_reader, time_
             colors=sensors.Colors(
                 background=palette.black,
                 header_text=palette.white,
-                value_text=palette.green,
+                value_text=palette.white,
                 secondary_text=palette.gray,
             ),
         ),

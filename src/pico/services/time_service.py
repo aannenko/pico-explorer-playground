@@ -99,8 +99,8 @@ class TimeService:
     def __init__(
         self,
         tz_offset: int,
-        dst_start,  # tuple (month, week, weekday, hour) | None
-        dst_end,  # tuple (month, week, weekday, hour) | None
+        dst_start: tuple[int, int, int, int] | None,  # (month, week, weekday, hour)
+        dst_end: tuple[int, int, int, int] | None,  # (month, week, weekday, hour)
         dst_offset: int = 0,
         get_time=time.time,
         tick_scheduler=None,

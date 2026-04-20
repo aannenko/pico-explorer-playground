@@ -1,1 +1,5 @@
 pytest==9.0.2
+
+# Used by src/tools/spritesheet-to-rgb332.py (invoked via src/tools/regenerate-icons.bat).
+Pillow
+numpy

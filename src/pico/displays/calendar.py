@@ -173,7 +173,7 @@ class Renderer:
                 gfx.rectangle(x0, row_top, x1 - x0, bar_h)
 
                 bar_px = x1 - x0
-                text_y = row_top + (bar_h - geom.bar_text_height) // 2
+                text_y = row_top + (bar_h - geom.bar_text_height) // 2 + 2
                 label_right = x0
                 usable_px = bar_px - 2 * _BAR_TEXT_MARGIN
 

@@ -23,14 +23,12 @@ class Palette:
         black: int,
         gray: int,
         white: int,
-        green: int,
         orange: int,
         dark_gray: int,
     ) -> None:
         self.black = black
         self.gray = gray
         self.white = white
-        self.green = green
         self.orange = orange
         self.dark_gray = dark_gray
 
@@ -40,7 +38,6 @@ def build_palette(gfx):  # gfx: PicoGraphics
         black=gfx.create_pen(0, 0, 0),
         gray=gfx.create_pen(190, 190, 190),
         white=gfx.create_pen(255, 255, 255),
-        green=gfx.create_pen(0, 255, 0),
         orange=gfx.create_pen(255, 165, 0),
         dark_gray=gfx.create_pen(40, 40, 40),
     )

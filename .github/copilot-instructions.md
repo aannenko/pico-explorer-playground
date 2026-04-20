@@ -10,6 +10,7 @@ See `ROADMAP.md` for planned features and design intent.
 - Avoid allocations in hot paths, especially timer / IRQ callbacks.  Cache bound-method refs in `__init__` (`self._tick_ref = self._tick`) and use those in IRQ handlers.
 - In timer IRQs, keep work tiny and defer via `micropython.schedule(...)`.  Guard schedule calls with a `_pending` flag; roll it back on exception so one failure doesn't wedge the state machine.
 - Prefer `const(...)` for constants; keep math integer where possible.
+- **Spritesheet preload:** `src/pico/icons_symbols.rgb332` (16 KiB) must be loaded in `main.py` *before* `from app import build_app` — MP's non-compacting GC fragments heap early and a later 16 KiB contiguous alloc can fail.
 
 ## Virtual timer budget
 MicroPython's `machine.Timer(-1)` allocates a *virtual* (software) timer slot.  The RP2040 Pimoroni build supports only a small fixed number of them (observed cap ≈ 8–10), and `Timer.deinit()` is not instantaneous — slots linger briefly.  Rapid create/deinit churn has, in the past, exhausted the pool and raised system exceptions.
@@ -71,6 +72,7 @@ graph TD
 - **Display lifecycle:** `DisplayManager` owns a single `RefreshGate` rebuilt on every view switch from the active display's `refresh_period_ms` and the scheduler's `ms_per_tick`.  A/B button presses reset the gate *only* when the active display overrides the base handler (so stray presses on passive views don't disturb cadence).
 - **Button handling:** `ButtonPoller` polls `machine.Pin` edges in the main loop and dispatches presses via `micropython.schedule()`.  X/Y cycle views; A/B are forwarded to the active view.
 - **Hardware boundary:** `src/pico/hardware/explorer.py` centralizes GPIO pin constants.
+- **Shared display assets:** `displays/shared/icons_symbols.py` owns the spritesheet API (`load`, `draw_icon`, `draw_sprite`, `ICON_*` / `UNIT_*` cell constants; all draws pass `transparent=0`). PNG → `.rgb332` via `src/regenerate-icons.bat`.
 - **TimeService:** central time authority; RTC holds UTC, `now()` returns local epoch (TZ + DST).  Must be created after NTP sync.  Exposes `to_utc()`, `total_offset()`, `real_duration()` for DST-aware math.  Consumers pass `time_service.now` as `get_time`.
 - **NetworkService:** `status_fn` kwarg is only on `connect_and_sync_initial(...)`, not the constructor — periodic resyncs are silent so they never clobber the active view.
 - **WiFi:** `WifiClient` is a service instantiated in `app.py` and injected into `NetworkService`. It owns its own `machine.Timer` (transient — only during CONNECTING) and state machine.
