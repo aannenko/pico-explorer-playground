@@ -77,6 +77,7 @@ class Geometry:
             self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
         # Text geometry
+        self.font = font
         pico_graphics.set_font(font)
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
@@ -117,6 +118,7 @@ class Renderer:
         self._last_text_above_center: str = ""
         self._last_text_below_center: str = ""
 
+        self._gfx.set_font(self._geom.font)
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
 

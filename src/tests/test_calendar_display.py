@@ -171,7 +171,7 @@ class TestSharedHeader:
 
         result = format_header_time(epoch)
 
-        assert result == "'26-04-10 17:56"
+        assert result == "2026-04-10 17:56"
 
     def test_format_header_time_midnight(self, monkeypatch):
         from displays.shared.header import format_header_time
@@ -181,7 +181,7 @@ class TestSharedHeader:
 
         result = format_header_time(epoch)
 
-        assert result == "'26-01-01 00:00"
+        assert result == "2026-01-01 00:00"
 
 
 # ---------------------------------------------------------------------------

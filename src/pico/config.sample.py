@@ -8,8 +8,8 @@ secrets stay local; this sample is checked in as a template.
 from micropython import const
 
 
-FONT = "bitmap6"           # default font when no override is set
-FONT_HEIGHT = const(6)     # height of bitmap6 glyphs
+FONT = "bitmap8"           # default font when no override is set
+FONT_HEIGHT = const(8)     # height of bitmap8 glyphs
 TEXT_SCALE = const(3)      # default scale for fonts
 
 # WiFi credentials — replace with your own network's SSID and password.

@@ -14,6 +14,9 @@ class FakePicoGraphics:
     def set_pen(self, pen: int) -> None:
         self.calls.append(("set_pen", (pen,), {}))
 
+    def set_font(self, font: str) -> None:
+        self.calls.append(("set_font", (font,), {}))
+
     def circle(self, x: int, y: int, r: int) -> None:
         self.calls.append(("circle", (x, y, r), {}))
 
@@ -56,6 +59,7 @@ class FakeGeometry:
 
     # Text geometry
     width: int = 100
+    font: str = "bitmap6"
     text_scale: int = 1
     text_height: int = 6
 
@@ -96,6 +100,7 @@ def test_reset_draws_ring_and_clears_state() -> None:
     tg.reset()
 
     assert display.calls == [
+        ("set_font", ("bitmap6",), {}),
         ("set_pen", (1,), {}),
         ("clear", (), {}),
         ("set_pen", (2,), {}),

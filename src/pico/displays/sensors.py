@@ -33,6 +33,7 @@ class Geometry:
 
         self.width, self.height = pico_graphics.get_bounds()
 
+        self.font = font
         pico_graphics.set_font(font)
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
@@ -69,6 +70,7 @@ class Renderer:
     def reset(self) -> None:
         self._last_header = ""
         self._last_lines = ["", "", "", "", "", ""]
+        self._gfx.set_font(self._geom.font)
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
 

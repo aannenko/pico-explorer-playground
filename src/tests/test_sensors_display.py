@@ -43,7 +43,7 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
 
     d._update_display()
 
-    assert ("header_write", ("'26-01-04 13:05",), {}) in renderer.calls
+    assert ("header_write", ("2026-01-04 13:05",), {}) in renderer.calls
     assert ("value_write", (0, "Temp: 22.4 C"), {}) in renderer.calls
     assert ("secondary_write", (1, "Prsr: 963 mb"), {}) in renderer.calls
     assert ("secondary_write", (2, "Hum: 25.70 %"), {}) in renderer.calls
