@@ -27,6 +27,7 @@ DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
 SENSOR_READ_DELAY_MS = const(5_000)  # milliseconds between sensor reads
 BME690_TEMP_OFFSET = -1.2  # Temperature offset to apply to BME690 sensor readings
 BME690_HUM_OFFSET = 5.0    # Humidity offset to apply to BME690 sensor readings
+BME690_PRSR_OFFSET = 45    # Pressure offset (hPa) to apply to BME690 sensor readings
 
 # Sensors-view band thresholds. Each tuple holds 3 strict upper bounds in
 # ascending order; readings classify into 4 bands (band 0 < bands[0],

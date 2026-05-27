@@ -28,12 +28,14 @@ class PimoroniBME690:
         self,
         temp_offset: float,
         hum_offset: float,
+        prsr_offset: float,
         sensor_read_delay_ms: int = 5000,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
         self._temp_offset = temp_offset
         self._hum_offset = hum_offset
+        self._prsr_offset = prsr_offset
         self._read_interval_ms = sensor_read_delay_ms
         self._schedule = schedule
 
@@ -74,7 +76,7 @@ class PimoroniBME690:
         temp += self._temp_offset
         hum += self._hum_offset
         heater = "Stable" if status & STATUS_HEATER_STABLE else "Unstable"
-        self._last_reading = (temp, press / 100, hum, gas_r / 1000, heater)
+        self._last_reading = (temp, press / 100 + self._prsr_offset, hum, gas_r / 1000, heater)
 
     def _do_read_scheduled(self, _: int) -> None:
         try:

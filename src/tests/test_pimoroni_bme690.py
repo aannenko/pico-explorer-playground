@@ -54,12 +54,13 @@ def test_read_applies_offsets_converts_units_and_stable_status() -> None:
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=1.5,
         hum_offset=-2.0,
+        prsr_offset=3.0,
     )
 
     temp, press_mb, hum, gas_kohm, heater = reader.read()
 
     assert temp == 21.5
-    assert press_mb == 1000.0
+    assert press_mb == 1003.0
     assert hum == 48.0
     assert gas_kohm == 2.5
     assert heater == "Stable"
@@ -77,6 +78,7 @@ def test_read_maps_unstable_status() -> None:
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
         hum_offset=0.0,
+        prsr_offset=0.0,
     )
 
     *_vals, heater = reader.read()
@@ -91,6 +93,7 @@ def test_init_starts_periodic_timer_at_configured_interval() -> None:
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
         hum_offset=0.0,
+        prsr_offset=0.0,
         sensor_read_delay_ms=7000,
         timer_factory=timer_factory,
     )
@@ -113,6 +116,7 @@ def test_timer_callback_schedules_read_and_guards_reentry() -> None:
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
         hum_offset=0.0,
+        prsr_offset=0.0,
         schedule=lambda fn, arg: scheduled.append((fn, arg)),
         timer_factory=FakeTimer,
     )
@@ -145,6 +149,7 @@ def test_timer_callback_clears_pending_if_schedule_raises() -> None:
     reader = pimoroni_bme690.PimoroniBME690(
         temp_offset=0.0,
         hum_offset=0.0,
+        prsr_offset=0.0,
         schedule=raising_schedule,
         timer_factory=FakeTimer,
     )

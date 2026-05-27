@@ -178,6 +178,7 @@ def build_app(pico_graphics, schedule_fn) -> App:
     bme690_reader = PimoroniBME690(
         temp_offset=config.BME690_TEMP_OFFSET,
         hum_offset=config.BME690_HUM_OFFSET,
+        prsr_offset=config.BME690_PRSR_OFFSET,
         sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
     )
 

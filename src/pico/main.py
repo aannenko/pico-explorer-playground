@@ -1,4 +1,3 @@
-import gc
 import machine
 import micropython
 
