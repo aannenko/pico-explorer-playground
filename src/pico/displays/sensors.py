@@ -44,8 +44,7 @@ class Geometry:
 
         self.values_top_y = self.text_height + self.line_spacing
 
-        # Precompute y positions for up to 6 lines.
-        # (More than enough for now; avoids dynamic list allocations in updates.)
+        # Precomputed y positions; 6 lines is more than enough for now.
         self.line_y = (
             self.values_top_y,
             self.values_top_y * 2,
@@ -58,19 +57,16 @@ class Geometry:
         self.header_rect = (0, 0, self.width, self.text_height)
         self.value_rect_height = self.text_height
 
-        # Left-column layout.
-        # Icon: 2x2 sprite cells at scale=2 -> 32x32 px footprint (28px visible
-        # content inside 1px black margin, rendered transparent).
-        # Unit: 1x1 sprite cell at scale=3 -> 24x24 px, aligns with bitmap8 x3 text.
+        # Left-column layout: 32px icon (2x2 cells @scale=2) + 24px unit
+        # (1 cell @text scale, inline with the glyph row).
         self.icon_scale = 2
-        self.icon_cells = 2  # 2x2 cells per icon
+        self.icon_cells = 2
         self.icon_size_px = 8 * self.icon_cells * self.icon_scale  # 32
-        # Center the 32px icon vertically on the 24px text row, then nudge up
-        # by 2px for a slightly better optical balance against the glyph
-        # x-height.
+        # Center vertically on the text row, then nudge up 2px for
+        # optical balance against the glyph x-height.
         self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + 2  # 6
 
-        self.unit_scale = text_scale  # match text scale so unit glyphs sit inline
+        self.unit_scale = text_scale
         self.unit_size_px = 8 * self.unit_scale  # 24
 
         self.icon_x = 0

@@ -6,10 +6,8 @@ class DisplayManager:
         self._displays: list[Display] = displays
         self._scheduler_period_ms: int = scheduler_period_ms
         self._current: int = 0
-        # Only one view is active at a time, so one gate is enough.  It's
-        # rebuilt on every view switch to match the active display's
-        # ``refresh_period_ms``.  ``None`` means "render every tick"
-        # (display opted out of throttling via refresh_period_ms=0).
+        # Rebuilt on every view switch from the active display's
+        # ``refresh_period_ms``.  ``None`` = render every tick.
         self._gate = self._build_gate(displays[0])  # RefreshGate | None
 
         # Refs compatible with micropython.schedule(callback, arg)

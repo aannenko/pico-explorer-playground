@@ -1,20 +1,12 @@
 class Event:
-    """
-    Represents a scheduled event.
+    """Scheduled event with both wall-clock and DST-corrected real durations."""
 
-    Attributes:
-        name (str): Event name.
-        alt_text (str): Alternative text for the event.
-        start_timestamp (int): Event start time as seconds since Epoch.
-        wall_clock_duration_sec (int): Event duration in wall-clock seconds.
-        real_duration_sec (int): Event duration in real seconds (DST-corrected).
-    """
     def __init__(
         self,
         name: str,
         start_timestamp: int,
         wall_clock_duration_sec: int,
-        real_duration_sec: int = -1,
+        real_duration_sec: int = -1,  # DST-corrected
     ) -> None:
         if not name:
             raise ValueError("Event name cannot be empty")

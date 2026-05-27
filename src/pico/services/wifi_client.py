@@ -97,11 +97,9 @@ class WifiClient:
             time.sleep_ms(_CONNECTING_SLEEP_MS)
 
     def is_connected(self) -> bool:
-        """Check actual WiFi hardware connectivity."""
         return self._wlan is not None and self._wlan.isconnected()
 
     def reset(self) -> None:
-        """Stop any active timer and return to IDLE."""
         if self._timer is not None:
             self._timer.deinit()
             self._timer = None

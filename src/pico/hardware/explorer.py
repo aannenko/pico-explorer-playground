@@ -1,10 +1,4 @@
-"""Pico Explorer hardware boundary: pin numbers for on-board peripherals.
-
-Centralizing these constants lets the composition layer (``app.py``)
-and individual services share one source of truth for which GPIO does
-what.  Useful if the board ever changes or if we want to support a
-different carrier.
-"""
+"""Pico Explorer hardware boundary: GPIO pin numbers for on-board peripherals."""
 
 from micropython import const
 

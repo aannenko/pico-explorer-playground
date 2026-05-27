@@ -41,7 +41,7 @@ class ExplorerBuzzer:
         interval_ms: int = _DEFAULT_ALERT_INTERVAL_MS,
     ) -> None:
         self._alert_generation += 1
-        self._alert_remaining = count * 2  # toggles = beeps * 2
+        self._alert_remaining = count * 2
         self._alert_freq = freq
         self._beep(freq)
         self._alert_timer.init(

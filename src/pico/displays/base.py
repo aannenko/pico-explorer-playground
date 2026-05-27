@@ -1,19 +1,12 @@
 class Display:
     """Base class for display views managed by ``DisplayManager``.
 
-    Subclasses declare their redraw cadence via the ``refresh_period_ms``
-    class attribute; the manager converts this to scheduler ticks and
-    calls ``render()`` on the correct cadence.  The default of ``1000``
-    (one redraw per second) is a sane choice for clock-style views; set
-    to ``0`` to render on every scheduler tick (no throttling), or to a
-    larger value for slow-changing views.
-
-    ``initialize`` / ``deinitialize`` fire on view switch.  ``initialize``
-    must produce a complete first render; ``render`` then updates
-    whatever state has changed.  ``on_button_a`` / ``on_button_b`` fire
-    when the A/B hardware buttons are pressed while this view is active.
-    Every method has a no-op default so subclasses only override what
-    they need.
+    ``refresh_period_ms`` (class attribute) sets the redraw cadence;
+    the manager converts it to scheduler ticks.  Use ``0`` to render
+    every scheduler tick.  ``initialize`` must produce a complete first
+    render; ``render`` then updates whatever changed.  ``on_button_a``
+    / ``on_button_b`` fire when A/B are pressed while this view is
+    active.
     """
 
     refresh_period_ms: int = 1000

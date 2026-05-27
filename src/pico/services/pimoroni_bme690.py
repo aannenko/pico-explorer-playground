@@ -15,16 +15,13 @@ from pimoroni_i2c import PimoroniI2C  # type: ignore
 
 
 class PimoroniBME690:
-    """BME690 reader paced by a dedicated hardware Timer.
+    """BME690 reader paced by its own ``machine.Timer``.
 
-    The gas-resistance sensor is sensitive to inter-read spacing: if
-    reads come too close, the hot plate doesn't cool fully between
-    measurements and the gas baseline drifts.  Using the shared
-    ``TickScheduler`` would make the effective interval depend on
-    whatever other subscribers ran first, so this service owns its own
-    ``machine.Timer`` running at ``sensor_read_delay_ms``.  The Timer
-    IRQ only schedules ``_do_read`` via ``micropython.schedule`` — the
-    actual blocking I2C read runs in normal context.
+    Gas-resistance accuracy depends on constant inter-read spacing
+    (the hot plate must cool between measurements), so this service
+    can't share the ``TickScheduler``. The Timer IRQ schedules
+    ``_do_read`` via ``micropython.schedule``; the blocking I2C read
+    runs in normal context.
     """
 
     def __init__(

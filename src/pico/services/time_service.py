@@ -121,11 +121,9 @@ class TimeService:
             tick_scheduler.register(self._tick)
 
     def now(self) -> int:
-        """Current local epoch (UTC + TZ + DST offset)."""
         return self._get_time() + self._offset_sec
 
     def utc_now(self) -> int:
-        """Current UTC epoch."""
         return self._get_time()
 
     def total_offset(self, utc_timestamp: int) -> int:

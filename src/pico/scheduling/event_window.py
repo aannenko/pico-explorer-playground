@@ -4,14 +4,10 @@ from scheduling.event import Event
 class EventWindow:
     """Sliding-buffer wrapper over a forward-only event iterator.
 
-    Maintains a small buffer of events covering a requested time window.
-    Each call to ``get_visible`` fills the buffer forward and prunes
-    events that ended before the window start.
-
-    Args:
-        events_iter: Forward-only iterator yielding ``Event`` objects.
-        color_a (int): First pen color for alternating events.
-        color_b (int): Second pen color for alternating events.
+    Each ``get_visible`` call fills the buffer forward to the requested
+    window end and prunes events that ended before its start.
+    ``color_a`` / ``color_b`` are pens used by callers to alternate
+    adjacent bars.
     """
 
     def __init__(
@@ -33,18 +29,14 @@ class EventWindow:
         window_start: int,
         window_end: int,
     ) -> list[tuple[Event, bool]]:
-        """Return events overlapping ``[window_start, window_end)``.
+        """Return ``[(Event, use_alt_color), ...]`` overlapping ``[window_start, window_end)``.
 
-        Each item is ``(Event, use_alt_color)`` where ``use_alt_color``
-        alternates between adjacent events so the caller can pick
-        ``color_a`` or ``color_b``.
+        ``use_alt_color`` alternates between adjacent events so callers
+        can pick ``color_a`` or ``color_b``.
 
-        Note:
-            The returned list is the window's internal buffer, not a copy.
-            Callers must treat it as read-only; the buffer is mutated on
-            the next ``get_visible`` call (fill-forward + prune-past).
-            Returning the buffer directly avoids per-frame list
-            allocations in the calendar's hot draw path.
+        Note: the returned list is the window's internal buffer (mutated
+        on the next call) — callers must treat it as read-only.  This
+        avoids per-frame list allocations on the calendar's hot path.
         """
         self._fill_to(window_end)
         self._prune_before(window_start)

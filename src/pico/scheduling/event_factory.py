@@ -23,33 +23,14 @@ def work_week_loop(
     work_end: tuple[int, int],
     time_service: TimeService,
 ):
+    """Yield work / rest / weekend events forever, starting with the currently running one.
+
+    Operates in local-epoch throughout; ``real_duration_sec`` is
+    DST-corrected at yield time via ``time_service``.  Assumes one
+    sub-24h shift per work day with a fixed daily start/end (shifts may
+    cross midnight); gaps between work days collapse into a single
+    weekend event spanning > 24h.
     """
-    Yield work-rest-weekend events, starting from the currently running one.
-
-    Operates in local-epoch throughout.  At yield time, each event gets
-    a DST-corrected ``real_duration_sec`` via the time service.
-
-    Args:
-        work_days (set[int]): Set of work days (0=Monday .. 6=Sunday)
-        work_start (tuple[int, int]): Work start time in local time (hour, minute)
-        work_end (tuple[int, int]): Work end time in local time (hour, minute)
-        time_service: TimeService instance for local time + DST correction
-
-    Returns:
-        Iterator[Event]: A sequence of work, rest, and weekend events,
-        starting from the currently running one.
-    """
-
-    # CONDITIONS:
-    # 1. One work shift per work day.
-    # 2. Work shifts cannot last 24 hours or more, hence - cannot overlap.
-    # 3. All work shifts have the same start time, end time, and duration.
-    # 4. Work shifts can cross midnight.
-    # 5. Overnight work shift may end on a weekend day.
-    # 6. The time between work shifts is rest time, if it's between work shifts on consecutive work days.
-    # 7. Rest time spanning over non-work days is weekend time.
-    # 8. Each weekend event starts right after a work shift, spans > 24 hours, and finishes at the start of the next shift.
-    # 9. There can be zero or more weekend days.
 
     work_start_hour, work_start_minute = work_start
     if work_start_hour < 0 or work_start_hour > 23 or work_start_minute < 0 or work_start_minute > 59:
