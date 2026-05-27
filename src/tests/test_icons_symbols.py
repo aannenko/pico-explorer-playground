@@ -57,13 +57,26 @@ def test_draw_sprite_emits_single_sprite_call() -> None:
 
 def test_unit_and_icon_constants_are_within_16x16_grid() -> None:
     icons = (
+        # Row 0: thermometers.
         icons_symbols.ICON_THERMO_BLUE,
         icons_symbols.ICON_THERMO_GREEN,
         icons_symbols.ICON_THERMO_YELLOW,
         icons_symbols.ICON_THERMO_RED,
-        icons_symbols.ICON_WATERDROP,
-        icons_symbols.ICON_GAUGE,
-        icons_symbols.ICON_GAS,
+        # Row 1: water drops.
+        icons_symbols.ICON_DROP_LOW,
+        icons_symbols.ICON_DROP_MID_LOW,
+        icons_symbols.ICON_DROP_MID_HIGH,
+        icons_symbols.ICON_DROP_HIGH,
+        # Row 2: pressure gauges.
+        icons_symbols.ICON_GAUGE_LOW,
+        icons_symbols.ICON_GAUGE_MID_LOW,
+        icons_symbols.ICON_GAUGE_MID_HIGH,
+        icons_symbols.ICON_GAUGE_HIGH,
+        # Row 3: gas masks.
+        icons_symbols.ICON_GAS_LOW,
+        icons_symbols.ICON_GAS_MID_LOW,
+        icons_symbols.ICON_GAS_MID_HIGH,
+        icons_symbols.ICON_GAS_HIGH,
     )
     units = (
         icons_symbols.UNIT_KOHM,
@@ -81,3 +94,29 @@ def test_unit_and_icon_constants_are_within_16x16_grid() -> None:
     for sx, sy in units:
         assert 0 <= sx <= 15
         assert 0 <= sy <= 15
+
+
+def test_metric_icon_rows_are_distinct_and_ordered() -> None:
+    """Each 4-icon metric row should occupy a single sy and step sx by 2."""
+    for row in (
+        (icons_symbols.ICON_THERMO_BLUE,
+         icons_symbols.ICON_THERMO_GREEN,
+         icons_symbols.ICON_THERMO_YELLOW,
+         icons_symbols.ICON_THERMO_RED),
+        (icons_symbols.ICON_DROP_LOW,
+         icons_symbols.ICON_DROP_MID_LOW,
+         icons_symbols.ICON_DROP_MID_HIGH,
+         icons_symbols.ICON_DROP_HIGH),
+        (icons_symbols.ICON_GAUGE_LOW,
+         icons_symbols.ICON_GAUGE_MID_LOW,
+         icons_symbols.ICON_GAUGE_MID_HIGH,
+         icons_symbols.ICON_GAUGE_HIGH),
+        (icons_symbols.ICON_GAS_LOW,
+         icons_symbols.ICON_GAS_MID_LOW,
+         icons_symbols.ICON_GAS_MID_HIGH,
+         icons_symbols.ICON_GAS_HIGH),
+    ):
+        sys = {sy for _, sy in row}
+        assert len(sys) == 1, f"row {row} spans multiple sy values"
+        sxs = [sx for sx, _ in row]
+        assert sxs == [0, 2, 4, 6], f"row {row} not in expected sx order"

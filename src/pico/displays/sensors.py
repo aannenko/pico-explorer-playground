@@ -169,43 +169,119 @@ class Renderer:
 
 
 class Display(_Display):
-    # Rows in display order: (icon_cell, unit_cell).
-    # Row 0's icon is swapped dynamically in ``_update_display`` per temperature.
+    # Static per-row schema in display order: (unit_cell, icons_low_to_high).
+    # Band thresholds arrive via ``__init__`` from ``config.SENSOR_*_BANDS``
+    # and are merged into ``self._rows`` as ``(unit, bands, icons)`` triples.
+    # ``icons[1]`` (MID_LOW) is what ``initialize`` paints by default so a
+    # centered indoor reading needs no first swap.
     ROWS = (
-        (icons_symbols.ICON_THERMO_GREEN, icons_symbols.UNIT_DEG_C),
-        (icons_symbols.ICON_GAUGE,        icons_symbols.UNIT_MB),
-        (icons_symbols.ICON_WATERDROP,    icons_symbols.UNIT_PCT),
-        (icons_symbols.ICON_GAS,          icons_symbols.UNIT_KOHM),
+        (
+            icons_symbols.UNIT_DEG_C,
+            (
+                icons_symbols.ICON_THERMO_BLUE,
+                icons_symbols.ICON_THERMO_GREEN,
+                icons_symbols.ICON_THERMO_YELLOW,
+                icons_symbols.ICON_THERMO_RED,
+            ),
+        ),
+        (
+            icons_symbols.UNIT_MB,
+            (
+                icons_symbols.ICON_GAUGE_LOW,
+                icons_symbols.ICON_GAUGE_MID_LOW,
+                icons_symbols.ICON_GAUGE_MID_HIGH,
+                icons_symbols.ICON_GAUGE_HIGH,
+            ),
+        ),
+        (
+            icons_symbols.UNIT_PCT,
+            (
+                icons_symbols.ICON_DROP_LOW,
+                icons_symbols.ICON_DROP_MID_LOW,
+                icons_symbols.ICON_DROP_MID_HIGH,
+                icons_symbols.ICON_DROP_HIGH,
+            ),
+        ),
+        (
+            icons_symbols.UNIT_KOHM,
+            (
+                icons_symbols.ICON_GAS_LOW,
+                icons_symbols.ICON_GAS_MID_LOW,
+                icons_symbols.ICON_GAS_MID_HIGH,
+                icons_symbols.ICON_GAS_HIGH,
+            ),
+        ),
     )
 
-    # Temperature band thresholds (°C). Below `_COLD` → blue; [_COLD, _WARM)
-    # → green; [_WARM, _HOT) → yellow; >= `_HOT` → red.
-    _THERMO_COLD = 12
-    _THERMO_WARM = 24
-    _THERMO_HOT = 28
+    # Row index gated on heater status (see ``_update_display``).
+    _GAS_ROW = 3
 
     def __init__(
         self,
         renderer: Renderer,
         bme690_reader: PimoroniBME690,
         time_service,
+        *,
+        temp_bands: tuple[int, int, int],
+        pressure_bands: tuple[int, int, int],
+        humidity_bands: tuple[int, int, int],
+        gas_bands: tuple[int, int, int],
     ) -> None:
         self._renderer = renderer
         self._time_service = time_service
         self._bme690_reader = bme690_reader
         self._active = False
-        self._thermo_cell: tuple[int, int] | None = None
+        # Currently painted icon cell per row; ``None`` forces the first
+        # ``_maybe_swap_icon`` to paint.  Populated by ``initialize``.
+        self._row_icons: list[tuple[int, int] | None] = [None] * len(self.ROWS)
         self._last_rendered_reading: tuple | None = None
 
-    @classmethod
-    def _thermo_cell_for(cls, temp: float) -> tuple[int, int]:
-        if temp < cls._THERMO_COLD:
-            return icons_symbols.ICON_THERMO_BLUE
-        if temp < cls._THERMO_WARM:
-            return icons_symbols.ICON_THERMO_GREEN
-        if temp < cls._THERMO_HOT:
-            return icons_symbols.ICON_THERMO_YELLOW
-        return icons_symbols.ICON_THERMO_RED
+        # Validate at startup so a bad config raises here, not on the first
+        # sensor read.
+        bands_per_row = (temp_bands, pressure_bands, humidity_bands, gas_bands)
+        self._rows = tuple(
+            (unit_cell, self._validated_bands(i, bands_per_row[i]), icons)
+            for i, (unit_cell, icons) in enumerate(self.ROWS)
+        )
+
+    @staticmethod
+    def _validated_bands(row_index: int, bands) -> tuple[int, int, int]:
+        """Return ``bands`` as a 3-tuple, or raise ``ValueError`` if the shape is wrong."""
+        if len(bands) != 3:
+            raise ValueError(
+                "Display row {} requires 3 band thresholds, got {}".format(
+                    row_index, len(bands)
+                )
+            )
+        b0, b1, b2 = bands
+        if not (b0 < b1 < b2):
+            raise ValueError(
+                "Display row {} bands must be strictly ascending, got {}".format(
+                    row_index, bands
+                )
+            )
+        return (b0, b1, b2)
+
+    @staticmethod
+    def _icon_for_value(
+        value: float,
+        bands: tuple[int, ...],
+        icons: tuple[tuple[int, int], ...],
+    ) -> tuple[int, int]:
+        """Return the band's icon: the first ``icons[i]`` where ``value < bands[i]``.
+
+        Falls through to ``icons[len(bands)]`` (the highest band) when
+        ``value`` exceeds every threshold.
+        """
+        for i, threshold in enumerate(bands):
+            if value < threshold:
+                return icons[i]
+        return icons[len(bands)]
+
+    def _maybe_swap_icon(self, line_idx: int, new_cell: tuple[int, int]) -> None:
+        if new_cell != self._row_icons[line_idx]:
+            self._renderer.redraw_row_icon(line_idx, new_cell)
+            self._row_icons[line_idx] = new_cell
 
     def _update_display(self) -> None:
         self._renderer.header_write(format_header_time(self._time_service.now()))
@@ -218,16 +294,16 @@ class Display(_Display):
             self._last_rendered_reading = reading
             temp, press, hum, gas_r, status = reading
 
-            new_thermo = self._thermo_cell_for(temp)
-            if new_thermo != self._thermo_cell:
-                self._renderer.redraw_row_icon(0, new_thermo)
-                self._thermo_cell = new_thermo
+            # Gas row only follows the reading when the heater is stable.
+            for i, value in enumerate((temp, press, hum, gas_r)):
+                if i == self._GAS_ROW and status != "Stable":
+                    continue
+                _unit, bands, icons = self._rows[i]
+                self._maybe_swap_icon(i, self._icon_for_value(value, bands, icons))
 
             self._renderer.value_write(0, f"{temp:0.1f}")
             self._renderer.value_write(1, f"{press:0.0f}")
             self._renderer.value_write(2, f"{hum:0.1f}")
-            # Gas row fuses the heater status: show kOhm value only when stable,
-            # otherwise replace the number with a short "warming..." text.
             if status == "Stable":
                 self._renderer.value_write(3, f"{gas_r:0.1f}")
             else:
@@ -243,11 +319,10 @@ class Display(_Display):
             return
         self._active = True
         self._renderer.reset()
-        for i, (icon_cell, unit_cell) in enumerate(self.ROWS):
-            self._renderer.draw_left_column(i, icon_cell, unit_cell)
-        # ROWS[0] paints the green thermometer; track it so _update_display
-        # only repaints when the band actually changes.
-        self._thermo_cell = self.ROWS[0][0]
+        for i, (unit_cell, _bands, icons) in enumerate(self._rows):
+            default_icon = icons[1]
+            self._renderer.draw_left_column(i, default_icon, unit_cell)
+            self._row_icons[i] = default_icon
         # Force first _update_display to paint values even if the reader
         # returns the same tuple object as the last time we were active.
         self._last_rendered_reading = None

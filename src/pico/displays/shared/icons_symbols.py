@@ -3,8 +3,10 @@
 Asset: ``icons_symbols.rgb332`` — 128x128 RGB332, a 16x16 grid of 8x8 cells.
 
 Layout:
-  top row (sy=0..1):  16x16 icons (2x2 cells each), 1px black margin for
-                      halo-free rendering against any background
+  rows sy=0..7:       16x16 icons (2x2 cells each) arranged as a 4x4 metric
+                      grid — one metric per row, four bands per metric, in
+                      low → high order along sx. 1px black margin around each
+                      icon enables halo-free rendering against any background.
   bottom row (sy=15): 8x8 single-cell unit labels (2-symbol combos matched to
                       the bitmap8 font metrics so they align inline with text)
 
@@ -23,13 +25,28 @@ SPRITESHEET_PATH = "icons_symbols.rgb332"
 
 # Sprite cell coordinates (sx, sy) into the 16x16 cell grid.
 # Icons are 2x2 cells; the constant points to the top-left cell.
+#
+# Row 0 — thermometers, cold → hot (color-coded bulb fill).
 ICON_THERMO_BLUE = (0, 0)
 ICON_THERMO_GREEN = (2, 0)
 ICON_THERMO_YELLOW = (4, 0)
 ICON_THERMO_RED = (6, 0)
-ICON_WATERDROP = (8, 0)
-ICON_GAUGE = (10, 0)
-ICON_GAS = (12, 0)
+# Row 1 — water drops, low → high humidity (fill level increases).
+ICON_DROP_LOW = (0, 2)
+ICON_DROP_MID_LOW = (2, 2)
+ICON_DROP_MID_HIGH = (4, 2)
+ICON_DROP_HIGH = (6, 2)
+# Row 2 — pressure gauges, low → high atmospheric pressure (needle position).
+ICON_GAUGE_LOW = (0, 4)
+ICON_GAUGE_MID_LOW = (2, 4)
+ICON_GAUGE_MID_HIGH = (4, 4)
+ICON_GAUGE_HIGH = (6, 4)
+# Row 3 — gas masks, low → high gas resistance, i.e. polluted → clean
+# (filter color shifts red → yellow → green → blue).
+ICON_GAS_LOW = (0, 6)
+ICON_GAS_MID_LOW = (2, 6)
+ICON_GAS_MID_HIGH = (4, 6)
+ICON_GAS_HIGH = (6, 6)
 
 # Unit labels are single 8x8 cells along the bottom row.
 UNIT_KOHM = (0, 15)

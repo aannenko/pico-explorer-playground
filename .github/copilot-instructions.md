@@ -67,7 +67,7 @@ graph TD
 
 **Key patterns:**
 
-- **Entry point:** `src/pico/main.py` is a thin entry (~20 lines); `app.build_app(pico_graphics, micropython.schedule)` does all wiring and returns an `App` bag (`display_manager`, `tick_scheduler`, `button_poller`, `network_service`).
+- **Entry point:** `src/pico/main.py` (~40 lines) runs the config bootstrap, allocates the framebuffer, preloads the spritesheet, then hands off to `app.build_app(pico_graphics, micropython.schedule)` which returns an `App` bag (`display_manager`, `tick_scheduler`, `button_poller`, `network_service`).
 - **Display contract:** all displays inherit `displays.base.Display` (no-op defaults for `initialize` / `deinitialize` / `render` / `on_button_a` / `on_button_b`).  Each declares its redraw cadence via the `refresh_period_ms` class attribute (default `1000`; `0` = render every scheduler tick).
 - **Display lifecycle:** `DisplayManager` owns a single `RefreshGate` rebuilt on every view switch from the active display's `refresh_period_ms` and the scheduler's `ms_per_tick`.  A/B button presses reset the gate *only* when the active display overrides the base handler (so stray presses on passive views don't disturb cadence).
 - **Button handling:** `ButtonPoller` polls `machine.Pin` edges in the main loop and dispatches presses via `micropython.schedule()`.  X/Y cycle views; A/B are forwarded to the active view.
@@ -96,7 +96,13 @@ graph TD
 - Comment only what needs clarification.
 
 ## Config / secrets
-- WiFi credentials, timezone, and DST rules live in `src/pico/config.py` (git-ignored).  `src/pico/config.sample.py` is the committed template — copy it to `config.py` and fill in credentials.
+- `src/pico/config.py` is git-ignored; `src/pico/config.sample.py` is the committed template (WiFi, TZ/DST, sensor offsets/bands).
+- At boot, `config_bootstrap.ensure_config()` reconciles `config.py` against the sample *before* `import config`:
+  - empty / missing → full sample copied; boot halts with an "edit and reboot" message.
+  - some keys missing → appended under a banner; existing values kept.
+  - all keys present → no-op.
+- **Adding a key:** append to `config.sample.py` with a `#` comment block *immediately* above (no blank line, or attribution breaks). Access via `config.X` — no `getattr` defaults; tests pass values explicitly.
+- **Parser scope:** top-level `UPPER_SNAKE_CASE = ...` only; bracket-balanced multi-line RHS preserved; sample's top-level `import` lines are forwarded alongside missing blocks.
 - DST rules use tuple `(month, week, weekday, hour)` where `week=-1` = "last occurrence" and `weekday` uses MP's 0=Mon .. 6=Sun.  CET/CEST example:
   ```python
   TIME_ZONE_OFFSET = const(1)      # UTC+1 (CET)

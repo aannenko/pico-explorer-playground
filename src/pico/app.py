@@ -93,6 +93,10 @@ def _build_sensors_display(pico_graphics, palette: Palette, bme690_reader, time_
         ),
         bme690_reader=bme690_reader,
         time_service=time_service,
+        temp_bands=config.SENSOR_TEMP_BANDS,
+        pressure_bands=config.SENSOR_PRESSURE_BANDS,
+        humidity_bands=config.SENSOR_HUMIDITY_BANDS,
+        gas_bands=config.SENSOR_GAS_BANDS,
     )
 
 
