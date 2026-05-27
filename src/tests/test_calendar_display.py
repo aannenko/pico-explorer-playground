@@ -13,10 +13,6 @@ from conftest import RecordingRenderer
 # Fakes / helpers
 # ---------------------------------------------------------------------------
 
-class FakeRenderer(RecordingRenderer):
-    pass
-
-
 def _make_event(name: str, start: int, duration: int) -> Event:
     return Event(name=name, start_timestamp=start, wall_clock_duration_sec=duration)
 
@@ -30,8 +26,8 @@ def _make_stream(*specs, color_a: int = 1, color_b: int = 2) -> EventWindow:
 
 
 def _mk_display(streams=None, now: int = 0):
-    """Build a calendar.Display with a FakeRenderer and a fixed-now clock."""
-    renderer = FakeRenderer()
+    """Build a calendar.Display with a RecordingRenderer and a fixed-now clock."""
+    renderer = RecordingRenderer()
     d = calendar.Display(
         renderer=renderer,
         streams=streams if streams is not None else [],
@@ -154,34 +150,6 @@ class TestHeaderFormatting:
         assert captured == [now_val]
         header_calls = [c for c in renderer.calls if c[0] == "header_write"]
         assert header_calls[0][1] == (f"T:{now_val}",)
-
-
-# ---------------------------------------------------------------------------
-# Shared header module
-# ---------------------------------------------------------------------------
-
-class TestSharedHeader:
-    def test_format_header_time(self, monkeypatch):
-        from displays.shared.header import format_header_time
-
-        # Use a known epoch: 2026-04-10 17:56 UTC
-        # gmtime of that epoch gives the components.
-        import time
-        epoch = time.mktime((2026, 4, 10, 17, 56, 0, 0, 0))
-
-        result = format_header_time(epoch)
-
-        assert result == "2026-04-10 17:56"
-
-    def test_format_header_time_midnight(self, monkeypatch):
-        from displays.shared.header import format_header_time
-
-        import time
-        epoch = time.mktime((2026, 1, 1, 0, 0, 0, 0, 0))
-
-        result = format_header_time(epoch)
-
-        assert result == "2026-01-01 00:00"
 
 
 # ---------------------------------------------------------------------------

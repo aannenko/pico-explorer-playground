@@ -12,10 +12,6 @@ class _FakeTime:
         self.now = fn
 
 
-class FakeRenderer(RecordingRenderer):
-    pass
-
-
 class FakeBME690Reader:
     def __init__(self, reading: tuple[float, float, float, float, str]) -> None:
         self._reading = reading
@@ -35,7 +31,7 @@ _TEST_BAND_KWARGS = {
 
 
 def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
 
     # Make gmtime deterministic.
     monkeypatch.setattr(
@@ -66,7 +62,7 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
 
 
 def test_three_digit_gas_value_renders_without_decimal(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     reading = (22.4, 963.0, 25.7, 250.7, "Stable")
@@ -86,7 +82,7 @@ def test_three_digit_gas_value_renders_without_decimal(monkeypatch) -> None:
 
 
 def test_gas_row_shows_warming_when_heater_unstable(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     d = sensors.Display(
@@ -179,7 +175,7 @@ def test_rows_schema_invariants(monkeypatch) -> None:
     # ascending band tuples.
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
     d = sensors.Display(
-        renderer=FakeRenderer(),
+        renderer=RecordingRenderer(),
         bme690_reader=FakeBME690Reader((20.0, 1005.0, 40.0, 70.0, "Stable")),
         time_service=_FakeTime(lambda: 0),
         **_TEST_BAND_KWARGS,
@@ -198,7 +194,7 @@ def test_band_change_triggers_single_icon_repaint_per_metric(monkeypatch) -> Non
     import displays.shared.icons_symbols as ics
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     # Reading chosen so every metric lands in its default band → no swaps
     # during initialize().
     reader = FakeBME690Reader((20.0, 1005.0, 40.0, 70.0, "Stable"))
@@ -261,7 +257,7 @@ def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
     import displays.shared.icons_symbols as ics
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     reader = FakeBME690Reader((20.0, 1005.0, 40.0, 70.0, "Stable"))
     d = sensors.Display(
         renderer=renderer,
@@ -290,7 +286,7 @@ def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
 
 
 def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
 
     monkeypatch.setattr(
         time,
@@ -330,7 +326,7 @@ def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
 
 
 def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
@@ -355,7 +351,7 @@ def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -
 
 
 def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
@@ -377,7 +373,7 @@ def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch)
 
 
 def test_reinitialize_repaints_values_even_if_reader_returns_same_tuple(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     reader = FakeBME690Reader((22.4, 963.11, 25.7, 65.674, "Stable"))
@@ -397,7 +393,7 @@ def test_reinitialize_repaints_values_even_if_reader_returns_same_tuple(monkeypa
 
 
 def test_reinitialize_repaints_left_column(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     d = sensors.Display(
@@ -417,7 +413,7 @@ def test_reinitialize_repaints_left_column(monkeypatch) -> None:
 
 
 def test_deinitialize_sets_inactive_and_is_idempotent(monkeypatch) -> None:
-    renderer = FakeRenderer()
+    renderer = RecordingRenderer()
 
     monkeypatch.setattr(
         time,
