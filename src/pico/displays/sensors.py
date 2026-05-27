@@ -301,7 +301,8 @@ class Display(_Display):
             self._renderer.value_write(1, f"{press:0.0f}")
             self._renderer.value_write(2, f"{hum:0.1f}")
             if status == "Stable":
-                self._renderer.value_write(3, f"{gas_r:0.1f}")
+                gas_r_text = str(round(gas_r)) if gas_r >= 100 else f"{gas_r:0.1f}"
+                self._renderer.value_write(3, gas_r_text)
             else:
                 self._renderer.value_write(3, "warming...")
 

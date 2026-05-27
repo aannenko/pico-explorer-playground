@@ -65,6 +65,26 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
     assert renderer.update_calls == 1
 
 
+def test_three_digit_gas_value_renders_without_decimal(monkeypatch) -> None:
+    renderer = FakeRenderer()
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+
+    reading = (22.4, 963.0, 25.7, 250.7, "Stable")
+    d = sensors.Display(
+        renderer=renderer,
+        bme690_reader=FakeBME690Reader(reading),
+        time_service=_FakeTime(lambda: 0),
+        **_TEST_BAND_KWARGS,
+    )
+
+    d._update_display()
+
+    # Two-digit rows keep the decimal; gas at >=100 drops it.
+    assert ("value_write", (0, "22.4"), {}) in renderer.calls
+    assert ("value_write", (2, "25.7"), {}) in renderer.calls
+    assert ("value_write", (3, "251"), {}) in renderer.calls
+
+
 def test_gas_row_shows_warming_when_heater_unstable(monkeypatch) -> None:
     renderer = FakeRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
