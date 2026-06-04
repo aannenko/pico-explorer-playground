@@ -16,6 +16,8 @@ if _config_state == config_bootstrap.CONFIG_CREATED:
     )
 if _config_state == config_bootstrap.CONFIG_PATCHED:
     print("config: appended missing keys from config.sample.py")
+if _config_state == config_bootstrap.CONFIG_RESYNCED:
+    print("config: resynced schema-upgraded keys from config.sample.py")
 
 import config  # noqa: F401, E402
 

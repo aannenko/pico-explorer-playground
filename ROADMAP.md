@@ -7,47 +7,41 @@ leaves them ambiguous.
 ## Implemented
 
 - **Multi-screen UI** — hardware buttons (X/Y) cycle between independent
-  views via `ButtonPoller` (polled in main loop). Three views today:
-  Sensors, Countdown, Calendar. Each view has `initialize()` /
-  `deinitialize()` lifecycle methods; `DisplayManager` manages the active
-  view index, switching, and forwards A/B button presses to the active
-  display. Views that handle buttons implement `on_button_a()` /
-  `on_button_b()`.
+  views. Three views today: Sensors, Countdown, Calendar. Each has a
+  lifecycle (`initialize` / `deinitialize`); A/B button presses are
+  forwarded to the active view (Countdown is the only consumer today).
 
-- **Countdown timer** — `CountdownTimer` service is a pure timer engine
-  with `on_done` / `on_configure` callbacks. `configure(name, total_sec)`
-  sets / resets presets; `start()` / `pause()` / `resume()` / `reset()` for
-  state transitions. The display owns duration presets
-  (`DURATIONS` / `LABELS`) and cycling logic and bootstraps the timer via
-  `configure()` in its constructor. `ExplorerBuzzer.play_alert` is wired
-  as `on_done`; `stop_alert` as `on_configure`. The countdown keeps
-  ticking (and buzzer fires) even when the user switches to another
-  display. `countdown.Display` is a rendering-only view. Ring rendering
-  lives in `displays/ring.py` as a reusable module.
+- **Countdown timer** — preset durations cycled via A/B. The buzzer fires
+  on completion and is silenced by any preset change. The timer keeps
+  ticking (and the buzzer keeps firing) while the user is on a different
+  view.
 
 - **Calendar view** — horizontal timeline where time progresses
   left-to-right. 2-hour sliding window (30 min past + 90 min future) with
-  a "now" marker at 25 % from the left. Up to 5 event streams rendered as
-  horizontal bar rows with two alternating colors per stream. Labels use
-  binary-search truncation to fit narrow bars (`bitmap6` x2 scale, 2 px
-  margins). Right-aligned remaining-time labels (format `-HH:mm`) shown
-  when an event's end extends beyond the visible window. 15-minute tick
-  marks on the baseline, hour labels below. Static overlay (now-line
-  segments, baseline) drawn once on init; rows and time axis redrawn each
-  minute. `@micropython.native` on hot draw methods. The "now" line is
-  drawn as short segments in the gaps between rows. Each stream is backed
-  by an `EventWindow` (`scheduling/event_window.py`), constructed from a
-  `Stream` (RGB tuples) by mapping RGB → pen via `gfx.create_pen`.
-  Currently wired with one `work_week_loop` stream plus 4 demo streams
-  from `demo_streams.py`. No A/B button interaction; purely
-  auto-scrolling.
+  a "now" marker at 25 % from the left. Up to 5 event-stream rows rendered
+  as horizontal bar rows with two alternating colors per stream. Labels
+  truncate to fit narrow bars; right-aligned remaining-time labels
+  (`-HH:mm`) appear when an event extends beyond the visible window.
+  15-minute tick marks on the baseline, hour labels below. Auto-scrolling;
+  no button interaction. Currently fed by one `work_week_loop` stream plus
+  4 demo streams (slated for replacement — see _Planned_).
+
+- **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
+  gas resistance) with a header showing local time. Each row carries a
+  **24-hour history graph** to the right of the value: 1-px columns
+  spaced ~14 min apart, filled with a pastel band-color spanning the row
+  height. A bright pixel inside each column marks the value's Y position
+  when in-range; out-of-range columns show the band fill alone; NaN
+  columns are skipped. Per-row cap range and band thresholds both come
+  from `config.SENSOR_*_BANDS` (one 5-tuple per metric). The gas row's
+  graph is hidden while the heater is warming; on the Warming→Stable
+  transition the full row repaints from the captured history. Value text
+  is auto-sized to leave room for the graph. No persistence across
+  reboots.
 
 ## Partially implemented
 
-- **Sensor dashboard** — shows BME690 readings (temperature, pressure,
-  humidity, gas resistance, heater status) and a header with local time
-  (via `TimeService.now`). History graphs are planned but not yet
-  implemented.
+_(none currently)_
 
 ## Planned
 
@@ -64,7 +58,7 @@ leaves them ambiguous.
 - Due to the 240×240 display constraint, only the Sensors and Calendar
   views share a common header (time / date); other views may use the full
   screen.
-- Header typography (Sensors / Calendar): `bitmap6` at x3 scale, single
+- Header typography (Sensors / Calendar): `bitmap8` at x3 scale, single
   line, plus 6 px bottom margin.
 - Prefer clean boundaries between data acquisition (sensors / network),
   scheduling, and rendering.

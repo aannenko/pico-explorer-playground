@@ -12,7 +12,7 @@ import config
 import demo_streams
 from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
-from displays.palette import Palette, build_palette
+from displays.palette import Palette, build_palette, build_sensor_band_pens
 from displays.status import StatusDisplay
 from hardware.explorer import (
     BUTTON_A_PIN,
@@ -27,12 +27,49 @@ from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.pimoroni_bme690 import PimoroniBME690
+from services.ring_history import RingHistory
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
 from services.wifi_client import WifiClient
 
 
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
+
+
+_SENSOR_BANDS_KEYS = (
+    "SENSOR_TEMP_BANDS",
+    "SENSOR_PRESSURE_BANDS",
+    "SENSOR_HUMIDITY_BANDS",
+    "SENSOR_GAS_BANDS",
+)
+
+
+def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
+    """Backstop check after config_bootstrap should have already auto-resynced
+    any old 3-tuple SENSOR_*_BANDS.  Surfaces malformed shapes that slipped
+    through (hand-edit after bootstrap, bootstrap I/O failure) on the panel
+    instead of as a blank/frozen screen.
+
+    Tolerant of any input shape — wraps the structural checks in try/except
+    so a scalar (``SENSOR_TEMP_BANDS = 14``) or non-comparable mixed types
+    surface the same panel error instead of an uncaught traceback.
+    """
+    for name in _SENSOR_BANDS_KEYS:
+        bands = getattr(config, name, None)
+        try:
+            ok = (
+                bands is not None
+                and len(bands) == 5
+                and list(bands) == sorted(bands)
+                and len(set(bands)) == 5
+            )
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            # Full diagnostic to serial; short panel-friendly message on screen.
+            print("config error:", name, "=", repr(bands))
+            status_display.show("Bad config", "edit & reboot")
+            raise SystemExit(1)
 
 
 class App:
@@ -75,15 +112,25 @@ def _build_countdown_display(pico_graphics, palette: Palette, tick_scheduler: Ti
     )
 
 
-def _build_sensors_display(pico_graphics, palette: Palette, bme690_reader, time_service: TimeService):
+def _build_sensors_display(
+    pico_graphics,
+    palette: Palette,
+    bme690_reader,
+    time_service: TimeService,
+    geometry: "sensors.Geometry",
+    band_pens,
+    history: RingHistory,
+):
+    """Construct the sensors Display from pre-built parts.
+
+    Geometry, band pens, and history are built earlier in ``build_app`` so
+    sensor capture can start before the blocking network sync.  This helper
+    just wires the Display object once ``time_service`` (which needs NTP)
+    is available.
+    """
     return sensors.Display(
         renderer=sensors.Renderer(
-            geometry=sensors.Geometry(
-                pico_graphics=pico_graphics,
-                font=config.FONT,
-                font_height=config.FONT_HEIGHT,
-                text_scale=config.TEXT_SCALE,
-            ),
+            geometry=geometry,
             colors=sensors.Colors(
                 background=palette.black,
                 header_text=palette.white,
@@ -93,6 +140,9 @@ def _build_sensors_display(pico_graphics, palette: Palette, bme690_reader, time_
         ),
         bme690_reader=bme690_reader,
         time_service=time_service,
+        history=history,
+        band_pens=band_pens,
+        graph_height=geometry.graph_height,
         temp_bands=config.SENSOR_TEMP_BANDS,
         pressure_bands=config.SENSOR_PRESSURE_BANDS,
         humidity_bands=config.SENSOR_HUMIDITY_BANDS,
@@ -152,7 +202,40 @@ def build_app(pico_graphics, schedule_fn) -> App:
         subtext_color=palette.gray,
     )
 
+    # Backstop validation: config_bootstrap should have already auto-resynced
+    # any stale-schema SENSOR_*_BANDS, but if anything slipped through (manual
+    # edit, I/O failure) we surface it on the panel before the long network
+    # boot, while ``status_display`` is still alive.
+    _validate_sensor_bands_or_halt(status_display)
+
     tick_scheduler = TickScheduler()
+
+    # Build sensor + history BEFORE the blocking WiFi+NTP bootstrap so the
+    # immediate first RingHistory commit captures a boot-time reading rather
+    # than one taken 0–5 minutes later.  TickScheduler isn't running yet
+    # (main.py calls .start() after build_app returns), so periodic commits
+    # only kick in then.
+    bme690_reader = PimoroniBME690(
+        temp_offset=config.BME690_TEMP_OFFSET,
+        hum_offset=config.BME690_HUM_OFFSET,
+        prsr_offset=config.BME690_PRSR_OFFSET,
+        sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
+    )
+    sensors_geometry = sensors.Geometry(
+        pico_graphics=pico_graphics,
+        font=config.FONT,
+        font_height=config.FONT_HEIGHT,
+        text_scale=config.TEXT_SCALE,
+        tick_period_ms=tick_scheduler.ms_per_tick,
+    )
+    sensors_band_pens = build_sensor_band_pens(pico_graphics)
+    sensor_history = RingHistory(
+        bme690_reader.read,
+        num_metrics=4,
+        capacity=sensors_geometry.graph_width,
+        ticks_per_commit=sensors_geometry.ticks_per_commit,
+    )
+    tick_scheduler.register(sensor_history._tick_ref)
 
     wifi_client = WifiClient()
     network_service = NetworkService(
@@ -175,14 +258,15 @@ def build_app(pico_graphics, schedule_fn) -> App:
         tick_scheduler=tick_scheduler,
     )
 
-    bme690_reader = PimoroniBME690(
-        temp_offset=config.BME690_TEMP_OFFSET,
-        hum_offset=config.BME690_HUM_OFFSET,
-        prsr_offset=config.BME690_PRSR_OFFSET,
-        sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
+    sensors_display = _build_sensors_display(
+        pico_graphics,
+        palette,
+        bme690_reader,
+        time_service,
+        sensors_geometry,
+        sensors_band_pens,
+        sensor_history,
     )
-
-    sensors_display = _build_sensors_display(pico_graphics, palette, bme690_reader, time_service)
     countdown_display = _build_countdown_display(pico_graphics, palette, tick_scheduler)
     calendar_display = _build_calendar_display(pico_graphics, palette, time_service)
 

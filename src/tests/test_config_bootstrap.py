@@ -329,3 +329,282 @@ def test_imports_not_forwarded_when_target_has_every_key(tmp_path) -> None:
 
     assert state == config_bootstrap.CONFIG_OK
     assert _read(target) == original
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Schema-version reconciliation: # bootstrap: schema v<N>
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_schema_bump_replaces_stale_target_block(tmp_path) -> None:
+    """Sample marker > target marker (or missing) → block is rewritten verbatim."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "FOO = 1\n"
+            "\n"
+            "# bootstrap: schema v2\n"
+            "# Bands now use 5 ascending edges.\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+            "\n"
+            "AFTER = 99\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(
+        target,
+        (
+            "FOO = 1\n"
+            "BANDS = (20, 30, 40)\n"  # old shape, no marker
+            "AFTER = 99\n"
+        ),
+    )
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    # New block (with marker) is present.
+    assert "# bootstrap: schema v2" in text
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+    # Old block is gone.
+    assert "BANDS = (20, 30, 40)" not in text
+    # Surrounding unrelated keys untouched.
+    assert "FOO = 1" in text
+    assert "AFTER = 99" in text
+
+
+def test_schema_marker_no_op_when_versions_match(tmp_path) -> None:
+    """Sample.version == target.version → no replacement."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v2\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    # User has their own 5-edge values at v2 — should NOT be replaced.
+    original = (
+        "# bootstrap: schema v2\n"
+        "BANDS = (15, 25, 35, 45, 55)\n"
+    )
+    _write(target, original)
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_OK
+    assert _read(target) == original
+
+
+def test_schema_marker_replaces_when_target_lacks_marker(tmp_path) -> None:
+    """Target's missing marker is treated as v0 → any sample marker triggers resync."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v1\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(target, "BANDS = (1, 2, 3, 4, 5)\n")  # no marker → v0
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    assert "# bootstrap: schema v1" in text
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+
+
+def test_schema_marker_no_op_without_markers(tmp_path) -> None:
+    """If neither side has the marker, the existing PATCHED/OK paths still rule."""
+    sample = tmp_path / "config.sample.py"
+    _write(sample, "FOO = 1\nBAR = 2\n")
+    target = tmp_path / "config.py"
+    original = "FOO = 100\n"
+    _write(target, original)
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_PATCHED
+    text = _read(target)
+    assert "FOO = 100" in text
+    assert "BAR = 2" in text
+
+
+def test_schema_resync_takes_precedence_over_patched(tmp_path) -> None:
+    """If both missing keys and stale-schema keys are present, RESYNCED wins."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v2\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+            "\n"
+            "NEW_KEY = 42\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(target, "BANDS = (1, 2, 3)\n")  # stale + missing NEW_KEY
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+    # NEW_KEY was appended (PATCHED logic) AND BANDS was rewritten (RESYNCED).
+    assert "NEW_KEY = 42" in text
+    assert "BANDS = (1, 2, 3)" not in text
+
+
+def test_schema_resync_preserves_multiline_block(tmp_path) -> None:
+    """A multi-line replacement block is emitted verbatim, brackets balanced."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v2\n"
+            "# A multi-line replacement spanning several lines.\n"
+            "DST = (\n"
+            "    (3, -1, 6, 2),\n"
+            "    (10, -1, 6, 3),\n"
+            ")\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(target, "DST = (1, 2, 3, 4)\n")
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    assert "# bootstrap: schema v2" in text
+    assert "DST = (\n    (3, -1, 6, 2),\n    (10, -1, 6, 3),\n)\n" in text
+    # File still parses.
+    exec_ns: dict = {}
+    exec(text, exec_ns)
+    assert exec_ns["DST"] == ((3, -1, 6, 2), (10, -1, 6, 3))
+
+
+def test_schema_resync_drops_original_target_block_header(tmp_path) -> None:
+    """The target's preceding comment header for a replaced block is dropped
+    (so user-added comments on the stale block don't survive). The
+    replacement carries the sample's header.
+    """
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v2\n"
+            "# Sample explanation for the new shape.\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(
+        target,
+        (
+            "# My old comment for the old shape.\n"
+            "BANDS = (20, 30, 40)\n"
+        ),
+    )
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    assert "# My old comment for the old shape." not in text
+    assert "# Sample explanation for the new shape." in text
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+
+
+def test_schema_resync_replaces_only_marked_keys(tmp_path) -> None:
+    """Unrelated user-customized keys (no marker on either side) survive untouched."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "WIFI_SSID = \"SampleSSID\"\n"
+            "\n"
+            "# bootstrap: schema v2\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    _write(
+        target,
+        (
+            "WIFI_SSID = \"MyNetwork\"\n"
+            "BANDS = (1, 2, 3)\n"
+        ),
+    )
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    # User WIFI_SSID preserved (no marker on either side).
+    assert 'WIFI_SSID = "MyNetwork"' in text
+    assert 'WIFI_SSID = "SampleSSID"' not in text
+    # BANDS resynced.
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+
+
+def test_schema_marker_only_recognised_in_comment_lines(tmp_path) -> None:
+    """A 'bootstrap: schema v…' substring in a string literal must NOT trigger."""
+    sample = tmp_path / "config.sample.py"
+    _write(
+        sample,
+        (
+            "# bootstrap: schema v2\n"
+            "BANDS = (10, 20, 30, 40, 50)\n"
+        ),
+    )
+    target = tmp_path / "config.py"
+    # The string literal contains the marker but it isn't in a comment line.
+    _write(
+        target,
+        (
+            'NOTE = "bootstrap: schema v9 (just a string)"\n'
+            "BANDS = (1, 2, 3)\n"
+        ),
+    )
+
+    state = config_bootstrap.ensure_config(str(sample), str(target))
+
+    # The NOTE block has no real marker → BANDS still resyncs because target's
+    # BANDS block also has no real marker (target version = v0 < sample v2).
+    assert state == config_bootstrap.CONFIG_RESYNCED
+    text = _read(target)
+    assert 'NOTE = "bootstrap: schema v9 (just a string)"' in text
+    assert "BANDS = (10, 20, 30, 40, 50)" in text
+
+
+def test_extract_schema_version_parses_marker() -> None:
+    """Direct unit test for the marker parser."""
+    fn = config_bootstrap._extract_schema_version
+    assert fn("# bootstrap: schema v2\nFOO = 1\n") == 2
+    assert fn("# leading comment\n# bootstrap: schema v37\nFOO = 1\n") == 37
+    assert fn("FOO = 1\n") is None
+    assert fn("# unrelated comment\nFOO = 1\n") is None
+    # Marker without digits → None.
+    assert fn("# bootstrap: schema v\nFOO = 1\n") is None
+    # Marker inside a string literal (not a comment line) → None.
+    assert fn('FOO = "bootstrap: schema v3"\n') is None
+
+
+def test_extract_schema_version_is_whitespace_tolerant() -> None:
+    """O2 fix: extra whitespace between tokens must still match."""
+    fn = config_bootstrap._extract_schema_version
+    # Multiple spaces.
+    assert fn("#  bootstrap:  schema  v4\nFOO = 1\n") == 4
+    # Tab separators.
+    assert fn("#\tbootstrap:\tschema\tv5\nFOO = 1\n") == 5
+    # Mixed.
+    assert fn("# \t bootstrap: \t schema \t v6\nFOO = 1\n") == 6
+    # Leading whitespace before the # is fine.
+    assert fn("   # bootstrap: schema v7\nFOO = 1\n") == 7

@@ -8,10 +8,26 @@ This module reconciles it against ``config.sample.py``:
   - target has some keys                     -> append missing keys (and any
                                                 sample imports the target
                                                 lacks), return CONFIG_PATCHED
+  - target has stale-schema blocks           -> rewrite those blocks with
+                                                sample's version,      return CONFIG_RESYNCED
 
 The parser only recognises top-level ``UPPER_SNAKE_CASE = ...`` assignments;
 right-hand sides (including multi-line tuples) are copied verbatim, never
 evaluated.  Must not import anything that depends on ``config``.
+
+**Schema-version reconciliation.** A sample block can declare a per-key
+schema version by including a ``# bootstrap: schema v<N>`` line anywhere
+in its preceding comment block.  When the sample's version is higher than
+the target's (target lacking the marker counts as v0), the bootstrap
+rewrites the target's block (header comments + value, bracket-balanced)
+with the sample's block.  Use this to silently roll out schema changes;
+user customisations of the affected key are clobbered by design.
+
+Return-code precedence when multiple actions could apply in one boot:
+``CREATED > RESYNCED > PATCHED > OK``.  ``CREATED`` is mutually exclusive
+with the others (the file is rewritten from scratch); ``RESYNCED`` and
+``PATCHED`` can in principle co-occur (user has missing keys *and*
+stale-schema keys), in which case ``RESYNCED`` is returned.
 """
 
 import os
@@ -23,6 +39,7 @@ _TARGET = "config.py"
 CONFIG_OK = 0
 CONFIG_PATCHED = 1
 CONFIG_CREATED = 2
+CONFIG_RESYNCED = 3
 
 
 def _assignment_key(line):  # (str) -> str | None
@@ -142,6 +159,95 @@ def _parse_blocks(path: str) -> list:
     return blocks
 
 
+def _extract_schema_version(block_text: str):  # (str) -> int | None
+    """Return integer N if a ``# bootstrap: schema v<N>`` marker is present.
+
+    Whitespace-tolerant: matches any positive whitespace between the
+    tokens ``bootstrap:``, ``schema``, and ``v<digits>``.  Only comment
+    lines are considered, so a ``bootstrap: schema v...`` substring in a
+    string literal won't trigger.  Returns ``None`` if no marker is found
+    or the version digits are missing.
+    """
+    for line in block_text.splitlines():
+        stripped = line.lstrip()
+        if not stripped.startswith("#"):
+            continue
+        # str.split() with no args collapses any whitespace run.
+        tokens = stripped[1:].split()
+        for i in range(len(tokens) - 2):
+            if (
+                tokens[i] == "bootstrap:"
+                and tokens[i + 1] == "schema"
+                and len(tokens[i + 2]) > 1
+                and tokens[i + 2][0] == "v"
+                and tokens[i + 2][1:].isdigit()
+            ):
+                return int(tokens[i + 2][1:])
+    return None
+
+
+def _rewrite_with_replaced_blocks(target_path: str, replacements: dict) -> None:
+    """Rewrite ``target_path`` swapping in ``replacements[key]`` for each named block.
+
+    Each replacement is the full new block text (header comments + assignment
+    + any multi-line continuation).  Surrounding content (other blocks, blank
+    lines, unrelated lines) is preserved verbatim.  The original block's
+    preceding comment header is dropped along with its body.
+    """
+    with open(target_path, "r") as f:
+        lines = f.readlines()
+
+    output = []
+    idx = 0
+    total = len(lines)
+    pending_header = []
+
+    while idx < total:
+        line = lines[idx]
+
+        if line.lstrip().startswith("#"):
+            pending_header.append(line)
+            idx += 1
+            continue
+
+        if not line.strip():
+            output.extend(pending_header)
+            pending_header = []
+            output.append(line)
+            idx += 1
+            continue
+
+        key = _assignment_key(line)
+        if key is None:
+            output.extend(pending_header)
+            pending_header = []
+            output.append(line)
+            idx += 1
+            continue
+
+        # Start of an assignment block. Consume the body (multi-line allowed).
+        body = [line]
+        depth = _bracket_depth_delta(line)
+        idx += 1
+        while depth > 0 and idx < total:
+            body.append(lines[idx])
+            depth += _bracket_depth_delta(lines[idx])
+            idx += 1
+
+        if key in replacements:
+            output.append(replacements[key])
+            pending_header = []
+        else:
+            output.extend(pending_header)
+            output.extend(body)
+            pending_header = []
+
+    output.extend(pending_header)
+
+    with open(target_path, "w") as f:
+        f.writelines(output)
+
+
 def _copy_file(src: str, dst: str) -> None:
     with open(src, "r") as fsrc, open(dst, "w") as fdst:
         while True:
@@ -160,10 +266,13 @@ def _target_exists(path: str) -> bool:
 
 
 def ensure_config(sample_path: str = _SAMPLE, target_path: str = _TARGET) -> int:
-    """Make ``target_path`` carry every key declared in ``sample_path``.
+    """Make ``target_path`` carry every key declared in ``sample_path`` at the
+    sample's schema version.
 
-    Returns one of ``CONFIG_OK`` / ``CONFIG_PATCHED`` / ``CONFIG_CREATED``.
-    Silent — callers handle any user-facing logging.
+    Returns one of ``CONFIG_OK`` / ``CONFIG_PATCHED`` / ``CONFIG_RESYNCED`` /
+    ``CONFIG_CREATED``.  Precedence when multiple actions apply:
+    ``CREATED > RESYNCED > PATCHED > OK``.  Silent — callers handle any
+    user-facing logging.
     """
     if not _target_exists(target_path):
         _copy_file(sample_path, target_path)
@@ -178,24 +287,52 @@ def ensure_config(sample_path: str = _SAMPLE, target_path: str = _TARGET) -> int
         return CONFIG_CREATED
 
     sample_blocks = _parse_blocks(sample_path)
+
+    patched = False
     missing_blocks = [(k, b) for k, b in sample_blocks if k not in target_keys]
-    if not missing_blocks:
-        return CONFIG_OK
+    if missing_blocks:
+        # Forward any sample imports the target lacks, so appended blocks that
+        # need (e.g.) ``const`` remain importable.
+        target_imports = {line.rstrip() for line in _parse_imports(target_path)}
+        missing_imports = [
+            line for line in _parse_imports(sample_path)
+            if line.rstrip() not in target_imports
+        ]
 
-    # Forward any sample imports the target lacks, so appended blocks that
-    # need (e.g.) ``const`` remain importable.
-    target_imports = {line.rstrip() for line in _parse_imports(target_path)}
-    missing_imports = [
-        line for line in _parse_imports(sample_path)
-        if line.rstrip() not in target_imports
-    ]
+        with open(target_path, "a") as f:
+            f.write("\n\n# --- Added by config_bootstrap from {} ---\n".format(sample_path))
+            for line in missing_imports:
+                f.write(line)
+            if missing_imports:
+                f.write("\n")
+            for _key, block in missing_blocks:
+                f.write(block)
+        patched = True
 
-    with open(target_path, "a") as f:
-        f.write("\n\n# --- Added by config_bootstrap from {} ---\n".format(sample_path))
-        for line in missing_imports:
-            f.write(line)
-        if missing_imports:
-            f.write("\n")
-        for _key, block in missing_blocks:
-            f.write(block)
-    return CONFIG_PATCHED
+    # Schema-version reconciliation pass: for any sample block that carries
+    # a ``# bootstrap: schema v<N>`` marker, replace the target's block when
+    # the sample's version is higher (target missing the marker = v0).
+    sample_marked = {}
+    for key, block in sample_blocks:
+        version = _extract_schema_version(block)
+        if version is not None:
+            sample_marked[key] = (version, block)
+
+    if sample_marked:
+        target_blocks = _parse_blocks(target_path)  # re-read after possible patch
+        replacements = {}
+        for key, target_block in target_blocks:
+            if key not in sample_marked:
+                continue
+            sample_version, sample_block = sample_marked[key]
+            target_version = _extract_schema_version(target_block)
+            if target_version is None or sample_version > target_version:
+                replacements[key] = sample_block
+
+        if replacements:
+            _rewrite_with_replaced_blocks(target_path, replacements)
+            return CONFIG_RESYNCED
+
+    if patched:
+        return CONFIG_PATCHED
+    return CONFIG_OK

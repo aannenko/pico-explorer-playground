@@ -17,6 +17,32 @@ DEFAULT_STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] =
 ]
 
 
+# Sensor-view band colors: 4 rows × 4 bands × (pastel, bright) × (r, g, b).
+# Row order matches ``sensors.Display.ROWS`` (temp / pressure / humidity /
+# gas).  Band 0 is the lowest, band 3 the highest.  The pastel value fills
+# the entire 24px-tall history column for a sample in that band; the
+# bright value paints the single value-Y pixel inside the column.
+#
+# All values are quantised to RGB332 on-device (3-3-2 bits → 8 R levels, 8
+# G levels, 4 B levels), so close neighbours may render identically.
+
+# Named pairs reused across rows — tweak once, applies everywhere referenced.
+RED       = ((90, 25, 25), (255, 90, 80))
+YELLOW    = ((90, 70, 20), (255, 220, 90))
+GREEN     = ((20, 70, 30), (90, 220, 110))
+BLUE      = ((20, 30, 80), (80, 140, 255))
+CYAN      = ((20, 60, 80), (90, 200, 230))
+PALE_BLUE = ((50, 70, 90), (180, 220, 240))
+PURPLE    = ((60, 30, 90), (190, 110, 230))  # used once (pressure band 0)
+
+SENSOR_BAND_RGB: tuple = (
+    (BLUE,   GREEN,     YELLOW,    RED),    # Temperature: cold / cool / warm / hot
+    (PURPLE, CYAN,      PALE_BLUE, YELLOW), # Pressure:    stormy / low / normal / fair
+    (YELLOW, PALE_BLUE, CYAN,      BLUE),   # Humidity:    dry / comfy-low / comfy-high / humid
+    (RED,    YELLOW,    GREEN,     CYAN),   # Gas:         polluted / mild / decent / clean
+)
+
+
 class Palette:
     def __init__(
         self,
@@ -40,4 +66,20 @@ def build_palette(gfx):  # gfx: PicoGraphics
         white=gfx.create_pen(255, 255, 255),
         orange=gfx.create_pen(255, 165, 0),
         dark_gray=gfx.create_pen(40, 40, 40),
+    )
+
+
+def build_sensor_band_pens(gfx):  # gfx: PicoGraphics
+    """Build the 4×4 grid of (pastel_pen, bright_pen) pairs from ``SENSOR_BAND_RGB``.
+
+    Returns a ``tuple[4][4][2]`` of pen ints (one pen per ``create_pen``
+    call).  The display indexes as ``pens[metric_idx][band_idx]`` to get
+    ``(pastel_pen, bright_pen)`` for a sample.
+    """
+    return tuple(
+        tuple(
+            (gfx.create_pen(*pastel), gfx.create_pen(*bright))
+            for pastel, bright in row
+        )
+        for row in SENSOR_BAND_RGB
     )

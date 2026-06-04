@@ -1,10 +1,41 @@
 import micropython
 
+from micropython import const
+
 from displays.base import Display as _Display
 from displays.shared import icons_symbols
 from displays.shared.header import format_header_time
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
+
+
+_HISTORY_SECONDS = const(24 * 3600)   # 24 h of history per metric
+_L_GAP = const(3)                     # px between value text and graph
+_R_MARGIN = const(0)                  # px between graph right edge and screen edge
+# Widest realistic value the formatter can emit: a sub-zero outdoor
+# temperature with one decimal, e.g. "-88.8" (5 cells, 69 px at bitmap8
+# scale 3).  Sized so every realistic reading fits without overdrawing
+# the graph: e.g. "-12.3" (temp), "100.0" (humidity), "250.7" (gas).
+_GRAPH_VALUE_SAMPLE = "-88.8"
+
+
+def _largest_divisor_of(n: int, max_val: int) -> int:
+    """Return the largest integer d in [1..max_val] that divides n.
+
+    Used at boot to pick a graph width that splits 24 h of ticks into an
+    integer ``ticks_per_commit``.  ``1`` always divides ``n``, so the loop
+    terminates for any ``max_val >= 1``.
+    """
+    if max_val < 1:
+        raise ValueError("max_val must be >= 1")
+    if max_val > n:
+        max_val = n
+    d = max_val
+    while d > 1:
+        if n % d == 0:
+            return d
+        d -= 1
+    return 1
 
 
 class Colors:
@@ -29,13 +60,14 @@ class Geometry:
         font: str,
         font_height: int,
         text_scale: int,
+        tick_period_ms: int,
     ) -> None:
         self.graphics = pico_graphics
 
         self.width, self.height = pico_graphics.get_bounds()
 
         self.font = font
-        pico_graphics.set_font(font)
+        pico_graphics.set_font(font)  # must precede measure_text below
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
         self.line_spacing = self.text_height // 2
@@ -72,7 +104,29 @@ class Geometry:
         self.icon_x = 0
         self.unit_x = self.icon_x + self.icon_size_px + 4   # 36
         self.value_x = self.unit_x + self.unit_size_px + 6  # 66
-        self.value_rect_width = self.width - self.value_x
+
+        # Graph layout — fully derived from the actual rendered width of a
+        # 4-character value at the current font/scale.  No hardcoded value
+        # column width.
+        value_max_text_width = pico_graphics.measure_text(
+            _GRAPH_VALUE_SAMPLE, scale=text_scale
+        )
+        self.graph_x = self.value_x + value_max_text_width + _L_GAP
+        available = self.width - self.graph_x - _R_MARGIN
+        if available < 1:
+            raise RuntimeError(
+                "sensors geometry: no room for graph (font/scale too large)"
+            )
+        # 24 h of scheduler ticks; for 500 ms ticks → 172800.
+        total_ticks = _HISTORY_SECONDS * 1000 // tick_period_ms
+        self.graph_width = _largest_divisor_of(total_ticks, available)
+        self.ticks_per_commit = total_ticks // self.graph_width
+        self.graph_height = self.text_height  # 24 px, matches row height
+
+        # Value-cell clear width: covers the value text + the L-gap so
+        # ``line_write`` never touches the graph rect.  Also stops just
+        # before the graph rect on the right.
+        self.value_clear_width = self.graph_x - self.value_x
 
 
 class Renderer:
@@ -134,9 +188,11 @@ class Renderer:
             return
 
         g = self._geom
-        # Clear value-column rect only; left-column icon + unit are static.
+        # Clear value-column rect only; left-column icon + unit are static,
+        # and the graph rect (graph_x .. graph_x+graph_width) is never
+        # touched by line_write — it has its own redraw path.
         self._gfx.set_pen(self._colors.background)
-        self._gfx.rectangle(g.value_x, g.line_y[line_idx], g.value_rect_width, g.value_rect_height)
+        self._gfx.rectangle(g.value_x, g.line_y[line_idx], g.value_clear_width, g.value_rect_height)
 
         if text:
             self._gfx.set_pen(pen)
@@ -160,6 +216,42 @@ class Renderer:
     def secondary_write(self, line_idx: int, text: str) -> None:
         self.line_write(line_idx, text, pen=self._colors.secondary_text)
 
+    def draw_graph_clear(self, line_idx: int) -> None:
+        """Paint the row's graph rect with the background pen."""
+        if line_idx < 0 or line_idx >= len(self._last_lines):
+            return
+        g = self._geom
+        self._gfx.set_pen(self._colors.background)
+        self._gfx.rectangle(g.graph_x, g.line_y[line_idx], g.graph_width, g.graph_height)
+
+    @micropython.native
+    def draw_graph_column(
+        self,
+        line_idx: int,
+        col: int,
+        pastel_pen: int,
+        bright_pen,  # int | None
+        value_y,     # int | None
+    ) -> None:
+        """Paint one 1×graph_height column: full-height pastel fill, plus an
+        optional single bright pixel at ``value_y`` inside the column.
+
+        ``col`` is the column index 0..graph_width-1 within the graph rect
+        (caller maps history value_idx → col).  ``value_y`` is the y offset
+        inside the row (0 = top, graph_height-1 = bottom); the bright pixel
+        is only drawn when both ``bright_pen`` and ``value_y`` are not None.
+        """
+        if line_idx < 0 or line_idx >= len(self._last_lines):
+            return
+        g = self._geom
+        x = g.graph_x + col
+        y = g.line_y[line_idx]
+        self._gfx.set_pen(pastel_pen)
+        self._gfx.rectangle(x, y, 1, g.graph_height)
+        if bright_pen is not None and value_y is not None:
+            self._gfx.set_pen(bright_pen)
+            self._gfx.pixel(x, y + value_y)
+
     def update(self) -> None:
         self._gfx.update()
 
@@ -167,7 +259,10 @@ class Renderer:
 class Display(_Display):
     # Static per-row schema in display order: (unit_cell, icons_low_to_high).
     # Band thresholds arrive via ``__init__`` from ``config.SENSOR_*_BANDS``
-    # and are merged into ``self._rows`` as ``(unit, bands, icons)`` triples.
+    # and are merged into ``self._rows`` as ``(unit, edges, icons)`` triples.
+    # ``edges`` is a 5-tuple ``(cap_min, t1, t2, t3, cap_max)``; the inner
+    # three drive icon classification, the outer two bound the history
+    # graph's Y axis.
     # ``icons[1]`` (MID_LOW) is what ``initialize`` paints by default so a
     # centered indoor reading needs no first swap.
     ROWS = (
@@ -217,20 +312,31 @@ class Display(_Display):
         renderer: Renderer,
         bme690_reader: PimoroniBME690,
         time_service,
+        history,
+        band_pens,
+        graph_height: int,
         *,
-        temp_bands: tuple[int, int, int],
-        pressure_bands: tuple[int, int, int],
-        humidity_bands: tuple[int, int, int],
-        gas_bands: tuple[int, int, int],
+        temp_bands: tuple,
+        pressure_bands: tuple,
+        humidity_bands: tuple,
+        gas_bands: tuple,
     ) -> None:
         self._renderer = renderer
         self._time_service = time_service
         self._bme690_reader = bme690_reader
+        self._history = history
+        self._band_pens = band_pens
+        self._graph_height = graph_height
         self._active = False
         # Currently painted icon cell per row; ``None`` forces the first
         # ``_maybe_swap_icon`` to paint.  Populated by ``initialize``.
         self._row_icons: list[tuple[int, int] | None] = [None] * len(self.ROWS)
         self._last_rendered_reading: tuple | None = None
+        # Graph redraw triggers: track the last commit_count we drew for, and
+        # the last gas heater stable-state we rendered.  ``-1`` / ``None``
+        # values force a redraw on first ``_update_display`` after init.
+        self._last_commit: int = -1
+        self._gas_was_stable = None  # bool | None — None means "force redraw"
 
         # Validate at startup so a bad config raises here, not on the first
         # sensor read.
@@ -241,48 +347,164 @@ class Display(_Display):
         )
 
     @staticmethod
-    def _validated_bands(row_index: int, bands) -> tuple[int, int, int]:
-        """Return ``bands`` as a 3-tuple, or raise ``ValueError`` if the shape is wrong."""
-        if len(bands) != 3:
+    def _validated_bands(row_index: int, bands) -> tuple:
+        """Return ``bands`` as a 5-tuple, or raise ``ValueError`` on bad shape.
+
+        Accepts a tuple/list of 5 strictly ascending numeric edges
+        ``(cap_min, t1, t2, t3, cap_max)``.  Rejects any other length, any
+        non-ascending or duplicated sequence.
+        """
+        if len(bands) != 5:
             raise ValueError(
-                "Display row {} requires 3 band thresholds, got {}".format(
+                "Display row {} requires 5 band edges (cap_min, t1, t2, t3, cap_max), got {}".format(
                     row_index, len(bands)
                 )
             )
-        b0, b1, b2 = bands
-        if not (b0 < b1 < b2):
+        b0, b1, b2, b3, b4 = bands
+        if not (b0 < b1 < b2 < b3 < b4):
             raise ValueError(
-                "Display row {} bands must be strictly ascending, got {}".format(
+                "Display row {} band edges must be strictly ascending, got {}".format(
                     row_index, bands
                 )
             )
-        return (b0, b1, b2)
+        return (b0, b1, b2, b3, b4)
 
     @staticmethod
-    def _icon_for_value(
-        value: float,
-        bands: tuple[int, ...],
-        icons: tuple[tuple[int, int], ...],
-    ) -> tuple[int, int]:
-        """Return the band's icon: the first ``icons[i]`` where ``value < bands[i]``.
+    def _band_index(value: float, edges: tuple) -> int:
+        """Return band 0..3 for ``value`` against the 3 inner edges of ``edges``.
 
-        Falls through to ``icons[len(bands)]`` (the highest band) when
-        ``value`` exceeds every threshold.
+        ``edges`` is the full 5-tuple; only ``edges[1:4]`` is used for
+        classification (the outer two bound the graph Y axis, not the bands).
+        Matches the pre-graph behavior: ``value < threshold`` walks low→high.
         """
-        for i, threshold in enumerate(bands):
-            if value < threshold:
-                return icons[i]
-        return icons[len(bands)]
+        if value < edges[1]:
+            return 0
+        if value < edges[2]:
+            return 1
+        if value < edges[3]:
+            return 2
+        return 3
+
+    @staticmethod
+    @micropython.native
+    def _y_for(value: float, edges: tuple, graph_height: int):  # -> int | None
+        """Map ``value`` to a row-local y in 0..graph_height-1.
+
+        ``cap_max`` (edges[-1]) → ``y=0`` (top), ``cap_min`` (edges[0]) →
+        ``y=graph_height-1`` (bottom).  Both caps inclusive.  Returns
+        ``None`` for values outside the cap range — the caller draws the
+        column pastel-only (no bright pixel).  NaN handling lives at the
+        caller (``_redraw_graphs``), not here; this stays pure math.
+        """
+        cap_min = edges[0]
+        cap_max = edges[-1]
+        if value < cap_min or value > cap_max:
+            return None
+        # Linear map: at cap_max → 0, at cap_min → graph_height-1.
+        return round((cap_max - value) * (graph_height - 1) / (cap_max - cap_min))
+
+    @staticmethod
+    def _fit_chars(value: float, decimals: int) -> str:
+        """Format ``value`` for the sensor value cell.
+
+        Rule: keep ``decimals`` decimals iff the rounded value is in
+        ``(-100, 100)``; otherwise drop to the integer form.  Integer
+        outputs are clamped to ``"9999"`` / ``"-999"`` to guarantee the
+        rendered width never exceeds the 63 px budget set by
+        ``_GRAPH_VALUE_SAMPLE = "-88.8"`` (``PicoGraphics.text()`` doesn't
+        clip, so an overflow would overdraw the history graph).
+
+        Realistic readings (BME690 in the project's typical setup) all fit:
+          - temp:     ``"22.4"``, ``"-9.9"``, ``"-12.3"``, ``"-99.9"``, ``"100"``
+          - humidity: ``"50.5"``, ``"99.9"``, ``"100"`` (decimal drops at >= 100)
+          - pressure: ``"1013"`` (no decimal requested)
+          - gas:      ``"75.3"``, ``"99.9"``, ``"100"``, ``"251"``, ``"1000"``
+
+        The rounded-value check (``round(value, decimals)``) handles the
+        boundary edge: ``-99.99`` formats to ``"-100.0"`` (6 cells, 75 px
+        on-device) which would overdraw; rounded to ``-100.0`` it leaves
+        the in-range window and takes the integer branch instead → ``"-100"``.
+        """
+        if decimals > 0 and -100 < round(value, decimals) < 100:
+            return "{:.{}f}".format(value, decimals)
+        i = round(value)
+        if i > 9999:
+            return "9999"
+        if i < -999:
+            return "-999"
+        return str(i)
 
     def _maybe_swap_icon(self, line_idx: int, new_cell: tuple[int, int]) -> None:
         if new_cell != self._row_icons[line_idx]:
             self._renderer.redraw_row_icon(line_idx, new_cell)
             self._row_icons[line_idx] = new_cell
 
+    @micropython.native
+    def _redraw_graphs(self, gas_stable_now: bool) -> None:
+        """Repaint all 4 history graphs based on current ``self._history`` state.
+
+        Triggered by a commit_count bump or a gas heater stable-state change.
+        Gas row has special handling: while heater is unstable, the entire
+        graph region is owned by the wide ``"warming..."`` text and we do
+        not paint there; on the Stable→Warming transition we clear it once
+        to wipe any prior column content.
+        """
+        history = self._history
+        renderer = self._renderer
+        band_pens = self._band_pens
+        capacity = history.capacity
+        gas_row = self._GAS_ROW
+
+        for metric_idx in range(len(self._rows)):
+            _unit, edges, _icons = self._rows[metric_idx]
+
+            if metric_idx == gas_row:
+                if not gas_stable_now:
+                    # While unstable: only act on the Stable→Warming transition
+                    # (was_stable is True).  Other transitions and steady-state
+                    # warming leave the row alone — the "warming..." text owns
+                    # those pixels.
+                    if self._gas_was_stable is True:
+                        renderer.draw_graph_clear(gas_row)
+                    continue
+                # gas_stable_now is True → fall through to the normal redraw.
+
+            renderer.draw_graph_clear(metric_idx)
+            graph_height = self._graph_height
+            pens_row = band_pens[metric_idx]
+            for i in range(history.filled(metric_idx)):
+                value = history.value_at(metric_idx, i)
+                if value != value:  # NaN — leave the column as cleared background
+                    continue
+                band = self._band_index(value, edges)
+                pastel_pen, bright_pen = pens_row[band]
+                y = self._y_for(value, edges, graph_height)
+                col = capacity - 1 - i
+                renderer.draw_graph_column(
+                    metric_idx,
+                    col,
+                    pastel_pen,
+                    bright_pen if y is not None else None,
+                    y,
+                )
+
     def _update_display(self) -> None:
         self._renderer.header_write(format_header_time(self._time_service.now()))
 
         reading = self._bme690_reader.read()
+
+        # Graph-redraw check lives BEFORE the reading-identity guard so a
+        # history commit observed on a "reading unchanged" tick still fires.
+        gas_stable_now = (reading[4] == "Stable")
+        commit_now = self._history.commit_count
+        if (
+            commit_now != self._last_commit
+            or gas_stable_now != self._gas_was_stable
+        ):
+            self._redraw_graphs(gas_stable_now)
+            self._last_commit = commit_now
+            self._gas_was_stable = gas_stable_now
+
         # PimoroniBME690 replaces _last_reading with a fresh tuple on each
         # sensor read (~5 s); until then read() returns the same object.
         # Identity-compare to skip the four f-string formats per tick.
@@ -294,16 +516,18 @@ class Display(_Display):
             for i, value in enumerate((temp, press, hum, gas_r)):
                 if i == self._GAS_ROW and status != "Stable":
                     continue
-                _unit, bands, icons = self._rows[i]
-                self._maybe_swap_icon(i, self._icon_for_value(value, bands, icons))
+                _unit, edges, icons = self._rows[i]
+                self._maybe_swap_icon(i, icons[self._band_index(value, edges)])
 
-            self._renderer.value_write(0, f"{temp:0.1f}")
-            self._renderer.value_write(1, f"{press:0.0f}")
-            self._renderer.value_write(2, f"{hum:0.1f}")
+            self._renderer.value_write(0, self._fit_chars(temp, 1))
+            self._renderer.value_write(1, self._fit_chars(press, 0))
+            self._renderer.value_write(2, self._fit_chars(hum, 1))
             if status == "Stable":
-                gas_r_text = str(round(gas_r)) if gas_r >= 100 else f"{gas_r:0.1f}"
-                self._renderer.value_write(3, gas_r_text)
+                self._renderer.value_write(3, self._fit_chars(gas_r, 1))
             else:
+                # "warming..." is intentionally wider than the value cell; it
+                # spills into the gas-row graph rect and the gas-row state
+                # machine in _redraw_graphs ensures we don't paint over it.
                 self._renderer.value_write(3, "warming...")
 
         self._renderer.update()
@@ -323,6 +547,9 @@ class Display(_Display):
         # Force first _update_display to paint values even if the reader
         # returns the same tuple object as the last time we were active.
         self._last_rendered_reading = None
+        # Force a graph redraw on re-entry (the screen was cleared by reset()).
+        self._last_commit = -1
+        self._gas_was_stable = None
         self._update_display()
 
     def deinitialize(self) -> None:
