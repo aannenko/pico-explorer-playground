@@ -45,14 +45,16 @@ _SENSOR_BANDS_KEYS = (
 
 
 def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
-    """Backstop check after config_bootstrap should have already auto-resynced
-    any old 3-tuple SENSOR_*_BANDS.  Surfaces malformed shapes that slipped
-    through (hand-edit after bootstrap, bootstrap I/O failure) on the panel
-    instead of as a blank/frozen screen.
+    """Semantic backstop for ``SENSOR_*_BANDS`` — runs after the loader has
+    already enforced *structural* shape (5-tuple of ints) via
+    ``config_bootstrap.apply_overrides``.  This check covers what the loader
+    intentionally doesn't: strictly ascending order and uniqueness.  Failures
+    here are rendered on the panel before the long WiFi/NTP bootstrap, so a
+    bad threshold doesn't manifest as a blank or frozen screen later.
 
-    Tolerant of any input shape — wraps the structural checks in try/except
-    so a scalar (``SENSOR_TEMP_BANDS = 14``) or non-comparable mixed types
-    surface the same panel error instead of an uncaught traceback.
+    Tolerant of any input shape — wraps the comparisons in try/except so a
+    scalar (``SENSOR_TEMP_BANDS = 14``) or non-comparable mixed types surface
+    the same panel error instead of an uncaught traceback.
     """
     for name in _SENSOR_BANDS_KEYS:
         bands = getattr(config, name, None)
@@ -202,10 +204,8 @@ def build_app(pico_graphics, schedule_fn) -> App:
         subtext_color=palette.gray,
     )
 
-    # Backstop validation: config_bootstrap should have already auto-resynced
-    # any stale-schema SENSOR_*_BANDS, but if anything slipped through (manual
-    # edit, I/O failure) we surface it on the panel before the long network
-    # boot, while ``status_display`` is still alive.
+    # Done while ``status_display`` is still alive so a malformed band shows
+    # on the panel rather than during the long network boot that follows.
     _validate_sensor_bands_or_halt(status_display)
 
     tick_scheduler = TickScheduler()

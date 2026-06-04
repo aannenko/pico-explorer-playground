@@ -14,8 +14,9 @@ by the Explorer's X/Y buttons, with A/B forwarded to the active view.
   - `app.py` — composition: wires services + displays.
   - `displays/`, `services/`, `scheduling/`, `utilities/`, `hardware/`
     — feature modules.
-  - `config.sample.py` — template config; copy to `config.py` and fill
-    in WiFi credentials.  `config.py` is gitignored.
+  - `config_defaults.py` — committed schema and defaults; copy to
+    `config.py` and override the keys you care about.  `config.py` is
+    gitignored.
 - `src/tests/` — host-side pytest suite; runs under CPython with
   MicroPython stubs from `src/tests/conftest.py`.
 
@@ -23,7 +24,7 @@ by the Explorer's X/Y buttons, with A/B forwarded to the active view.
 
 1. Install a recent Pimoroni MicroPython build on the Pico
    (see [pimoroni-pico releases](https://github.com/pimoroni/pimoroni-pico/releases)).
-2. `cp src/pico/config.sample.py src/pico/config.py` and edit
+2. `cp src/pico/config_defaults.py src/pico/config.py` and edit
    `WIFI_SSID` / `WIFI_PASSWORD`.
 3. Open `src/solution.code-workspace` in VS Code with the
    [MicroPico](https://marketplace.visualstudio.com/items?itemName=paulober.pico-w-go)

@@ -1,610 +1,371 @@
 from __future__ import annotations
 
+import importlib
+import sys
+
+import pytest
+
 import config_bootstrap
 
 
-def _read(path) -> str:
-    return path.read_text(encoding="utf-8")
+# Workspace fixture: writes ad-hoc ``<name>.py`` files into a tmp_path
+# entry on ``sys.path`` and clears tracked names from ``sys.modules`` /
+# the import cache on teardown so tests don't pollute each other.
 
 
-def _write(path, text: str) -> None:
-    path.write_text(text, encoding="utf-8")
+_TEST_NAME_PREFIX = "cfg_test_"
+_DEFAULTS_NAME = _TEST_NAME_PREFIX + "defaults"
+_USER_NAME = _TEST_NAME_PREFIX + "user"
 
 
-def test_creates_target_when_missing(tmp_path) -> None:
-    sample = tmp_path / "config.sample.py"
-    _write(sample, "FOO = 1\nBAR = 2\n")
-    target = tmp_path / "config.py"
+class _Workspace:
+    def __init__(self, tmp_path) -> None:
+        self.tmp_path = tmp_path
+        self._path_str = str(tmp_path)
+        sys.path.insert(0, self._path_str)
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    def write_defaults(self, source: str, name: str = _DEFAULTS_NAME) -> str:
+        (self.tmp_path / (name + ".py")).write_text(source, encoding="utf-8")
+        return name
 
-    assert state == config_bootstrap.CONFIG_CREATED
-    assert target.exists()
-    # Fresh-copy is byte-for-byte identical to the sample.
-    assert _read(target) == "FOO = 1\nBAR = 2\n"
+    def write_user(self, source: str, name: str = _USER_NAME) -> str:
+        (self.tmp_path / (name + ".py")).write_text(source, encoding="utf-8")
+        return name
 
-
-def test_no_op_when_target_has_every_key(tmp_path) -> None:
-    sample = tmp_path / "config.sample.py"
-    _write(sample, "FOO = 1\nBAR = 2\n")
-    target = tmp_path / "config.py"
-    original = "BAR = 100\nFOO = 200\n"  # user values, order shuffled
-    _write(target, original)
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_OK
-    # Target is untouched, even byte-for-byte (no banner / no rewrites).
-    assert _read(target) == original
+    def teardown(self) -> None:
+        try:
+            sys.path.remove(self._path_str)
+        except ValueError:
+            pass
+        for name in [n for n in sys.modules if n.startswith(_TEST_NAME_PREFIX)]:
+            del sys.modules[name]
+        importlib.invalidate_caches()
 
 
-def test_appends_missing_keys_with_preceding_comments(tmp_path) -> None:
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "FOO = 1\n"
-            "\n"
-            "# Bar is essential — set to 42 for the universe.\n"
-            "BAR = 2\n"
-            "\n"
-            "# Group of related keys spanning\n"
-            "# two comment lines to explain them.\n"
-            "BAZ = 3\n"
-            "QUX = 4\n"
-        ),
+@pytest.fixture
+def workspace(tmp_path):
+    ws = _Workspace(tmp_path)
+    try:
+        yield ws
+    finally:
+        ws.teardown()
+
+
+# ---------------------------------------------------------------------
+# apply_overrides — happy paths
+# ---------------------------------------------------------------------
+
+
+def test_empty_user_module_falls_back_to_every_default(workspace) -> None:
+    workspace.write_defaults("FOO = 1\nBAR = 'two'\nBAZ = (1, 2, 3)\n")
+    workspace.write_user("")
+
+    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert merged.FOO == 1
+    assert merged.BAR == "two"
+    assert merged.BAZ == (1, 2, 3)
+
+
+def test_user_override_wins_over_default(workspace) -> None:
+    workspace.write_defaults("FOO = 1\nBAR = 'sample'\n")
+    workspace.write_user("FOO = 100\n")
+
+    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert merged.FOO == 100
+    assert merged.BAR == "sample"
+
+
+def test_apply_returns_user_module_object(workspace) -> None:
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user("FOO = 100\n")
+
+    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    # The merged module IS the user module (in-place mutation), not a synthetic copy.
+    assert merged is sys.modules[_USER_NAME]
+
+
+def test_idempotent_apply_returns_same_module_without_rerunning(workspace, capsys) -> None:
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user("UNKNOWN_KEY = 99\nFOO = 100\n")
+
+    first = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+    capsys.readouterr()  # drain the first call's warning
+    second = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert first is second
+    # Second call should be a sentinel-guarded no-op: no fresh warning emitted.
+    assert "UNKNOWN_KEY" not in capsys.readouterr().out
+
+
+def test_in_place_mutation_visible_to_prior_references(workspace) -> None:
+    """A reference to ``user`` taken *before* the loader runs sees defaults
+    materialise on the same module object after the loader runs."""
+    workspace.write_defaults("FOO = 1\nBAR = 2\n")
+    workspace.write_user("FOO = 100\n")
+
+    pre_imported = __import__(_USER_NAME)
+    assert not hasattr(pre_imported, "BAR")
+
+    config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert pre_imported.BAR == 2
+    assert pre_imported.FOO == 100
+
+
+def test_unknown_user_key_emits_warning(workspace, capsys) -> None:
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user("FOO = 100\nWIFI_SSDI = 'typo'\n")
+
+    config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    out = capsys.readouterr().out
+    assert "WIFI_SSDI" in out
+    assert "ignoring unknown key" in out
+
+
+def test_uppercase_callable_and_module_aliases_are_not_treated_as_settings(
+    workspace, capsys
+) -> None:
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user(
+        "import os as OS\n"
+        "from os import getcwd as GETCWD\n"
+        "FOO = 100\n"
     )
-    target = tmp_path / "config.py"
-    _write(target, "FOO = 100\nBAR = 200\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    # Existing user values preserved verbatim.
-    assert text.startswith("FOO = 100\nBAR = 200\n")
-    # Banner separates user content from the bootstrapped block.
-    assert "Added by config_bootstrap" in text
-    # Both missing keys are present after the banner.
-    banner_idx = text.index("Added by config_bootstrap")
-    assert "BAZ = 3" in text[banner_idx:]
-    assert "QUX = 4" in text[banner_idx:]
-    # Preceding-comment block followed BAZ (the first key after the comments)
-    # so the explanation travels with the value.
-    baz_idx = text.index("BAZ = 3")
-    assert "# Group of related keys spanning" in text[:baz_idx]
-    assert "# two comment lines to explain them." in text[:baz_idx]
+    out = capsys.readouterr().out
+    assert "OS" not in out
+    assert "GETCWD" not in out
 
 
-def test_preserves_user_values_for_existing_keys(tmp_path) -> None:
-    """Bootstrap only appends; it must never rewrite existing keys."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        'WIFI_SSID = "SampleSSID"\n'
-        'WIFI_PASSWORD = "SamplePassword"\n'
-        'TIMEOUT = 30\n',
-    )
-    target = tmp_path / "config.py"
-    _write(
-        target,
-        'WIFI_SSID = "MyHomeNetwork"\n'
-        'WIFI_PASSWORD = "supersecret"\n',
-    )
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert 'WIFI_SSID = "MyHomeNetwork"' in text
-    assert 'WIFI_PASSWORD = "supersecret"' in text
-    assert "TIMEOUT = 30" in text
-    # And the sample's default for WIFI_SSID is NOT present.
-    assert 'WIFI_SSID = "SampleSSID"' not in text
-
-
-def test_ignores_indented_assignments_and_equality_checks(tmp_path) -> None:
-    """The parser only treats top-level UPPER_SNAKE_CASE = … as a key."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "FOO = 1\n"
-            "if FOO == 1:\n"  # equality, not assignment
-            "    BAR = 2\n"  # indented — not top-level
-            "BAZ = 3\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    # Non-empty target with a real key so the empty-target shortcut doesn't
-    # fire — this test is about parser behavior, not the missing-file path.
-    _write(target, "FOO = 100\n")
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert "FOO = 100" in text  # user value preserved
-    assert "BAZ = 3" in text
-    # BAR is indented in the sample → parser treats it as not an assignment,
-    # so it is NOT considered "missing" and never gets copied.
-    assert "BAR = 2" not in text
-
-
-def test_const_and_tuple_values_round_trip(tmp_path) -> None:
-    """Right-hand sides are copied verbatim — const(...) and tuples work."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "from micropython import const\n"
-            "\n"
-            "TIME_ZONE_OFFSET = const(1)\n"
-            "DST_START = (3, -1, 6, 2)\n"
-            'FONT = "bitmap8"\n'
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, "DST_START = (4, -1, 6, 2)\n")  # user customized DST
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert "TIME_ZONE_OFFSET = const(1)" in text
-    assert 'FONT = "bitmap8"' in text
-    # User's DST_START is the one that survives.
-    assert "DST_START = (4, -1, 6, 2)" in text
-    assert "DST_START = (3, -1, 6, 2)" not in text
-
-
-def test_returns_created_state_when_sample_is_empty(tmp_path) -> None:
-    """Even an empty sample is enough to materialize an empty config.py."""
-    sample = tmp_path / "config.sample.py"
-    _write(sample, "")
-    target = tmp_path / "config.py"
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_CREATED
-    assert target.exists()
-    assert _read(target) == ""
-
-
-def test_no_writes_when_target_has_every_key(tmp_path, monkeypatch) -> None:
-    """Performance/flash-wear guard: a fully-synced config must not be rewritten."""
-    sample = tmp_path / "config.sample.py"
-    _write(sample, "FOO = 1\nBAR = 2\n")
-    target = tmp_path / "config.py"
-    _write(target, "FOO = 9\nBAR = 9\n")
-
-    # Wrap builtins.open so we can detect any open(..., "w" | "a") call on target.
-    write_opens: list[str] = []
-    real_open = open
-
-    def spy_open(path, mode="r", *args, **kwargs):
-        if str(path) == str(target) and ("w" in mode or "a" in mode):
-            write_opens.append(mode)
-        return real_open(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.open", spy_open)
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_OK
-    assert write_opens == [], f"unexpected writes to target: {write_opens}"
-
-
-def test_multiline_tuple_value_is_preserved_when_appended(tmp_path) -> None:
-    """A multi-line RHS in the sample must be copied verbatim when patched."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "FOO = 1\n"
-            "\n"
-            "# A multi-line config value spanning several lines.\n"
-            "MULTI = (\n"
-            "    (3, -1, 6, 2),\n"
-            "    (10, -1, 6, 3),\n"
-            ")\n"
-            "AFTER = 99\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, "FOO = 100\n")
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    # Every continuation line of MULTI must have made it through.
-    assert "MULTI = (\n    (3, -1, 6, 2),\n    (10, -1, 6, 3),\n)\n" in text
-    assert "AFTER = 99" in text
-    # The appended block must parse — exec it to confirm no SyntaxError.
-    exec_ns: dict = {}
-    exec(text, exec_ns)
-    assert exec_ns["MULTI"] == ((3, -1, 6, 2), (10, -1, 6, 3))
-    assert exec_ns["AFTER"] == 99
-
-
-def test_empty_target_is_overwritten_from_sample(tmp_path) -> None:
-    """A target file with no recognised keys is treated as missing.
-
-    Otherwise we'd risk appending blocks that need an import (e.g.
-    ``const()``) into a file that doesn't declare it.
-    """
-    sample = tmp_path / "config.sample.py"
-    sample_text = (
+def test_const_values_round_trip_as_plain_ints(workspace) -> None:
+    """``const()`` is a MicroPython compile-time hint that returns the bare
+    value at runtime — the loader should treat ``const(8080)`` as ``int``."""
+    workspace.write_defaults(
         "from micropython import const\n"
-        "\n"
-        "FONT_HEIGHT = const(8)\n"
-        'WIFI_SSID = "SampleSSID"\n'
+        "PORT = const(8080)\n"
     )
-    _write(sample, sample_text)
-    target = tmp_path / "config.py"
-    _write(target, "# user notes but no assignments\n")
+    workspace.write_user("")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_CREATED
-    assert _read(target) == sample_text
+    assert merged.PORT == 8080
+    assert type(merged.PORT) is int
 
 
-def test_missing_imports_are_forwarded_when_patching(tmp_path) -> None:
-    """A partial user config lacking ``from micropython import const`` gets
-    the import auto-added when the sample's missing blocks use ``const(...)``,
-    so the patched file remains importable.
-    """
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "from micropython import const\n"
-            "\n"
-            "TIMEOUT = const(30)\n"
-            'WIFI_SSID = "Sample"\n'
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, 'WIFI_SSID = "Mine"\n')
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert 'WIFI_SSID = "Mine"' in text
-    assert text.count("from micropython import const") == 1
-    exec_ns: dict = {}
-    exec(text, exec_ns)
-    assert exec_ns["TIMEOUT"] == 30
-    assert exec_ns["WIFI_SSID"] == "Mine"
+# ---------------------------------------------------------------------
+# apply_overrides — error paths
+# ---------------------------------------------------------------------
 
 
-def test_existing_imports_not_duplicated_when_patching(tmp_path) -> None:
-    """An import the user already declared must not be appended again."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "from micropython import const\n"
-            "\n"
-            "TIMEOUT = const(30)\n"
-            'WIFI_SSID = "Sample"\n'
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(
-        target,
-        (
-            "from micropython import const\n"
-            'WIFI_SSID = "Mine"\n'
-        ),
+def test_missing_user_raises_missing_config_error(workspace) -> None:
+    workspace.write_defaults("FOO = 1\n")
+
+    with pytest.raises(config_bootstrap.MissingConfigError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    msg = str(exc.value)
+    assert "config.py" in msg
+    assert "WIFI_SSID" in msg
+
+
+def test_nested_import_failure_is_not_missing_config_error(workspace) -> None:
+    """Detection uses the file-existence probe rather than ``ImportError.name``
+    so this works identically on CPython and MicroPython."""
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user(
+        "import this_module_does_not_exist_xyz\n"
+        "FOO = 100\n"
     )
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(RuntimeError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert text.count("from micropython import const") == 1
-
-
-def test_imports_not_forwarded_when_target_has_every_key(tmp_path) -> None:
-    """CONFIG_OK path stays untouched even if sample declares an import
-    the user's file lacks — we don't rewrite a fully-keyed config.
-    """
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "from micropython import const\n"
-            "\n"
-            'WIFI_SSID = "Sample"\n'
-        ),
-    )
-    target = tmp_path / "config.py"
-    original = 'WIFI_SSID = "Mine"\n'
-    _write(target, original)
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    assert state == config_bootstrap.CONFIG_OK
-    assert _read(target) == original
+    assert not isinstance(exc.value, config_bootstrap.MissingConfigError)
+    msg = str(exc.value)
+    assert "this_module_does_not_exist_xyz" in msg
+    assert "config.py" in msg
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Schema-version reconciliation: # bootstrap: schema v<N>
-# ─────────────────────────────────────────────────────────────────────
+def test_user_syntax_error_raises_runtime_error(workspace) -> None:
+    workspace.write_defaults("FOO = 1\n")
+    workspace.write_user('WIFI_SSID = "unterminated\n')
+
+    with pytest.raises(RuntimeError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert "invalid syntax" in str(exc.value)
 
 
-def test_schema_bump_replaces_stale_target_block(tmp_path) -> None:
-    """Sample marker > target marker (or missing) → block is rewritten verbatim."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "FOO = 1\n"
-            "\n"
-            "# bootstrap: schema v2\n"
-            "# Bands now use 5 ascending edges.\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-            "\n"
-            "AFTER = 99\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(
-        target,
-        (
-            "FOO = 1\n"
-            "BANDS = (20, 30, 40)\n"  # old shape, no marker
-            "AFTER = 99\n"
-        ),
-    )
+def test_missing_defaults_module_raises_runtime_error(workspace) -> None:
+    workspace.write_user("FOO = 100\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(RuntimeError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    # New block (with marker) is present.
-    assert "# bootstrap: schema v2" in text
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
-    # Old block is gone.
-    assert "BANDS = (20, 30, 40)" not in text
-    # Surrounding unrelated keys untouched.
-    assert "FOO = 1" in text
-    assert "AFTER = 99" in text
+    assert not isinstance(exc.value, config_bootstrap.MissingConfigError)
+    assert _DEFAULTS_NAME in str(exc.value)
 
 
-def test_schema_marker_no_op_when_versions_match(tmp_path) -> None:
-    """Sample.version == target.version → no replacement."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v2\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    # User has their own 5-edge values at v2 — should NOT be replaced.
-    original = (
-        "# bootstrap: schema v2\n"
-        "BANDS = (15, 25, 35, 45, 55)\n"
-    )
-    _write(target, original)
+def test_invalid_override_raises_invalid_config_error(workspace) -> None:
+    workspace.write_defaults("BME690_TEMP_OFFSET = -1.7\n")
+    workspace.write_user('BME690_TEMP_OFFSET = "minus two"\n')
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_OK
-    assert _read(target) == original
+    msg = str(exc.value)
+    assert "BME690_TEMP_OFFSET" in msg
+    assert "float" in msg
+    assert "str" in msg
 
 
-def test_schema_marker_replaces_when_target_lacks_marker(tmp_path) -> None:
-    """Target's missing marker is treated as v0 → any sample marker triggers resync."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v1\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, "BANDS = (1, 2, 3, 4, 5)\n")  # no marker → v0
+def test_invalid_tuple_shape_message_mentions_both_lengths(workspace) -> None:
+    """Realistic regression: user kept the old 3-tuple SENSOR_*_BANDS shape."""
+    workspace.write_defaults("SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)\n")
+    workspace.write_user("SENSOR_TEMP_BANDS = (10, 20, 30)\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    assert "# bootstrap: schema v1" in text
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
+    msg = str(exc.value)
+    assert "SENSOR_TEMP_BANDS" in msg
+    assert "length 5" in msg
+    assert "length 3" in msg
 
 
-def test_schema_marker_no_op_without_markers(tmp_path) -> None:
-    """If neither side has the marker, the existing PATCHED/OK paths still rule."""
-    sample = tmp_path / "config.sample.py"
-    _write(sample, "FOO = 1\nBAR = 2\n")
-    target = tmp_path / "config.py"
-    original = "FOO = 100\n"
-    _write(target, original)
+def test_failed_validation_does_not_set_sentinel(workspace) -> None:
+    """Otherwise a subsequent retry would early-return on a bad module."""
+    workspace.write_defaults("PORT = 8080\n")
+    workspace.write_user('PORT = "eighty-eighty"\n')
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(config_bootstrap.InvalidConfigError):
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_PATCHED
-    text = _read(target)
-    assert "FOO = 100" in text
-    assert "BAR = 2" in text
+    user_module = sys.modules[_USER_NAME]
+    assert not getattr(user_module, "_CONFIG_BOOTSTRAP_MERGED", False)
 
 
-def test_schema_resync_takes_precedence_over_patched(tmp_path) -> None:
-    """If both missing keys and stale-schema keys are present, RESYNCED wins."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v2\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-            "\n"
-            "NEW_KEY = 42\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, "BANDS = (1, 2, 3)\n")  # stale + missing NEW_KEY
+def test_failed_validation_does_not_mutate_user_module(workspace) -> None:
+    """Pass 1 must validate every key before pass 2 starts mutating, so a
+    later mismatch can't leave the user module half-merged."""
+    workspace.write_defaults("AAA = 1\nBBB = 2\nCCC = 3\n")
+    # User overrides AAA correctly but breaks CCC; without two-pass, BBB
+    # might get filled in before CCC's mismatch fires.
+    workspace.write_user("AAA = 100\nCCC = 'not an int'\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(config_bootstrap.InvalidConfigError):
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
-    # NEW_KEY was appended (PATCHED logic) AND BANDS was rewritten (RESYNCED).
-    assert "NEW_KEY = 42" in text
-    assert "BANDS = (1, 2, 3)" not in text
+    user_module = sys.modules[_USER_NAME]
+    assert user_module.AAA == 100
+    assert not hasattr(user_module, "BBB")  # default NOT copied in
+    assert user_module.CCC == "not an int"
 
 
-def test_schema_resync_preserves_multiline_block(tmp_path) -> None:
-    """A multi-line replacement block is emitted verbatim, brackets balanced."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v2\n"
-            "# A multi-line replacement spanning several lines.\n"
-            "DST = (\n"
-            "    (3, -1, 6, 2),\n"
-            "    (10, -1, 6, 3),\n"
-            ")\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(target, "DST = (1, 2, 3, 4)\n")
+def test_invalid_config_message_lists_extra_mismatch_count(workspace) -> None:
+    workspace.write_defaults("AAA = 1\nBBB = 2\nCCC = 3\n")
+    workspace.write_user("AAA = 'x'\nBBB = 'y'\nCCC = 'z'\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    assert "# bootstrap: schema v2" in text
-    assert "DST = (\n    (3, -1, 6, 2),\n    (10, -1, 6, 3),\n)\n" in text
-    # File still parses.
-    exec_ns: dict = {}
-    exec(text, exec_ns)
-    assert exec_ns["DST"] == ((3, -1, 6, 2), (10, -1, 6, 3))
+    msg = str(exc.value)
+    assert "and 2 more" in msg
 
 
-def test_schema_resync_drops_original_target_block_header(tmp_path) -> None:
-    """The target's preceding comment header for a replaced block is dropped
-    (so user-added comments on the stale block don't survive). The
-    replacement carries the sample's header.
-    """
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v2\n"
-            "# Sample explanation for the new shape.\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(
-        target,
-        (
-            "# My old comment for the old shape.\n"
-            "BANDS = (20, 30, 40)\n"
-        ),
-    )
+def test_same_name_for_both_layers_raises_value_error(workspace) -> None:
+    """Pointing both layers at the same module would collapse the merge —
+    guard so a future caller can't shoot themselves in the foot silently."""
+    workspace.write_defaults("FOO = 1\n")
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    with pytest.raises(ValueError) as exc:
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _DEFAULTS_NAME)
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    assert "# My old comment for the old shape." not in text
-    assert "# Sample explanation for the new shape." in text
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
+    assert "must differ" in str(exc.value)
 
 
-def test_schema_resync_replaces_only_marked_keys(tmp_path) -> None:
-    """Unrelated user-customized keys (no marker on either side) survive untouched."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "WIFI_SSID = \"SampleSSID\"\n"
-            "\n"
-            "# bootstrap: schema v2\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    _write(
-        target,
-        (
-            "WIFI_SSID = \"MyNetwork\"\n"
-            "BANDS = (1, 2, 3)\n"
-        ),
-    )
+def test_user_module_file_exists_probe(workspace) -> None:
+    """MP-compat probe: must succeed without relying on ``ImportError.name``."""
+    probe = config_bootstrap._user_module_file_exists
+    name = "cfg_test_probe_check"
 
-    state = config_bootstrap.ensure_config(str(sample), str(target))
+    assert probe(name) is False
 
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    # User WIFI_SSID preserved (no marker on either side).
-    assert 'WIFI_SSID = "MyNetwork"' in text
-    assert 'WIFI_SSID = "SampleSSID"' not in text
-    # BANDS resynced.
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
+    workspace.write_user("", name=name)
+
+    assert probe(name) is True
 
 
-def test_schema_marker_only_recognised_in_comment_lines(tmp_path) -> None:
-    """A 'bootstrap: schema v…' substring in a string literal must NOT trigger."""
-    sample = tmp_path / "config.sample.py"
-    _write(
-        sample,
-        (
-            "# bootstrap: schema v2\n"
-            "BANDS = (10, 20, 30, 40, 50)\n"
-        ),
-    )
-    target = tmp_path / "config.py"
-    # The string literal contains the marker but it isn't in a comment line.
-    _write(
-        target,
-        (
-            'NOTE = "bootstrap: schema v9 (just a string)"\n'
-            "BANDS = (1, 2, 3)\n"
-        ),
-    )
-
-    state = config_bootstrap.ensure_config(str(sample), str(target))
-
-    # The NOTE block has no real marker → BANDS still resyncs because target's
-    # BANDS block also has no real marker (target version = v0 < sample v2).
-    assert state == config_bootstrap.CONFIG_RESYNCED
-    text = _read(target)
-    assert 'NOTE = "bootstrap: schema v9 (just a string)"' in text
-    assert "BANDS = (10, 20, 30, 40, 50)" in text
+# ---------------------------------------------------------------------
+# _is_compatible — structural type/shape rules
+# ---------------------------------------------------------------------
 
 
-def test_extract_schema_version_parses_marker() -> None:
-    """Direct unit test for the marker parser."""
-    fn = config_bootstrap._extract_schema_version
-    assert fn("# bootstrap: schema v2\nFOO = 1\n") == 2
-    assert fn("# leading comment\n# bootstrap: schema v37\nFOO = 1\n") == 37
-    assert fn("FOO = 1\n") is None
-    assert fn("# unrelated comment\nFOO = 1\n") is None
-    # Marker without digits → None.
-    assert fn("# bootstrap: schema v\nFOO = 1\n") is None
-    # Marker inside a string literal (not a comment line) → None.
-    assert fn('FOO = "bootstrap: schema v3"\n') is None
+def test_compat_same_scalar_types_match() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(1, 2) is True
+    assert fn("a", "b") is True
+    assert fn(1.5, 2.5) is True
+    assert fn(True, False) is True
+    assert fn((1, 2), (3, 4)) is True
+    assert fn([1, 2], [3, 4]) is True
 
 
-def test_extract_schema_version_is_whitespace_tolerant() -> None:
-    """O2 fix: extra whitespace between tokens must still match."""
-    fn = config_bootstrap._extract_schema_version
-    # Multiple spaces.
-    assert fn("#  bootstrap:  schema  v4\nFOO = 1\n") == 4
-    # Tab separators.
-    assert fn("#\tbootstrap:\tschema\tv5\nFOO = 1\n") == 5
-    # Mixed.
-    assert fn("# \t bootstrap: \t schema \t v6\nFOO = 1\n") == 6
-    # Leading whitespace before the # is fine.
-    assert fn("   # bootstrap: schema v7\nFOO = 1\n") == 7
+def test_compat_mismatched_scalar_types_reject() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(1, "a") is False
+    assert fn("a", 1) is False
+    assert fn((1, 2), [3, 4]) is False
+    assert fn([1, 2], (3, 4)) is False
+
+
+def test_compat_bool_int_strictly_rejected() -> None:
+    """``bool`` is a subclass of ``int`` in Python, but ``type(True) is int``
+    is False — config compatibility should also reject the swap."""
+    fn = config_bootstrap._is_compatible
+    assert fn(True, 1) is False
+    assert fn(1, True) is False
+
+
+def test_compat_int_widens_to_float() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(1.0, 5) is True
+    assert fn(0.0, 0) is True
+    assert fn(-1.7, -2) is True
+
+
+def test_compat_float_does_not_narrow_to_int() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(1, 1.0) is False
+
+
+def test_compat_tuple_length_mismatch_rejects() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn((1, 2, 3), (1, 2)) is False
+    assert fn((1, 2), (1, 2, 3)) is False
+
+
+def test_compat_tuple_element_type_mismatch_rejects() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn((1, 2, 3), (1, "two", 3)) is False
+
+
+def test_compat_nested_tuple_structural_match() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(((1, 2), (3, 4)), ((10, 20), (30, 40))) is True
+    assert fn(((1, 2), (3, 4)), ((10, 20), (30,))) is False        # inner length mismatch
+    assert fn(((1, 2), (3, 4)), ((10, 20), (30, "x"))) is False    # inner element type mismatch
+
+
+def test_compat_dict_requires_every_expected_key() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn({"a": 1, "b": 2}, {"a": 10, "b": 20}) is True
+    assert fn({"a": 1}, {"a": 10, "extra": "x"}) is True    # extras on actual allowed
+    assert fn({"a": 1, "b": 2}, {"a": 10}) is False         # expected key missing
+    assert fn({"a": 1}, {"a": "x"}) is False                # value type mismatch

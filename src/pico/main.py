@@ -3,21 +3,11 @@ import micropython
 
 from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER, PEN_RGB332  # type: ignore
 
-# Ensure config.py exists and carries every key declared in config.sample.py
-# *before* importing config — the import depends on attribute access against
-# names that may have been added since the user's last sync.
+# Merge config_defaults + user config into ``sys.modules['config']`` before
+# any consumer does ``import config``.
 import config_bootstrap  # noqa: E402
 
-_config_state = config_bootstrap.ensure_config()
-if _config_state == config_bootstrap.CONFIG_CREATED:
-    raise RuntimeError(
-        "config.py was missing — created one from config.sample.py. "
-        "Edit it (especially WIFI_SSID / WIFI_PASSWORD) and reboot."
-    )
-if _config_state == config_bootstrap.CONFIG_PATCHED:
-    print("config: appended missing keys from config.sample.py")
-if _config_state == config_bootstrap.CONFIG_RESYNCED:
-    print("config: resynced schema-upgraded keys from config.sample.py")
+config_bootstrap.apply_overrides()
 
 import config  # noqa: F401, E402
 
