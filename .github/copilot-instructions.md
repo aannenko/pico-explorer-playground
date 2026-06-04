@@ -70,7 +70,7 @@ graph TD
 
 **Key patterns:**
 
-- **Entry point:** `src/pico/main.py` (~40 lines) runs the config bootstrap, allocates the framebuffer, preloads the spritesheet, then hands off to `app.build_app(pico_graphics, micropython.schedule)` which returns an `App` bag (`display_manager`, `tick_scheduler`, `button_poller`, `network_service`).
+- **Entry point:** `src/pico/main.py` is a thin top-level script that runs the config bootstrap, allocates the framebuffer, preloads the spritesheet, then hands off to `app.build_app(pico_graphics, micropython.schedule)` which returns an `App` bag (`display_manager`, `tick_scheduler`, `button_poller`, `network_service`).
 - **Display contract:** all displays inherit `displays.base.Display` (no-op defaults for `initialize` / `deinitialize` / `render` / `on_button_a` / `on_button_b`).  Each declares its redraw cadence via the `refresh_period_ms` class attribute (default `1000`; `0` = render every scheduler tick).
 - **Display lifecycle:** `DisplayManager` owns a single `RefreshGate` rebuilt on every view switch from the active display's `refresh_period_ms` and the scheduler's `ms_per_tick`.  A/B button presses reset the gate *only* when the active display overrides the base handler (so stray presses on passive views don't disturb cadence).
 - **Button handling:** `ButtonPoller` polls `machine.Pin` edges in the main loop and dispatches presses via `micropython.schedule()`.  X/Y cycle views; A/B are forwarded to the active view.

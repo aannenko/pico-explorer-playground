@@ -33,7 +33,7 @@ DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
 
 SENSOR_READ_DELAY_MS = const(5_000)
 BME690_TEMP_OFFSET = -1.7
-BME690_HUM_OFFSET = 5.0
+BME690_HUM_OFFSET = 7.0
 BME690_PRSR_OFFSET = 45.0
 
 # Sensors-view band thresholds.  Each tuple holds 5 strictly ascending
