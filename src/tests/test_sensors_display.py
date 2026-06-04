@@ -837,7 +837,7 @@ def test_line_write_clear_rect_never_extends_into_graph(monkeypatch) -> None:
     # This test uses the real Geometry + real Renderer to exercise the actual
     # value_clear_width derivation.
     from displays.sensors import Geometry, Renderer, Colors
-    from tests.test_sensors_renderer import FakePicoGraphics
+    from _fakes import FakePicoGraphics
 
     gfx = FakePicoGraphics()
     geom = Geometry(
