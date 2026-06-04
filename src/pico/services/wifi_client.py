@@ -36,7 +36,7 @@ class WifiClient:
     """
 
     def __init__(self) -> None:
-        self.state: int = IDLE
+        self._state: int = IDLE
         self._wlan = None  # WLAN | None
         self._timer = None  # Timer | None
         self._ssid: str = ""
@@ -52,17 +52,21 @@ class WifiClient:
 
     # --- Public API ---
 
+    @property
+    def state(self) -> int:
+        return self._state
+
     def start_connect(self, ssid: str, password: str) -> None:
         """Non-blocking connect. Starts a timer that drives the state machine.
 
         Idempotent if already CONNECTING. From other states, resets first.
         """
-        if self.state == CONNECTING:
+        if self._state == CONNECTING:
             return
 
         self.reset()
         self._begin_connect(ssid, password)
-        if self.state == FAILED:
+        if self._state == FAILED:
             return
 
         self._pending = False
@@ -80,16 +84,16 @@ class WifiClient:
 
         self.reset()
         self._begin_connect(ssid, password)
-        if self.state == FAILED:
+        if self._state == FAILED:
             return FAILED
 
         deadline_ms = time.ticks_add(time.ticks_ms(), timeout_ms)
 
         while True:
             self._tick(self._generation)
-            if self.state == CONNECTED:
+            if self._state == CONNECTED:
                 return CONNECTED
-            if self.state == FAILED:
+            if self._state == FAILED:
                 return FAILED
             if time.ticks_diff(time.ticks_ms(), deadline_ms) >= 0:
                 self.reset()
@@ -104,7 +108,7 @@ class WifiClient:
             self._timer.deinit()
             self._timer = None
         self._generation += 1
-        self.state = IDLE
+        self._state = IDLE
         self._wlan = None
         self._ssid = ""
         self._password = ""
@@ -116,7 +120,7 @@ class WifiClient:
 
     def _begin_connect(self, ssid: str, password: str) -> None:
         if not ssid:
-            self.state = FAILED
+            self._state = FAILED
             return
 
         self._ssid = ssid
@@ -137,7 +141,7 @@ class WifiClient:
         except Exception as e:
             print("[wifi] connect exception:", e)
 
-        self.state = CONNECTING
+        self._state = CONNECTING
 
     def _tick(self, gen: int) -> None:
         """Advance connection state machine one step."""
@@ -146,7 +150,7 @@ class WifiClient:
 
         self._pending = False
 
-        if self.state != CONNECTING or self._wlan is None:
+        if self._state != CONNECTING or self._wlan is None:
             return
 
         now_ms = time.ticks_ms()
@@ -157,13 +161,13 @@ class WifiClient:
         wlan_status = self._wlan.status()
 
         if wlan_status == STAT_GOT_IP:
-            self.state = CONNECTED
+            self._state = CONNECTED
             self._stop_timer()
             return
 
         if wlan_status == STAT_WRONG_PASSWORD:
             self._wlan.disconnect()
-            self.state = FAILED
+            self._state = FAILED
             self._stop_timer()
             return
 
