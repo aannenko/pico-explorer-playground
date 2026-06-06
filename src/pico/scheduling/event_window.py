@@ -42,6 +42,22 @@ class EventWindow:
         self._prune_before(window_start)
         return self._buffer
 
+    def replace(self, event_iter) -> None:  # event_iter: Iterator[Event]
+        """Swap in a fresh event iterator, discarding all buffered state.
+
+        Required for network-backed streams whose underlying data is
+        re-fetched periodically: the buffer, peek slot, color toggle
+        and exhaustion latch are all reset so the next ``get_visible``
+        repopulates from ``event_iter``.  Unlike the forward-only fill
+        path, this is the only way to clear ``_exhausted`` once a
+        bounded iterator has run out.
+        """
+        self._events = event_iter
+        self._buffer = []
+        self._use_alt = False
+        self._next = None
+        self._exhausted = False
+
     def _fill_to(self, window_end: int) -> None:
         if self._exhausted:
             return

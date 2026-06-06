@@ -222,3 +222,88 @@ class TestBoundaryConditions:
         visible = ew.get_visible(100, 200)
 
         assert visible == []
+
+
+# ---------------------------------------------------------------------------
+# Iterator replacement (refreshable buffer)
+# ---------------------------------------------------------------------------
+
+class TestReplace:
+    def test_clears_all_internal_state(self):
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), color_a=1, color_b=2)
+        ew.get_visible(0, 300)
+        # Buffer is now populated.
+        assert ew._buffer
+
+        ew.replace(_iter_events(("X", 0, 100)))
+
+        assert ew._buffer == []
+        assert ew._use_alt is False
+        assert ew._next is None
+        assert ew._exhausted is False
+
+    def test_replace_after_exhaustion_refills_from_new_event_iter(self):
+        ew = EventWindow(_iter_events(("A", 0, 100)), color_a=1, color_b=2)
+        # Drive past the only event so the iterator exhausts and latches.
+        ew.get_visible(0, 200)
+        ew.get_visible(200, 400)
+        assert ew._exhausted is True
+
+        ew.replace(_iter_events(("B", 200, 100)))
+        assert ew._exhausted is False  # reset by replace, before any fill
+
+        visible = ew.get_visible(200, 400)
+        names = [e.name for e, _ in visible]
+        assert names == ["B"]
+
+    def test_replace_discards_stale_buffered_events(self):
+        ew = EventWindow(
+            _iter_events(("A", 0, 100), ("B", 100, 100), ("C", 200, 100)),
+            color_a=1,
+            color_b=2,
+        )
+        ew.get_visible(0, 300)
+        assert [e.name for e, _ in ew._buffer] == ["A", "B", "C"]
+
+        ew.replace(_iter_events(("X", 0, 100), ("Y", 100, 100)))
+        visible = ew.get_visible(0, 300)
+
+        names = [e.name for e, _ in visible]
+        assert names == ["X", "Y"]
+
+    def test_replace_with_empty_iter_yields_empty(self):
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), color_a=1, color_b=2)
+        ew.get_visible(0, 300)
+
+        ew.replace(iter([]))
+        visible = ew.get_visible(0, 300)
+
+        assert visible == []
+
+    def test_replace_restarts_color_alternation(self):
+        ew = EventWindow(
+            _iter_events(("A", 0, 100), ("B", 100, 100)),
+            color_a=10,
+            color_b=20,
+        )
+        ew.get_visible(0, 300)
+        # Toggle has advanced (A=False, B=True), so the next event would be False→True.
+
+        ew.replace(_iter_events(("X", 0, 100), ("Y", 100, 100)))
+        visible = ew.get_visible(0, 300)
+
+        toggles = [alt for _, alt in visible]
+        assert toggles == [False, True]  # restarts from color_a
+
+    def test_replace_clears_pending_peek_slot(self):
+        # B starts beyond the window, so it is held in the peek slot.
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), color_a=1, color_b=2)
+        ew.get_visible(0, 200)
+        assert ew._next is not None  # B is peeked
+
+        ew.replace(_iter_events(("C", 0, 100)))
+        visible = ew.get_visible(0, 200)
+
+        names = [e.name for e, _ in visible]
+        assert names == ["C"]  # the stale peeked B does not resurface
+
