@@ -4,7 +4,7 @@ Keeping pen creation isolated here keeps hardware coupling out of the
 individual display modules and app composition code.
 """
 
-# Predefined stream color pairs (color_a, color_b) as RGB tuples.
+# Predefined stream palette entries as (main_rgb, alt_rgb) RGB pairs.
 # Based on the Okabe-Ito palette, brightened for black-text contrast.
 # Color-blind safe: avoids red-green confusion; distinguishable under
 # protanopia and deuteranopia.  Within-stream pairs use analogous hue shift.
@@ -83,3 +83,23 @@ def build_sensor_band_pens(gfx):  # gfx: PicoGraphics
         )
         for row in SENSOR_BAND_RGB
     )
+
+
+def build_stream_pen_pairs(gfx, palette):  # gfx: PicoGraphics
+    """Map an authored stream palette to ``(main_pen, alt_pen)`` pen pairs.
+
+    Each ``palette`` entry is either a single RGB triple — which expands to
+    ``(pen, pen)`` so a category renders as one solid color — or a
+    ``(main_rgb, alt_rgb)`` pair whose two pens let adjacent same-category
+    bars alternate.  ``EventWindow`` indexes the result by ``color_index``.
+    """
+    pairs: list[tuple[int, int]] = []
+    for entry in palette:
+        if isinstance(entry[0], int):
+            pen = gfx.create_pen(*entry)
+            pairs.append((pen, pen))
+        else:
+            main_rgb, alt_rgb = entry
+            pairs.append((gfx.create_pen(*main_rgb), gfx.create_pen(*alt_rgb)))
+
+    return tuple(pairs)

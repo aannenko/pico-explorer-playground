@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from displays.palette import SENSOR_BAND_RGB, build_sensor_band_pens
+from displays.palette import SENSOR_BAND_RGB, build_sensor_band_pens, build_stream_pen_pairs
 
 
 class _FakePicoGraphics:
@@ -80,3 +80,47 @@ def test_pens_indexable_as_metric_then_band() -> None:
     )
     _pastel, bright = pens[0][3]
     assert bright == expected_bright_pen
+
+
+# ---------------------------------------------------------------------------
+# build_stream_pen_pairs
+# ---------------------------------------------------------------------------
+
+def test_build_stream_pen_pairs_expands_single_rgb_to_equal_pair() -> None:
+    """A single RGB triple expands to (pen, pen) with one create_pen call."""
+    gfx = _FakePicoGraphics()
+    pairs = build_stream_pen_pairs(gfx, ((10, 20, 30),))
+
+    expected = (10 << 16) | (20 << 8) | 30
+    assert pairs == ((expected, expected),)
+    assert gfx.calls == [(10, 20, 30)]  # one pen, reused for main and alt
+
+
+def test_build_stream_pen_pairs_maps_main_alt_pair() -> None:
+    """A (main_rgb, alt_rgb) pair maps each side to its own pen."""
+    gfx = _FakePicoGraphics()
+    pairs = build_stream_pen_pairs(gfx, (((1, 2, 3), (4, 5, 6)),))
+
+    main = (1 << 16) | (2 << 8) | 3
+    alt = (4 << 16) | (5 << 8) | 6
+    assert pairs == ((main, alt),)
+
+
+def test_build_stream_pen_pairs_handles_mixed_entries() -> None:
+    """Singles and pairs may be mixed within one palette."""
+    gfx = _FakePicoGraphics()
+    pairs = build_stream_pen_pairs(gfx, ((1, 1, 1), ((2, 2, 2), (3, 3, 3))))
+
+    solid = (1 << 16) | (1 << 8) | 1
+    main = (2 << 16) | (2 << 8) | 2
+    alt = (3 << 16) | (3 << 8) | 3
+    assert pairs == ((solid, solid), (main, alt))
+
+
+def test_build_stream_pen_pairs_returns_nested_tuples() -> None:
+    gfx = _FakePicoGraphics()
+    pairs = build_stream_pen_pairs(gfx, ((1, 2, 3),))
+
+    assert isinstance(pairs, tuple)
+    assert isinstance(pairs[0], tuple)
+    assert len(pairs[0]) == 2

@@ -28,7 +28,7 @@ def test_event_repr_is_stable() -> None:
     e = Event("rest", 10, 20)
     assert repr(e) == (
         "Event(name=rest, start_timestamp=10, wall_clock_duration_sec=20, "
-        "real_duration_sec=20, severity=0)"
+        "real_duration_sec=20, color_index=0)"
     )
 
 
@@ -43,19 +43,19 @@ def test_event_real_duration_explicit() -> None:
     assert e.wall_clock_duration_sec == 3600
 
 
-def test_event_severity_defaults_to_zero() -> None:
-    assert Event("work", 0, 1).severity == 0
+def test_event_color_index_defaults_to_zero() -> None:
+    assert Event("work", 0, 1).color_index == 0
 
 
-def test_event_severity_explicit() -> None:
-    assert Event("rain", 0, 1, severity=2).severity == 2
+def test_event_color_index_explicit() -> None:
+    assert Event("rain", 0, 1, color_index=2).color_index == 2
 
 
-def test_event_rejects_negative_severity() -> None:
-    with pytest.raises(ValueError, match="Event severity cannot be negative"):
-        Event("x", 0, 1, severity=-1)
+def test_event_rejects_negative_color_index() -> None:
+    with pytest.raises(ValueError, match="Event color_index cannot be negative"):
+        Event("x", 0, 1, color_index=-1)
 
 
-def test_event_repr_includes_explicit_severity() -> None:
-    e = Event("rain", 5, 600, real_duration_sec=600, severity=2)
-    assert "severity=2" in repr(e)
+def test_event_repr_includes_explicit_color_index() -> None:
+    e = Event("rain", 5, 600, real_duration_sec=600, color_index=2)
+    assert "color_index=2" in repr(e)

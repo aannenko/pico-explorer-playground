@@ -42,7 +42,6 @@ def _random_event_loop(
 
 
 def build_work_week_stream(time_service: TimeService) -> Stream:
-    color_a, color_b = DEFAULT_STREAM_COLORS[0]
     return Stream(
         events_iter=event_factory.work_week_loop(
             work_days={0, 1, 2, 3, 4},
@@ -50,8 +49,7 @@ def build_work_week_stream(time_service: TimeService) -> Stream:
             work_end=(18, 0),
             time_service=time_service,
         ),
-        color_a=color_a,
-        color_b=color_b,
+        palette=(DEFAULT_STREAM_COLORS[0],),
     )
 
 
@@ -91,6 +89,6 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
     ]
 
     return [
-        Stream(events_iter=it, color_a=a, color_b=b)
-        for it, (a, b) in zip(iterators, DEFAULT_STREAM_COLORS[1:])
+        Stream(events_iter=it, palette=(colors,))
+        for it, colors in zip(iterators, DEFAULT_STREAM_COLORS[1:])
     ]

@@ -12,7 +12,7 @@ import config
 import demo_streams
 from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
-from displays.palette import Palette, build_palette, build_sensor_band_pens
+from displays.palette import Palette, build_palette, build_sensor_band_pens, build_stream_pen_pairs
 from displays.status import StatusDisplay
 from hardware.explorer import (
     BUTTON_A_PIN,
@@ -158,9 +158,8 @@ def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeS
 
     windows: list[EventWindow] = []
     for s in streams:
-        pen_a = pico_graphics.create_pen(*s.color_a)
-        pen_b = pico_graphics.create_pen(*s.color_b)
-        windows.append(EventWindow(events_iter=s.events_iter, colors=(pen_a, pen_b)))
+        pen_pairs = build_stream_pen_pairs(pico_graphics, s.palette)
+        windows.append(EventWindow(events_iter=s.events_iter, palette=pen_pairs))
 
     return calendar.Display(
         renderer=calendar.Renderer(

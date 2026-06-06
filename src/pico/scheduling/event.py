@@ -7,7 +7,7 @@ class Event:
         start_timestamp: int,
         wall_clock_duration_sec: int,
         real_duration_sec: int = -1,  # DST-corrected
-        severity: int = 0,
+        color_index: int = 0,
     ) -> None:
         if not name:
             raise ValueError("Event name cannot be empty")
@@ -18,14 +18,14 @@ class Event:
         if wall_clock_duration_sec < 0:
             raise ValueError("Event duration cannot be negative")
 
-        if severity < 0:
-            raise ValueError("Event severity cannot be negative")
+        if color_index < 0:
+            raise ValueError("Event color_index cannot be negative")
 
         self.name = name
         self.start_timestamp = start_timestamp
         self.wall_clock_duration_sec = wall_clock_duration_sec
         self.real_duration_sec = real_duration_sec if real_duration_sec >= 0 else wall_clock_duration_sec
-        self.severity = severity
+        self.color_index = color_index
 
     def __repr__(self) -> str:
         return (
@@ -33,5 +33,5 @@ class Event:
             f"start_timestamp={self.start_timestamp}, "
             f"wall_clock_duration_sec={self.wall_clock_duration_sec}, "
             f"real_duration_sec={self.real_duration_sec}, "
-            f"severity={self.severity})"
+            f"color_index={self.color_index})"
         )
