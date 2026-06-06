@@ -369,3 +369,124 @@ def test_compat_dict_requires_every_expected_key() -> None:
     assert fn({"a": 1}, {"a": 10, "extra": "x"}) is True    # extras on actual allowed
     assert fn({"a": 1, "b": 2}, {"a": 10}) is False         # expected key missing
     assert fn({"a": 1}, {"a": "x"}) is False                # value type mismatch
+
+
+# ---------------------------------------------------------------------
+# _is_compatible — variadic ``list`` defaults
+# ---------------------------------------------------------------------
+
+
+def test_compat_list_is_variadic_any_length() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn(["U11006Z1"], []) is True                 # empty override accepted
+    assert fn(["U11006Z1"], ["a", "b", "c"]) is True    # longer override accepted
+    assert fn([1], [1, 2, 3, 4, 5]) is True
+
+
+def test_compat_list_elements_checked_against_first_default() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn([""], ["U11006Z1", "U11006Z2"]) is True
+    assert fn([""], ["ok", 42]) is False                # wrong element type
+    assert fn([1], [1, "x"]) is False
+
+
+def test_compat_empty_list_default_accepts_any_list() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn([], []) is True
+    assert fn([], ["anything", 1, (2, 3)]) is True
+
+
+def test_compat_list_of_tuples_validates_element_shape() -> None:
+    fn = config_bootstrap._is_compatible
+    default = [("", (2026, 1, 1), 0, 0, 0, 1)]
+    assert fn(default, [("BIO", (2026, 6, 4), 6, 0, 60, 2)]) is True
+    assert fn(
+        default,
+        [("BIO", (2026, 6, 4), 6, 0, 60, 2), ("PLAST", (2026, 6, 5), 6, 0, 60, 2)],
+    ) is True
+    assert fn(default, [("BIO",)]) is False                              # wrong tuple length
+    assert fn(default, [("BIO", (2026, 6, 4), 6, 0, 60, "2")]) is False  # wrong element type
+
+
+def test_compat_list_tuple_cross_type_rejected() -> None:
+    fn = config_bootstrap._is_compatible
+    assert fn([1, 2], (1, 2)) is False     # tuple override of list default
+    assert fn((1, 2), [1, 2]) is False     # list override of tuple default
+
+
+def test_compat_list_element_widens_int_to_float() -> None:
+    """The int->float widening propagates into a variadic list's element template."""
+    fn = config_bootstrap._is_compatible
+    assert fn([1.0], [1, 2, 3]) is True       # ints accepted where template is float
+    assert fn([1.0], [1, 2.5, 3]) is True      # floats still fine
+    assert fn([1.0], [1, "x"]) is False        # non-numeric element still rejected
+
+
+def test_compat_list_nested_in_tuple_stays_variadic() -> None:
+    """A ``list`` nested inside a fixed-shape ``tuple`` keeps variadic semantics."""
+    fn = config_bootstrap._is_compatible
+    assert fn((1, [2]), (1, [2, 3, 4])) is True   # inner list may be any length
+    assert fn((1, [2]), (1, [])) is True          # inner list may be empty
+    assert fn((1, [2]), (1, [2, "x"])) is False   # inner element type mismatch
+    assert fn((1, [2]), (1, (2, 3))) is False     # inner tuple override of list default
+    assert fn((1, [2]), (1, 2)) is False          # inner non-list override
+
+
+# ---------------------------------------------------------------------
+# apply_overrides — variadic ``list`` keys (end-to-end)
+# ---------------------------------------------------------------------
+
+
+def test_variadic_list_override_accepts_longer_list(workspace) -> None:
+    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
+    workspace.write_user('BUS_STOPS = ["U11006Z1", "U11006Z2"]\n')
+
+    cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert cfg.BUS_STOPS == ["U11006Z1", "U11006Z2"]
+
+
+def test_variadic_list_override_accepts_empty(workspace) -> None:
+    workspace.write_defaults('BUS_DESTINATION_FILTER = ["Zlicin"]\n')
+    workspace.write_user("BUS_DESTINATION_FILTER = []\n")
+
+    cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert cfg.BUS_DESTINATION_FILTER == []
+
+
+def test_variadic_list_rejects_wrong_element_type(workspace) -> None:
+    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
+    workspace.write_user('BUS_STOPS = ["ok", 42]\n')
+
+    with pytest.raises(config_bootstrap.InvalidConfigError):
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+
+def test_variadic_list_of_tuples_accepts_well_shaped_entries(workspace) -> None:
+    workspace.write_defaults("WASTE_SCHEDULE = [('', (2026, 1, 1), 0, 0, 0, 1)]\n")
+    workspace.write_user(
+        "WASTE_SCHEDULE = [('BIO', (2026, 6, 4), 6, 0, 60, 2),"
+        " ('PLAST', (2026, 6, 5), 6, 0, 60, 2)]\n"
+    )
+
+    cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+    assert len(cfg.WASTE_SCHEDULE) == 2
+    assert cfg.WASTE_SCHEDULE[0][0] == "BIO"
+
+
+def test_variadic_list_of_tuples_rejects_bad_entry_shape(workspace) -> None:
+    workspace.write_defaults("WASTE_SCHEDULE = [('', (2026, 1, 1), 0, 0, 0, 1)]\n")
+    workspace.write_user("WASTE_SCHEDULE = [('BIO',)]\n")
+
+    with pytest.raises(config_bootstrap.InvalidConfigError):
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+
+def test_list_default_rejects_tuple_override(workspace) -> None:
+    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
+    workspace.write_user('BUS_STOPS = ("U11006Z1",)\n')
+
+    with pytest.raises(config_bootstrap.InvalidConfigError):
+        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)

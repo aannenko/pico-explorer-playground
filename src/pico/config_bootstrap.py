@@ -12,13 +12,16 @@ new namespace, so pre-existing ``import config`` references see the
 merged values and ``sys.modules['config']`` keeps pointing at the same
 object.
 
-Validation is *structural* only — same Python type, same tuple length
-and per-element types, with a single widening (``int`` accepted where
-the default is ``float``).  Semantic invariants (range bounds, monotonic
-ordering, uniqueness) live with their consumers.  Placeholder credential
-detection is intentionally out of scope: a ``config.py`` that does not
-override ``WIFI_SSID`` / ``WIFI_PASSWORD`` boots with the placeholder
-defaults and surfaces the problem at WiFi connect time.
+Validation is *structural* only — same Python type, with a single
+widening (``int`` accepted where the default is ``float``).  ``tuple``
+defaults are fixed-shape (matched length + per-element types); ``list``
+defaults are variadic collections (any length, each element matched
+against the first default element as a template).  Semantic invariants
+(range bounds, monotonic ordering, uniqueness) live with their
+consumers.  Placeholder credential detection is intentionally out of
+scope: a ``config.py`` that does not override ``WIFI_SSID`` /
+``WIFI_PASSWORD`` boots with the placeholder defaults and surfaces the
+problem at WiFi connect time.
 """
 
 import os
@@ -43,10 +46,17 @@ _MODULE_TYPE = type(sys)
 def _is_compatible(expected, actual):
     """Return True when ``actual`` matches ``expected``'s type and shape.
 
-    Allows the single widening ``int`` -> ``float``.  Tuples/lists must
-    match length and recurse per-element; dicts require every key in
-    ``expected`` (extras on ``actual`` are allowed).  ``bool`` and ``int``
-    are intentionally not interchangeable: ``type(True) is int`` is False.
+    Allows the single widening ``int`` -> ``float``.  Tuples are
+    fixed-shape: same length, recursing per-element.  Lists are variadic
+    collections: any length is accepted and each element is validated
+    against ``expected[0]`` as a shape template (an empty default list
+    imposes no element constraint).  Dicts require every key in
+    ``expected`` (extras on ``actual`` are allowed).  ``bool`` and
+    ``int`` are intentionally not interchangeable: ``type(True) is int``
+    is False.
+
+    Type identity is strict, so a ``tuple`` override of a ``list``
+    default (or vice versa) is rejected.
     """
     et = type(expected)
     at = type(actual)
@@ -54,11 +64,22 @@ def _is_compatible(expected, actual):
         return True
     if et is not at:
         return False
-    if et is tuple or et is list:
+    if et is tuple:
         if len(expected) != len(actual):
             return False
         for e, a in zip(expected, actual):
             if not _is_compatible(e, a):
+                return False
+        return True
+    if et is list:
+        # Variadic collection: any length accepted.  Each override
+        # element is validated against ``expected[0]`` as a shape
+        # template; an empty default list imposes no element constraint.
+        if not expected:
+            return True
+        template = expected[0]
+        for a in actual:
+            if not _is_compatible(template, a):
                 return False
         return True
     if et is dict:
@@ -85,8 +106,12 @@ def _is_public_setting(name, value):
 
 def _describe(value):
     name = type(value).__name__
-    if name == "tuple" or name == "list":
-        return "{} of length {}".format(name, len(value))
+    if name == "tuple":
+        return "tuple of length {}".format(len(value))
+    if name == "list":
+        # Lists are variadic — length is not a validation criterion, so
+        # reporting one would misleadingly imply it is.
+        return "list"
     return name
 
 
