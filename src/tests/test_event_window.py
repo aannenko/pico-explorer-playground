@@ -1,3 +1,5 @@
+import pytest
+
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
 
@@ -27,7 +29,7 @@ class TestGetVisible:
             ("B", 300, 200),   # 300..500
             ("C", 500, 200),   # 500..700
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(250, 550)
 
@@ -40,7 +42,7 @@ class TestGetVisible:
             ("B", 200, 100),   # 200..300
             ("C", 300, 100),   # 300..400
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(300, 500)
 
@@ -51,7 +53,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 500),   # 0..500 — spans into window
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(200, 400)
 
@@ -64,7 +66,7 @@ class TestGetVisible:
             ("B", 100, 100),   # 100..200
             ("C", 200, 100),   # 200..300
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         ew.get_visible(0, 300)
         assert len(ew._buffer) == 3
@@ -74,7 +76,7 @@ class TestGetVisible:
         assert names == ["C"]
 
     def test_empty_iterator_returns_empty(self):
-        ew = EventWindow(iter([]), color_a=1, color_b=2)
+        ew = EventWindow(iter([]), colors=(1, 2))
 
         visible = ew.get_visible(0, 1000)
 
@@ -84,7 +86,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 100),   # 0..100 — entirely before window
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(200, 400)
 
@@ -103,20 +105,20 @@ class TestColorToggle:
             ("C", 200, 100),
             ("D", 300, 100),
         )
-        ew = EventWindow(events, color_a=10, color_b=20)
+        ew = EventWindow(events, colors=(10, 20))
 
         visible = ew.get_visible(0, 500)
 
         toggles = [alt for _, alt in visible]
         assert toggles == [False, True, False, True]
 
-    def test_color_a_for_first_event(self):
+    def test_first_event_uses_first_color(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, color_a=10, color_b=20)
+        ew = EventWindow(events, colors=(10, 20))
 
         visible = ew.get_visible(0, 200)
 
-        assert visible[0][1] is False  # color_a
+        assert visible[0][1] is False  # colors[0]
 
     def test_toggle_persists_after_prune(self):
         events = _iter_events(
@@ -124,7 +126,7 @@ class TestColorToggle:
             ("B", 100, 100),
             ("C", 200, 100),
         )
-        ew = EventWindow(events, color_a=10, color_b=20)
+        ew = EventWindow(events, colors=(10, 20))
 
         ew.get_visible(0, 300)
         # A=False, B=True, C=False
@@ -142,7 +144,7 @@ class TestColorToggle:
 class TestIteratorExhaustion:
     def test_does_not_raise_on_exhausted_iterator(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         ew.get_visible(0, 200)
         visible = ew.get_visible(200, 400)
@@ -151,7 +153,7 @@ class TestIteratorExhaustion:
 
     def test_successive_calls_after_exhaustion(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -170,7 +172,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),     # ends at 100
             ("B", 100, 100),   # starts at 100
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(100, 300)
 
@@ -182,7 +184,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),
             ("B", 100, 100),
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         # Window [0, 100) — B starts at 100, should not appear
         visible = ew.get_visible(0, 100)
@@ -195,7 +197,7 @@ class TestBoundaryConditions:
             ("A", 100, 0),
             ("B", 100, 200),
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(50, 300)
 
@@ -205,7 +207,7 @@ class TestBoundaryConditions:
 
     def test_single_long_event_spanning_entire_window(self):
         events = _iter_events(("A", 0, 10000),)
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(1000, 2000)
 
@@ -217,7 +219,7 @@ class TestBoundaryConditions:
             ("A", 0, 50),       # 0..50
             ("B", 1000, 100),   # 1000..1100 — far beyond window
         )
-        ew = EventWindow(events, color_a=1, color_b=2)
+        ew = EventWindow(events, colors=(1, 2))
 
         visible = ew.get_visible(100, 200)
 
@@ -230,7 +232,7 @@ class TestBoundaryConditions:
 
 class TestReplace:
     def test_clears_all_internal_state(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), color_a=1, color_b=2)
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), colors=(1, 2))
         ew.get_visible(0, 300)
         # Buffer is now populated.
         assert ew._buffer
@@ -243,7 +245,7 @@ class TestReplace:
         assert ew._exhausted is False
 
     def test_replace_after_exhaustion_refills_from_new_event_iter(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), color_a=1, color_b=2)
+        ew = EventWindow(_iter_events(("A", 0, 100)), colors=(1, 2))
         # Drive past the only event so the iterator exhausts and latches.
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -259,8 +261,7 @@ class TestReplace:
     def test_replace_discards_stale_buffered_events(self):
         ew = EventWindow(
             _iter_events(("A", 0, 100), ("B", 100, 100), ("C", 200, 100)),
-            color_a=1,
-            color_b=2,
+            colors=(1, 2),
         )
         ew.get_visible(0, 300)
         assert [e.name for e, _ in ew._buffer] == ["A", "B", "C"]
@@ -272,7 +273,7 @@ class TestReplace:
         assert names == ["X", "Y"]
 
     def test_replace_with_empty_iter_yields_empty(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), color_a=1, color_b=2)
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), colors=(1, 2))
         ew.get_visible(0, 300)
 
         ew.replace(iter([]))
@@ -283,8 +284,7 @@ class TestReplace:
     def test_replace_restarts_color_alternation(self):
         ew = EventWindow(
             _iter_events(("A", 0, 100), ("B", 100, 100)),
-            color_a=10,
-            color_b=20,
+            colors=(10, 20),
         )
         ew.get_visible(0, 300)
         # Toggle has advanced (A=False, B=True), so the next event would be False→True.
@@ -293,11 +293,11 @@ class TestReplace:
         visible = ew.get_visible(0, 300)
 
         toggles = [alt for _, alt in visible]
-        assert toggles == [False, True]  # restarts from color_a
+        assert toggles == [False, True]  # restarts from colors[0]
 
     def test_replace_clears_pending_peek_slot(self):
         # B starts beyond the window, so it is held in the peek slot.
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), color_a=1, color_b=2)
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), colors=(1, 2))
         ew.get_visible(0, 200)
         assert ew._next is not None  # B is peeked
 
@@ -306,4 +306,27 @@ class TestReplace:
 
         names = [e.name for e, _ in visible]
         assert names == ["C"]  # the stale peeked B does not resurface
+
+
+# ---------------------------------------------------------------------------
+# Color palette
+# ---------------------------------------------------------------------------
+
+class TestColors:
+    def test_colors_tuple_stored(self):
+        ew = EventWindow(iter([]), colors=(10, 11, 12))
+        assert ew.colors == (10, 11, 12)
+
+    def test_colors_is_read_only(self):
+        ew = EventWindow(iter([]), colors=(10, 11))
+        with pytest.raises(AttributeError):
+            ew.colors = (1, 2)
+
+    def test_replace_preserves_colors(self):
+        ew = EventWindow(_iter_events(("A", 0, 100)), colors=(10, 11, 12))
+        ew.get_visible(0, 200)
+
+        ew.replace(_iter_events(("B", 0, 100)))
+
+        assert ew.colors == (10, 11, 12)
 

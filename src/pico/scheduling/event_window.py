@@ -5,24 +5,25 @@ class EventWindow:
     """Sliding-buffer wrapper over a forward-only event iterator.
 
     Each ``get_visible`` call fills the buffer forward to the requested
-    window end and prunes events that ended before its start.
-    ``color_a`` / ``color_b`` are pens used by callers to alternate
-    adjacent bars.
+    window end and prunes events that ended before its start.  ``colors``
+    holds the pens the renderer indexes by ``Event.severity``.
     """
 
     def __init__(
         self,
         events_iter,  # Iterator[Event]
-        color_a: int,
-        color_b: int,
+        colors: tuple[int, ...],
     ) -> None:
         self._events = events_iter
-        self.color_a: int = color_a
-        self.color_b: int = color_b
+        self._colors: tuple[int, ...] = colors
         self._buffer: list[tuple[Event, bool]] = []
         self._use_alt: bool = False
         self._next: tuple[Event, bool] | None = None
         self._exhausted: bool = False
+
+    @property
+    def colors(self) -> tuple[int, ...]:
+        return self._colors
 
     def get_visible(
         self,
@@ -32,7 +33,7 @@ class EventWindow:
         """Return ``[(Event, use_alt_color), ...]`` overlapping ``[window_start, window_end)``.
 
         ``use_alt_color`` alternates between adjacent events so callers
-        can pick ``color_a`` or ``color_b``.
+        can index ``colors[0]`` / ``colors[1]`` for severity-0 events.
 
         Note: the returned list is the window's internal buffer (mutated
         on the next call) — callers must treat it as read-only.  This

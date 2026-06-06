@@ -156,6 +156,8 @@ class Renderer:
 
             stream = streams[row_idx]
             visible = stream.get_visible(window_start, window_end)
+            colors = stream.colors
+            n_colors = len(colors)
 
             for event, use_alt in visible:
                 ev_start = event.start_timestamp
@@ -168,8 +170,13 @@ class Renderer:
                 if x1 <= x0:
                     continue
 
-                color = stream.color_b if use_alt else stream.color_a
-                gfx.set_pen(color)
+                # severity 0 alternates colors[0]/colors[1]; higher severity
+                # indexes colors[severity], clamped to the last entry.
+                sev = event.severity
+                idx = sev if sev > 0 else (1 if use_alt else 0)
+                if idx >= n_colors:
+                    idx = n_colors - 1
+                gfx.set_pen(colors[idx])
                 gfx.rectangle(x0, row_top, x1 - x0, bar_h)
 
                 bar_px = x1 - x0

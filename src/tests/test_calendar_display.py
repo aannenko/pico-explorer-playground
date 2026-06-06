@@ -13,15 +13,19 @@ from conftest import RecordingRenderer
 # Fakes / helpers
 # ---------------------------------------------------------------------------
 
-def _make_event(name: str, start: int, duration: int) -> Event:
-    return Event(name=name, start_timestamp=start, wall_clock_duration_sec=duration)
+def _make_event(name: str, start: int, duration: int, severity: int = 0) -> Event:
+    return Event(
+        name=name,
+        start_timestamp=start,
+        wall_clock_duration_sec=duration,
+        severity=severity,
+    )
 
 
-def _make_stream(*specs, color_a: int = 1, color_b: int = 2) -> EventWindow:
+def _make_stream(*specs, colors: tuple[int, ...] = (1, 2)) -> EventWindow:
     return EventWindow(
-        iter([_make_event(n, s, d) for n, s, d in specs]),
-        color_a=color_a,
-        color_b=color_b,
+        iter([_make_event(*spec) for spec in specs]),
+        colors=colors,
     )
 
 
@@ -183,6 +187,8 @@ class FakeGfx:
         self._bounds = (width, height)
         self.text_calls: list[tuple[str, int, int, int]] = []
         self.line_calls: list[tuple[int, int, int, int]] = []
+        self.rect_calls: list[tuple[int, int, int, int, int]] = []  # (pen, x, y, w, h)
+        self.current_pen: int | None = None
 
     def get_bounds(self) -> tuple[int, int]:
         return self._bounds
@@ -191,13 +197,13 @@ class FakeGfx:
         pass
 
     def set_pen(self, pen: int) -> None:
-        pass
+        self.current_pen = pen
 
     def clear(self) -> None:
         pass
 
     def rectangle(self, x: int, y: int, w: int, h: int) -> None:
-        pass
+        self.rect_calls.append((self.current_pen, x, y, w, h))
 
     def line(self, x1: int, y1: int, x2: int, y2: int) -> None:
         self.line_calls.append((x1, y1, x2, y2))
@@ -243,7 +249,7 @@ class TestRemainingTime:
 
         # Event: started 10 min ago, lasts 3 hours (end well beyond window)
         ev_duration = 3 * 3600
-        stream = _make_stream(("work", now - 600, ev_duration), color_a=10, color_b=11)
+        stream = _make_stream(("work", now - 600, ev_duration), colors=(10, 11))
         stream.get_visible(window_start, window_end)  # prime the buffer
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -261,7 +267,7 @@ class TestRemainingTime:
         window_end = now + 5400
 
         # Event: started 10 min ago, lasts 30 min (ends within window)
-        stream = _make_stream(("short", now - 600, 1800), color_a=10, color_b=11)
+        stream = _make_stream(("short", now - 600, 1800), colors=(10, 11))
         stream.get_visible(window_start, window_end)
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -280,7 +286,7 @@ class TestRemainingTime:
         # extending beyond — bar is wide but label fills it
         stream = _make_stream(
             ("AVERYLONGEVENTNAME", now + 4800, 7200),
-            color_a=10, color_b=11,
+            colors=(10, 11),
         )
         stream.get_visible(window_start, window_end)
 
@@ -294,6 +300,85 @@ class TestRemainingTime:
         # With bar starting at ~92% of 240px = ~220px, only ~20px visible.
         # "-02:50" at scale 2 = 6*6*2 = 72px — won't fit.
         assert len(rem_texts) == 0
+
+
+# ---------------------------------------------------------------------------
+# Severity-indexed bar colors
+# ---------------------------------------------------------------------------
+
+class TestSeverityColors:
+    """Bars pick a pen from the window's ``colors`` tuple by event severity.
+
+    The palette pens (10/11/12) are distinct from the renderer's
+    ``empty_row`` pen (3), so filtering recorded rectangles to palette pens
+    isolates the event bars from the per-row background fill.
+    """
+
+    _PALETTE = (10, 11, 12)
+
+    def _bar_pens(self, gfx: FakeGfx) -> list[int]:
+        return [pen for (pen, *_rest) in gfx.rect_calls if pen in self._PALETTE]
+
+    def test_severity_zero_alternates_first_two_colors(self):
+        renderer, gfx = _make_renderer()
+        window_start, window_end = 0, 7200
+        stream = _make_stream(
+            ("a", 0, 1800),       # 0..1800   use_alt False -> colors[0]
+            ("b", 1800, 1800),    # 1800..3600 use_alt True -> colors[1]
+            colors=self._PALETTE,
+        )
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end)
+
+        assert self._bar_pens(gfx) == [10, 11]
+
+    def test_positive_severity_selects_indexed_color(self):
+        renderer, gfx = _make_renderer()
+        window_start, window_end = 0, 7200
+        stream = EventWindow(
+            iter([
+                _make_event("warn", 0, 1800, severity=1),      # -> colors[1]
+                _make_event("sev", 1800, 1800, severity=2),    # -> colors[2]
+            ]),
+            colors=self._PALETTE,
+        )
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end)
+
+        assert self._bar_pens(gfx) == [11, 12]
+
+    def test_positive_severity_ignores_alternation(self):
+        # Two adjacent severity-1 events would alternate if severity were
+        # ignored; instead both must resolve to colors[1].
+        renderer, gfx = _make_renderer()
+        window_start, window_end = 0, 7200
+        stream = EventWindow(
+            iter([
+                _make_event("w1", 0, 1800, severity=1),
+                _make_event("w2", 1800, 1800, severity=1),
+            ]),
+            colors=self._PALETTE,
+        )
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end)
+
+        assert self._bar_pens(gfx) == [11, 11]
+
+    def test_out_of_range_severity_clamps_to_last_color(self):
+        renderer, gfx = _make_renderer()
+        window_start, window_end = 0, 7200
+        stream = EventWindow(
+            iter([_make_event("x", 0, 1800, severity=99)]),
+            colors=self._PALETTE,
+        )
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end)
+
+        assert self._bar_pens(gfx) == [12]  # clamped to colors[-1]
 
 
 # ---------------------------------------------------------------------------

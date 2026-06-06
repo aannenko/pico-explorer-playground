@@ -160,7 +160,7 @@ def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeS
     for s in streams:
         pen_a = pico_graphics.create_pen(*s.color_a)
         pen_b = pico_graphics.create_pen(*s.color_b)
-        windows.append(EventWindow(events_iter=s.events_iter, color_a=pen_a, color_b=pen_b))
+        windows.append(EventWindow(events_iter=s.events_iter, colors=(pen_a, pen_b)))
 
     return calendar.Display(
         renderer=calendar.Renderer(
