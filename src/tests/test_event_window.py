@@ -1,7 +1,8 @@
 import pytest
 
 from scheduling.event import Event
-from scheduling.event_window import EventWindow
+from scheduling.event_window import EventWindow, build_event_windows
+from scheduling.stream import Stream
 
 
 def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> Event:
@@ -401,3 +402,57 @@ class TestPalette:
         ew.replace(_iter_events(("B", 0, 100)))
 
         assert ew.palette == ((10, 11), (12, 13))
+
+
+# ---------------------------------------------------------------------------
+# build_event_windows — shared-palette composition helper
+# ---------------------------------------------------------------------------
+
+class TestBuildEventWindows:
+    _PALETTE = ((10, 11), (20, 21), (30, 31))
+
+    def test_one_window_per_stream(self):
+        streams = [
+            Stream(_iter_events(("A", 0, 100))),
+            Stream(_iter_events(("B", 0, 100))),
+        ]
+
+        windows = build_event_windows(self._PALETTE, streams)
+
+        assert len(windows) == 2
+        assert all(isinstance(w, EventWindow) for w in windows)
+
+    def test_all_windows_share_the_same_palette(self):
+        streams = [Stream(_iter_events(("A", 0, 100))) for _ in range(3)]
+
+        windows = build_event_windows(self._PALETTE, streams)
+
+        # The same immutable palette object is handed to every row.
+        for w in windows:
+            assert w.palette is self._PALETTE
+
+    def test_window_wraps_its_stream_iterator(self):
+        streams = [
+            Stream(_iter_events(("first", 0, 100))),
+            Stream(_iter_events(("second", 0, 100))),
+        ]
+
+        windows = build_event_windows(self._PALETTE, streams)
+
+        assert windows[0].get_visible(0, 200)[0][0].name == "first"
+        assert windows[1].get_visible(0, 200)[0][0].name == "second"
+
+    def test_color_index_indexes_the_shared_palette(self):
+        # An event's color_index selects globally into the shared palette.
+        stream = Stream(iter([
+            Event("x", 0, 100, color_index=2),
+        ]))
+
+        windows = build_event_windows(self._PALETTE, [stream])
+        visible = windows[0].get_visible(0, 200)
+
+        assert visible[0][1] == 30  # main pen of palette[2]
+
+    def test_empty_stream_list_yields_no_windows(self):
+        assert build_event_windows(self._PALETTE, []) == []
+

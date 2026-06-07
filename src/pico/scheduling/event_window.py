@@ -1,14 +1,24 @@
 from scheduling.event import Event
 
 
-class EventWindow:
-    """Sliding-buffer wrapper over a forward-only event iterator.
+def build_event_windows(palette, streams):  # palette: tuple[tuple[int,int],...]; streams: Iterable[Stream]
+    """Build one ``EventWindow`` per stream, all sharing ``palette``.
 
-    Each ``get_visible`` call fills the buffer forward to the requested
-    window end and prunes events that ended before its start.  ``palette``
-    holds one ``(main_pen, alt_pen)`` pair per category; an event's
-    ``color_index`` selects the pair, and the window resolves the final
-    pen at fill time (run-gated alternation, see ``_resolve_pen``).
+    Kept import-free of config/hardware so it is unit-testable with a
+    fake palette and fake streams.
+    """
+    return [EventWindow(events_iter=s.events_iter, palette=palette) for s in streams]
+
+
+class EventWindow:
+    """Per-row calendar view-model: a sliding buffer that also colors its bars.
+
+    Each ``get_visible`` fills the buffer forward and prunes events that
+    ended before the window start.  The pen is resolved and cached at
+    fill time (not at draw time) so pruning the leftmost bar can't
+    re-phase the run-gated alternation; ``get_visible`` returns
+    ``(Event, pen)`` so the renderer stays pure geometry.  ``palette`` is
+    a list of ``(main_pen, alt_pen)`` pairs indexed by ``color_index``.
     """
 
     def __init__(

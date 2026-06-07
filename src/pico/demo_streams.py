@@ -7,7 +7,6 @@ users can define their own streams.
 
 import random
 
-from displays.palette import DEFAULT_STREAM_COLORS
 from scheduling import event_factory
 from scheduling.event import Event
 from scheduling.stream import Stream
@@ -24,8 +23,13 @@ def _random_event_loop(
     gap_chance: int,
     start_timestamp: int,
     time_service: TimeService,
+    color_index: int,
 ):  # Iterator[Event]
-    """Yield random events from *names* with durations from *durations* and occasional gaps."""
+    """Yield random events from *names* with durations from *durations* and occasional gaps.
+
+    Every event is tagged with *color_index* so the whole row renders in
+    one color.
+    """
     cursor = start_timestamp
 
     while True:
@@ -37,11 +41,12 @@ def _random_event_loop(
 
         name = random.choice(names)
         real_dur = time_service.real_duration(cursor, dur)
-        yield Event(name, cursor, dur, real_dur)
+        yield Event(name, cursor, dur, real_dur, color_index=color_index)
         cursor += dur
 
 
 def build_work_week_stream(time_service: TimeService) -> Stream:
+    # color_index defaults to 0.
     return Stream(
         events_iter=event_factory.work_week_loop(
             work_days={0, 1, 2, 3, 4},
@@ -49,7 +54,6 @@ def build_work_week_stream(time_service: TimeService) -> Stream:
             work_end=(18, 0),
             time_service=time_service,
         ),
-        palette=(DEFAULT_STREAM_COLORS[0],),
     )
 
 
@@ -57,6 +61,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
     """Return the placeholder demo streams (weather + random events)."""
     start = time_service.now() - 30 * 60
 
+    # One color_index per row (work_week is row 0).
     iterators = [
         _random_event_loop(
             names=_WEATHER_NAMES,
@@ -64,6 +69,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=_WEATHER_GAP_CHANCE,
             start_timestamp=start,
             time_service=time_service,
+            color_index=1,
         ),
         _random_event_loop(
             names=("code", "review", "deploy", "test", "debug"),
@@ -71,6 +77,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=15,
             start_timestamp=start,
             time_service=time_service,
+            color_index=2,
         ),
         _random_event_loop(
             names=("call", "standup", "retro", "chat"),
@@ -78,6 +85,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=40,
             start_timestamp=start,
             time_service=time_service,
+            color_index=3,
         ),
         _random_event_loop(
             names=("run", "walk", "gym", "yoga", "rest"),
@@ -85,10 +93,8 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=25,
             start_timestamp=start,
             time_service=time_service,
+            color_index=4,
         ),
     ]
 
-    return [
-        Stream(events_iter=it, palette=(colors,))
-        for it, colors in zip(iterators, DEFAULT_STREAM_COLORS[1:])
-    ]
+    return [Stream(events_iter=it) for it in iterators]

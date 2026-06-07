@@ -4,16 +4,20 @@ Keeping pen creation isolated here keeps hardware coupling out of the
 individual display modules and app composition code.
 """
 
-# Predefined stream palette entries as (main_rgb, alt_rgb) RGB pairs.
-# Based on the Okabe-Ito palette, brightened for black-text contrast.
-# Color-blind safe: avoids red-green confusion; distinguishable under
-# protanopia and deuteranopia.  Within-stream pairs use analogous hue shift.
-DEFAULT_STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = [
-    ((240, 180, 50), (255, 210, 90)),    # orange / amber
-    ((100, 190, 245), (150, 210, 255)),  # sky blue / light blue
-    ((180, 200, 50), (210, 240, 130)),   # yellow / chartreuse
-    ((230, 150, 190), (245, 185, 215)),  # pink / light pink
-    ((80, 200, 160), (130, 240, 230)),   # teal / aqua
+# Curated stream-color palette: each Event's ``color_index`` is a 0-based
+# index into this list.  Each entry is a ``(main, alt)`` RGB pair — a run
+# of the same index alternates main/alt so adjacent same-category bars
+# stay distinguishable; differing indices each render their ``main``.
+#
+# Okabe-Ito based, brightened for black-text contrast and color-blind
+# safety.  Quantised to RGB332 on-device.
+#   0=Amber 1=SkyBlue 2=Yellow 3=Pink 4=Teal
+STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = [
+    ((240, 180, 50), (255, 210, 90)),    # 0 amber / light amber
+    ((100, 190, 245), (150, 210, 255)),  # 1 sky blue / light blue
+    ((180, 200, 50), (210, 240, 130)),   # 2 yellow / chartreuse
+    ((230, 150, 190), (245, 185, 215)),  # 3 pink / light pink
+    ((80, 200, 160), (130, 240, 230)),   # 4 teal / aqua
 ]
 
 
