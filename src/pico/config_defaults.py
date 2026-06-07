@@ -47,3 +47,15 @@ SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm 
 SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: bracketing the 1013.25 hPa standard atmosphere
 SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid
 SENSOR_GAS_BANDS = (50, 100, 180, 280, 400)           # kΩ: polluted -> clean
+
+# Waste collection schedule.  Each entry:
+#   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
+# label is shown on the bar; color_index picks the bar color, 0-based:
+#   0=amber 1=sky 2=yellow 3=pink 4=teal 5=red-brown 6=gray
+# period_weeks: 1=weekly, 2=biweekly.  Set to [] to disable the row.
+WASTE_SCHEDULE = [
+    ("BIO",   5, (2026, 6,  4), 9, 0, 60, 2),
+    ("PLAST", 2, (2026, 6,  5), 9, 0, 60, 2),
+    ("MIXED", 6, (2026, 6, 10), 9, 0, 60, 2),
+    ("PAPER", 1, (2026, 6, 12), 9, 0, 60, 2),
+]

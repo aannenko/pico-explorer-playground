@@ -60,6 +60,7 @@ graph TD
     NetworkService --> services/wifi_client.py
     NetworkService --> utilities/ntp.py
     EventWindow --> scheduling["scheduling/event + event_factory + stream"]
+    app --> providers["scheduling/providers (work_week, waste)"]
     app --> demo_streams
     app --> Palette["displays/palette"]
     app --> hardware["hardware/explorer (pin constants)"]
@@ -82,8 +83,9 @@ graph TD
 - **RingHistory:** generic N-metric ring-buffer service in `services/ring_history.py`; the Sensors view uses one instance with `num_metrics=4` to hold 24 h of BME690 history.  Takes a positional `sampler` callable (`app.py` passes `bme690.read` — a bound method, no closure allocation) plus keyword `num_metrics` / `capacity` / `ticks_per_commit`.  Pre-allocates `num_metrics` `array.array('f')` ring buffers; commits one snapshot every `ticks_per_commit` scheduler ticks; bumps `commit_count` so consumers can detect "new data" cheaply.  For the Sensors view, capacity (= graph_width in px) and `ticks_per_commit` are derived in `sensors.Geometry` from the actual measured 4-char value-text width + the 24-hour budget.  Registration on `TickScheduler` happens **once** in `app.py` (single site) using the cached `self._tick_ref` — MicroPython bound methods compare by identity, so the cache is what makes `register`'s `not in` dedup reliable.  No new `machine.Timer`.
 - **Sensor band edges:** `config.SENSOR_*_BANDS` is a 5-tuple `(cap_min, t1, t2, t3, cap_max)` per metric.  Inner three drive icon-swap classification (4 bands); outer two define the history-graph Y axis (cap_max → top, cap_min → bottom).  Tuple shape is structurally enforced by `config_bootstrap.apply_overrides` (mismatched length or element type halts boot); semantic invariants (strictly ascending, unique) are backstopped on the panel by `_validate_sensor_bands_or_halt` in `app.py`.
 - **Services** (`src/pico/services/`) are long-lived stateful objects created at startup, independent of display lifecycle.  Explorer- / Pimoroni-specific services use `Explorer*` / `Pimoroni*` naming to avoid shadowing built-in MicroPython modules.
-- **Scheduling** (`src/pico/scheduling/`): `Event` carries wall-clock + DST-corrected durations; `EventWindow` is a passive sliding buffer over a forward-only event iterator; `Stream` bundles an `events_iter` + two RGB color tuples that `app.py` maps to pens.  `event_factory.work_week_loop` operates in local-epoch and advances its cursor by wall-clock duration to keep local boundaries aligned.
-- **Demo streams** (`src/pico/demo_streams.py`) is temporary — slated for removal once the web configuration server lands.
+- **Scheduling** (`src/pico/scheduling/`): `Event` carries wall-clock + DST-corrected durations plus a `color_index`; `EventWindow` is the per-row calendar view-model (sliding buffer that also resolves each bar's pen at fill time); `Stream` bundles just an `events_iter`.  Bar colors come from `Event.color_index`, a 0-based index into the shared `displays/palette.STREAM_COLORS` list that `app.py` maps to pens once and shares across all rows via `build_event_windows`.  `event_factory.work_week_loop` operates in local-epoch and advances its cursor by wall-clock duration to keep local boundaries aligned.
+- **Stream providers** (`src/pico/scheduling/providers/`): pure on-device generators built once at boot — `work_week` (work/rest/weekend) and `waste` (recurring `config.WASTE_SCHEDULE`, advancing each entry by `period_weeks` in local-epoch).  No `__init__.py` (namespace packages).
+- **Demo streams** (`src/pico/demo_streams.py`) are temporary placeholders filling the remaining calendar rows — slated for removal once the web configuration server lands.
 
 ## Testing
 - Host-side pytest: `cd src && python -m pytest -q`.
