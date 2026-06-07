@@ -7,7 +7,6 @@ users can define their own streams.
 
 import random
 
-from scheduling import event_factory
 from scheduling.event import Event
 from scheduling.stream import Stream
 from services.time_service import TimeService
@@ -43,18 +42,6 @@ def _random_event_loop(
         real_dur = time_service.real_duration(cursor, dur)
         yield Event(name, cursor, dur, real_dur, color_index=color_index)
         cursor += dur
-
-
-def build_work_week_stream(time_service: TimeService) -> Stream:
-    # color_index defaults to 0.
-    return Stream(
-        events_iter=event_factory.work_week_loop(
-            work_days={0, 1, 2, 3, 4},
-            work_start=(9, 0),
-            work_end=(18, 0),
-            time_service=time_service,
-        ),
-    )
 
 
 def build_demo_streams(time_service: TimeService) -> list[Stream]:

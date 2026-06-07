@@ -27,6 +27,7 @@ from hardware.explorer import (
     BUTTON_Y_PIN,
 )
 from scheduling.event_window import EventWindow, build_event_windows
+from scheduling.providers import work_week
 from scheduling.stream import Stream
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
@@ -159,7 +160,7 @@ def _build_sensors_display(
 
 
 def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeService):
-    streams: list[Stream] = [demo_streams.build_work_week_stream(time_service)]
+    streams: list[Stream] = [work_week.build_stream(time_service)]
     streams.extend(demo_streams.build_demo_streams(time_service))
 
     stream_palette = build_stream_pen_pairs(pico_graphics, STREAM_COLORS)

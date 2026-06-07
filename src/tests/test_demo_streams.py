@@ -1,7 +1,7 @@
 """Tests for the placeholder demo streams.
 
 The substantive guarantee is the per-row ``color_index`` assignment:
-work_week is row 0 (default index 0) and the four demo rows are 1..4.
+the four demo rows are 1..4.
 """
 
 import demo_streams
@@ -19,11 +19,6 @@ class _FakeTimeService:
 
 def _first_event(stream):
     return next(stream.events_iter)
-
-
-def test_work_week_stream_uses_color_index_zero():
-    stream = demo_streams.build_work_week_stream(_FakeTimeService())
-    assert _first_event(stream).color_index == 0
 
 
 def test_demo_streams_assign_sequential_color_indices():
