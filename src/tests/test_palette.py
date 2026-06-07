@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from displays.palette import SENSOR_BAND_RGB, build_sensor_band_pens, build_stream_pen_pairs
+import displays.palette as palette
+from displays.palette import SENSOR_BAND_RGB, STREAM_COLORS, build_sensor_band_pens, build_stream_pen_pairs
 
 
 class _FakePicoGraphics:
@@ -28,6 +29,34 @@ def test_sensor_band_rgb_shape() -> None:
             assert len(bright) == 3, f"bright for row {row_idx} band {band_idx} must be (r,g,b)"
             for ch in (*pastel, *bright):
                 assert 0 <= ch <= 255, f"channel out of range in row {row_idx} band {band_idx}"
+
+
+def test_stream_colors_are_main_alt_rgb_pairs() -> None:
+    for idx, entry in enumerate(STREAM_COLORS):
+        main, alt = entry  # each entry is (main_rgb, alt_rgb)
+        for rgb in (main, alt):
+            assert len(rgb) == 3, f"entry {idx} must be an (r,g,b) triple"
+            for ch in rgb:
+                assert 0 <= ch <= 255, f"entry {idx} channel out of range"
+
+
+def test_stream_color_constants_match_positions() -> None:
+    # Named indices must line up with their palette slots.
+    assert palette.STREAM_AMBER == 0
+    assert palette.STREAM_SKY == 1
+    assert palette.STREAM_YELLOW == 2
+    assert palette.STREAM_PINK == 3
+    assert palette.STREAM_TEAL == 4
+    assert palette.STREAM_REDBROWN == 5
+    assert palette.STREAM_GRAY == 6
+    assert palette.STREAM_GRAY == len(STREAM_COLORS) - 1
+
+
+def test_waste_default_indices_are_in_range() -> None:
+    # The shipped WASTE_SCHEDULE references red-brown / gray / yellow / sky.
+    for idx in (palette.STREAM_REDBROWN, palette.STREAM_GRAY,
+                palette.STREAM_YELLOW, palette.STREAM_SKY):
+        assert 0 <= idx < len(STREAM_COLORS)
 
 
 def test_build_sensor_band_pens_shape() -> None:

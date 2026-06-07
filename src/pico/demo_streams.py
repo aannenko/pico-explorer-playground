@@ -7,6 +7,7 @@ users can define their own streams.
 
 import random
 
+from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL
 from scheduling.event import Event
 from scheduling.stream import Stream
 from services.time_service import TimeService
@@ -56,7 +57,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=_WEATHER_GAP_CHANCE,
             start_timestamp=start,
             time_service=time_service,
-            color_index=1,
+            color_index=STREAM_SKY,
         ),
         _random_event_loop(
             names=("code", "review", "deploy", "test", "debug"),
@@ -64,7 +65,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=15,
             start_timestamp=start,
             time_service=time_service,
-            color_index=2,
+            color_index=STREAM_YELLOW,
         ),
         _random_event_loop(
             names=("call", "standup", "retro", "chat"),
@@ -72,7 +73,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=40,
             start_timestamp=start,
             time_service=time_service,
-            color_index=3,
+            color_index=STREAM_PINK,
         ),
         _random_event_loop(
             names=("run", "walk", "gym", "yoga", "rest"),
@@ -80,7 +81,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             gap_chance=25,
             start_timestamp=start,
             time_service=time_service,
-            color_index=4,
+            color_index=STREAM_TEAL,
         ),
     ]
 

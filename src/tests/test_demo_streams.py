@@ -5,6 +5,7 @@ the four demo rows are 1..4.
 """
 
 import demo_streams
+from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL
 
 
 class _FakeTimeService:
@@ -24,7 +25,9 @@ def _first_event(stream):
 def test_demo_streams_assign_sequential_color_indices():
     streams = demo_streams.build_demo_streams(_FakeTimeService())
 
-    assert [_first_event(s).color_index for s in streams] == [1, 2, 3, 4]
+    assert [_first_event(s).color_index for s in streams] == [
+        STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL,
+    ]
 
 
 def test_demo_streams_returns_four_rows():
