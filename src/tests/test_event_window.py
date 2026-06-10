@@ -456,3 +456,37 @@ class TestBuildEventWindows:
     def test_empty_stream_list_yields_no_windows(self):
         assert build_event_windows(self._PALETTE, []) == []
 
+
+# ---------------------------------------------------------------------------
+# Overlapping events — fill must not drop a later overlapping event
+# ---------------------------------------------------------------------------
+
+class TestOverlapFill:
+    def test_later_event_overlapping_long_earlier_is_not_dropped(self):
+        # A is long and ends past window_end; B starts inside the window.
+        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), palette=((1, 2),))
+
+        visible = ew.get_visible(0, 500)
+
+        assert [e.name for e, _ in visible] == ["A", "B"]
+
+    def test_multiple_events_overlapping_one_long_event(self):
+        ew = EventWindow(
+            _iter_events(("A", 0, 1000), ("B", 100, 50), ("C", 200, 50)),
+            palette=((1, 2),),
+        )
+
+        visible = ew.get_visible(0, 500)
+
+        assert [e.name for e, _ in visible] == ["A", "B", "C"]
+
+    def test_long_event_then_exhausts_finite_iterator(self):
+        ew = EventWindow(_iter_events(("A", 0, 10000)), palette=((1, 2),))
+
+        visible = ew.get_visible(1000, 2000)
+
+        assert [e.name for e, _ in visible] == ["A"]
+        assert ew._exhausted is True  # pulled A, then hit StopIteration
+        # A stays visible on a repeat call without raising.
+        assert [e.name for e, _ in ew.get_visible(1000, 2000)] == ["A"]
+

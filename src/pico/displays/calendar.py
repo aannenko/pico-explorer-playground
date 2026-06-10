@@ -156,10 +156,19 @@ class Renderer:
 
             stream = streams[row_idx]
             visible = stream.get_visible(window_start, window_end)
+            n_visible = len(visible)
 
-            for event, pen in visible:
+            for i in range(n_visible):
+                event, pen = visible[i]
                 ev_start = event.start_timestamp
                 ev_end = ev_start + event.wall_clock_duration_sec
+
+                # Truncate at the next event's start so overlapping bars don't
+                # stack; also suppresses the remaining-time on a clipped bar.
+                if i + 1 < n_visible:
+                    next_start = visible[i + 1][0].start_timestamp
+                    if next_start < ev_end:
+                        ev_end = next_start
 
                 # Clip to window
                 x0 = max(0, (ev_start - window_start) * width // _WINDOW_TOTAL_SEC)

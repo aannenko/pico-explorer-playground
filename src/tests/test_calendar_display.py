@@ -386,6 +386,80 @@ class TestBarColors:
 
 
 # ---------------------------------------------------------------------------
+# Bar truncation — overlapping bars clip to the next event's start
+# ---------------------------------------------------------------------------
+
+class TestBarTruncation:
+    """draw_rows clips each bar to the next visible event's start so
+    overlapping bars render as clean non-overlapping segments.
+
+    Geometry: window 0..7200 over 240 px → 1 px per 30 s.
+    """
+
+    def _rects_for_pen(self, gfx: FakeGfx, pen: int) -> list[tuple[int, int]]:
+        return [(x, w) for (p, x, _y, w, _h) in gfx.rect_calls if p == pen]
+
+    def test_overlapping_bar_clipped_to_next_start(self):
+        renderer, gfx = _make_renderer()
+        stream = EventWindow(
+            iter([_make_event("A", 0, 3600), _make_event("B", 1800, 1800)]),
+            palette=((10, 11),),
+        )
+        stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 0, 7200)
+
+        # A (main pen 10) clips to B's start: 1800 s → 60 px, not its full 3600 s.
+        assert self._rects_for_pen(gfx, 10) == [(0, 60)]
+        assert self._rects_for_pen(gfx, 11) == [(60, 60)]  # B: 1800..3600
+
+    def test_contiguous_bars_not_truncated(self):
+        renderer, gfx = _make_renderer()
+        stream = EventWindow(
+            iter([_make_event("A", 0, 1800), _make_event("B", 1800, 1800)]),
+            palette=((10, 11),),
+        )
+        stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 0, 7200)
+
+        # next_start == A's end → no truncation; A keeps its full 60 px.
+        assert self._rects_for_pen(gfx, 10) == [(0, 60)]
+
+    def test_exact_same_start_earlier_is_zero_width(self):
+        renderer, gfx = _make_renderer()
+        stream = EventWindow(
+            iter([_make_event("A", 1800, 1800), _make_event("B", 1800, 1800)]),
+            palette=((10, 11),),
+        )
+        stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 0, 7200)
+
+        assert self._rects_for_pen(gfx, 10) == []        # A clipped to 0 width
+        assert len(self._rects_for_pen(gfx, 11)) == 1    # B (later) wins
+
+    def test_remaining_time_suppressed_on_truncated_bar(self):
+        renderer, gfx = _make_renderer()
+        now = 100_000
+        window_start, window_end = now - 1800, now + 5400
+        # A extends past the window but is interrupted by B inside it.
+        stream = EventWindow(
+            iter([
+                _make_event("A", now - 600, 3 * 3600),
+                _make_event("B", now + 600, 1800),
+            ]),
+            palette=((10, 11),),
+        )
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end)
+
+        rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
+        assert rem_texts == []  # truncated by B → no -HH:MM
+
+
+# ---------------------------------------------------------------------------
 # Tick marks (15-minute markers below baseline)
 # ---------------------------------------------------------------------------
 

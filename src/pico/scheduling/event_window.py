@@ -98,16 +98,12 @@ class EventWindow:
         return pair[1] if self._use_alt else pair[0]
 
     def _fill_to(self, window_end: int) -> None:
+        # Relies on events arriving in nondecreasing start order: the fill
+        # stops at the first event starting at/after window_end.
         if self._exhausted:
             return
 
         while True:
-            # Buffer covers window when last event extends past window_end
-            if self._buffer:
-                last = self._buffer[-1][0]
-                if last.start_timestamp + last.wall_clock_duration_sec > window_end:
-                    break
-
             # Get next event from peek slot or iterator
             if self._next is not None:
                 event, pen = self._next
