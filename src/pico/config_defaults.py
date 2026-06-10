@@ -32,8 +32,8 @@ DST_END = (10, -1, 6, 3)    # Last Sunday of October at 03:00 (DST time)
 DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
 
 SENSOR_READ_DELAY_MS = const(5_000)
-BME690_TEMP_OFFSET = -1.7
-BME690_HUM_OFFSET = 7.0
+BME690_TEMP_OFFSET = -2.1
+BME690_HUM_OFFSET = 8.0
 BME690_PRSR_OFFSET = 45.0
 
 # Sensors-view band thresholds.  Each tuple holds 5 strictly ascending
@@ -54,8 +54,8 @@ SENSOR_GAS_BANDS = (50, 100, 180, 280, 400)           # kΩ: polluted -> clean
 #   0=amber 1=sky 2=yellow 3=pink 4=teal 5=red-brown 6=gray
 # period_weeks: 1=weekly, 2=biweekly.  Set to [] to disable the row.
 WASTE_SCHEDULE = [
-    ("BIO",   5, (2026, 6,  4), 9, 0, 60, 2),
-    ("PLAST", 2, (2026, 6,  5), 9, 0, 60, 2),
-    ("MIXED", 6, (2026, 6, 10), 9, 0, 60, 2),
-    ("PAPER", 1, (2026, 6, 12), 9, 0, 60, 2),
+    ("BIO",   5, (2026, 6,  4), 8, 0, 120, 2),
+    ("PLAST", 2, (2026, 6,  5), 8, 0, 120, 2),
+    ("MIXED", 6, (2026, 6, 10), 8, 0, 120, 2),
+    ("PAPER", 1, (2026, 6, 12), 8, 0, 120, 2),
 ]
