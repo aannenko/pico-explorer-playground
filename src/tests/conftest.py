@@ -190,6 +190,14 @@ if "network" not in sys.modules:
     network_stub.STAT_CONNECT_FAIL = 5
     sys.modules["network"] = network_stub
 
+# Passive `urequests` stub so `services.http_client` imports under CPython.
+# Tests drive behavior via the `fake_urequests` fixture, which swaps the
+# module reference http_client actually holds.
+if "urequests" not in sys.modules:
+    urequests_stub = types.ModuleType("urequests")
+    urequests_stub.get = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+    sys.modules["urequests"] = urequests_stub
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Shared test helpers (available to every test module).
@@ -288,3 +296,57 @@ DST_END = (10, -1, 6, 3)    # Last Sun of Oct at 03:00 CEST
 def utc_epoch(*args) -> int:
     """Helper: calendar-style args → UTC epoch (matches conftest mktime stub)."""
     return int(_calendar_mod.timegm(args))
+
+
+class FakeResponse:
+    """Stub of a urequests Response: ``status_code``, ``json()``, ``close()``."""
+
+    def __init__(self, status_code: int, json_data, raise_on_json) -> None:
+        self.status_code = status_code
+        self._json_data = json_data
+        self._raise_on_json = raise_on_json
+        self.closed = False
+
+    def json(self):
+        if self._raise_on_json is not None:
+            raise self._raise_on_json
+        return self._json_data
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeUrequests:
+    """Configurable stand-in for the urequests/requests module.
+
+    Set ``raise_on_get`` / ``raise_on_json`` to an exception instance to
+    simulate connect/timeout / parse failures; set ``status_code`` /
+    ``json_data`` for the success path. Every ``get()`` call records
+    ``(url, headers, timeout)`` and the produced response.
+    """
+
+    def __init__(self) -> None:
+        self.status_code: int = 200
+        self.json_data = {}
+        self.raise_on_get: Exception | None = None
+        self.raise_on_json: Exception | None = None
+        self.calls: list[tuple] = []
+        self.responses: list[FakeResponse] = []
+
+    def get(self, url, headers=None, timeout=None) -> FakeResponse:
+        self.calls.append((url, headers, timeout))
+        if self.raise_on_get is not None:
+            raise self.raise_on_get
+        response = FakeResponse(self.status_code, self.json_data, self.raise_on_json)
+        self.responses.append(response)
+        return response
+
+
+@pytest.fixture
+def fake_urequests(monkeypatch):
+    """Swap the module reference ``http_client`` holds with a ``FakeUrequests``."""
+    import services.http_client as http_client
+
+    fake = FakeUrequests()
+    monkeypatch.setattr(http_client, "_requests", fake)
+    return fake
