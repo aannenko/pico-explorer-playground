@@ -23,6 +23,9 @@ TEXT_SCALE = const(3)
 WIFI_SSID = "YourSSID"
 WIFI_PASSWORD = "YourPassword"
 
+# Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
+HTTP_TIMEOUT_S = const(3)
+
 TIME_ZONE_OFFSET = const(1)  # Prague winter time (UTC+1)
 
 # Daylight Saving Time rules: (month, week, weekday, hour)

@@ -50,7 +50,7 @@ def _classify_oserror(exc: OSError) -> HttpError:
     return HttpConnectError(str(exc))
 
 
-def get_json(url: str, headers: dict | None = None, timeout_s: int = 10) -> dict:
+def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
     """GET ``url`` and return the parsed JSON body as a dict.
 
     Raises an ``HttpError`` subclass on any failure; never returns None.

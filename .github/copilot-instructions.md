@@ -9,6 +9,7 @@ See `ROADMAP.md` for planned features and design intent.
 - Display API: PicoGraphics, `PicoGraphics(display=DISPLAY_PICO_EXPLORER)`.
 - Avoid allocations in hot paths, especially timer / IRQ callbacks.  Cache bound-method refs in `__init__` (`self._tick_ref = self._tick`) and use those in IRQ handlers.
 - In timer IRQs, keep work tiny and defer via `micropython.schedule(...)`.  Guard schedule calls with a `_pending` flag; roll it back on exception so one failure doesn't wedge the state machine.
+- **Single Python thread:** scheduled callbacks and the main-loop button poll all run on one thread — no event loop, no background thread.  So blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering *and* buttons until it returns.  Network fetches use a tick-driven state machine (`services/_fetch_state.py`) bounded by a short `config.HTTP_TIMEOUT_S` (default 3 s) — not `asyncio`/`_thread` (lwIP isn't multi-core-safe; the rp2 GIL negates threading).
 - Prefer `const(...)` for constants; keep math integer where possible.
 - **Spritesheet preload:** `src/pico/icons_symbols.rgb332` (16 KiB) must be loaded in `main.py` *before* `from app import build_app` — MP's non-compacting GC fragments heap early and a later 16 KiB contiguous alloc can fail.
 
