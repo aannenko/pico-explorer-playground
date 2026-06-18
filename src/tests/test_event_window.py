@@ -2,7 +2,7 @@ import pytest
 
 from scheduling.event import Event
 from scheduling.event_window import EventWindow, build_event_windows
-from scheduling.stream import Stream
+from scheduling.stream import ERROR, FRESH, STALE, Stream
 
 
 def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> Event:
@@ -489,4 +489,125 @@ class TestOverlapFill:
         assert ew._exhausted is True  # pulled A, then hit StopIteration
         # A stays visible on a repeat call without raising.
         assert [e.name for e, _ in ew.get_visible(1000, 2000)] == ["A"]
+
+
+# ---------------------------------------------------------------------------
+# Status + generation-driven refresh (network-backed rows)
+# ---------------------------------------------------------------------------
+
+
+class _FakeSource:
+    """Stand-in for a network service: a mutable snapshot + generation/status."""
+
+    def __init__(self, specs, generation: int = 0, status: int = FRESH) -> None:
+        self.specs = specs
+        self.generation = generation
+        self.status = status
+        self.iter_calls = 0
+
+    def events_iter(self):  # -> Iterator[Event]
+        self.iter_calls += 1
+        return iter(_make_events(*self.specs))
+
+    def gen(self) -> int:
+        return self.generation
+
+    def stat(self) -> int:
+        return self.status
+
+    def _window(self, palette=((1, 2),)) -> EventWindow:
+        return EventWindow(
+            self.events_iter(),
+            palette=palette,
+            events_fn=self.events_iter,
+            generation_fn=self.gen,
+            status_fn=self.stat,
+        )
+
+
+class TestStatus:
+    def test_status_none_without_status_fn(self):
+        ew = EventWindow(iter([]), palette=((1, 2),))
+
+        assert ew.status() is None
+
+    def test_status_delegates_to_status_fn(self):
+        box = {"v": FRESH}
+        ew = EventWindow(iter([]), palette=((1, 2),), status_fn=lambda: box["v"])
+
+        assert ew.status() == FRESH
+        box["v"] = ERROR
+        assert ew.status() == ERROR
+
+
+class TestGenerationRefresh:
+    def test_refresh_pulls_new_snapshot_on_generation_bump(self):
+        src = _FakeSource([("A", 0, 100)], generation=0)
+        ew = src._window()
+
+        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
+
+        src.specs = [("B", 0, 100)]
+        src.generation = 1
+
+        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["B"]
+
+    def test_no_refresh_when_generation_unchanged(self):
+        src = _FakeSource([("A", 0, 100)], generation=5)
+        ew = src._window()
+
+        ew.get_visible(0, 1000)
+        calls_after_first = src.iter_calls
+        ew.get_visible(0, 1000)
+        ew.get_visible(0, 1000)
+
+        # events_fn was not invoked again while generation stayed at 5.
+        assert src.iter_calls == calls_after_first
+
+    def test_refresh_restarts_alternation_from_main(self):
+        # color_index-0 run alternates main(10)/alt(20); after a refresh the
+        # first bar must be main again, proving replace() reset the toggle.
+        src = _FakeSource([("A", 0, 100), ("B", 100, 100)], generation=0)
+        ew = EventWindow(
+            src.events_iter(),
+            palette=_ALT,
+            events_fn=src.events_iter,
+            generation_fn=src.gen,
+            status_fn=src.stat,
+        )
+
+        first = ew.get_visible(0, 1000)
+        assert [pen for _, pen in first] == [10, 20]
+
+        src.generation = 1
+        second = ew.get_visible(0, 1000)
+        assert [pen for _, pen in second] == [10, 20]
+
+    def test_static_window_never_refreshes(self):
+        # No generation_fn → the initial iterator is used forever.
+        ew = EventWindow(_iter_events(("A", 0, 100)), palette=((1, 2),))
+
+        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
+        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
+
+
+class TestBuildEventWindowsThreading:
+    def test_status_and_refresh_thread_from_stream(self):
+        src = _FakeSource([("A", 0, 100)], generation=0, status=STALE)
+        stream = Stream(
+            src.events_iter(),
+            events_fn=src.events_iter,
+            generation_fn=src.gen,
+            status_fn=src.stat,
+        )
+
+        window = build_event_windows(((1, 2),), [stream])[0]
+
+        assert window.status() == STALE
+        assert [e.name for e, _ in window.get_visible(0, 1000)] == ["A"]
+
+        src.specs = [("B", 0, 100)]
+        src.generation = 1
+        assert [e.name for e, _ in window.get_visible(0, 1000)] == ["B"]
+
 

@@ -7,6 +7,7 @@ from picographics import PicoGraphics  # type: ignore
 from displays.base import Display as _Display
 from displays.shared.header import format_header_time
 from scheduling.event_window import EventWindow
+from scheduling.stream import FRESH
 
 _WINDOW_PAST_SEC = const(30 * 60)      # 30 minutes of past
 _WINDOW_FUTURE_SEC = const(90 * 60)    # 90 minutes of future
@@ -21,6 +22,7 @@ _MIN_LABEL_PX = const(14)  # don't render label if bar is narrower
 _SEC_PER_HOUR = const(3600)
 _SEC_PER_QUARTER = const(900)
 _TICK_MARK_HEIGHT = const(4)
+_STATUS_GLYPH_PX = const(4)  # right-edge square shown when a row's data isn't fresh
 
 
 def _fmt_remaining(sec: int) -> str:
@@ -217,6 +219,13 @@ class Renderer:
                         if rem_x > label_right + 1:
                             gfx.set_pen(self._colors.background)
                             gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
+
+            # Right-edge glyph when this row's data isn't fresh (network rows
+            # only; static rows return None and draw nothing).
+            status = stream.status()
+            if status is not None and status != FRESH:
+                gfx.set_pen(self._colors.now_line)
+                gfx.rectangle(width - _STATUS_GLYPH_PX, row_top, _STATUS_GLYPH_PX, _STATUS_GLYPH_PX)
 
     @micropython.native
     def draw_time_axis(self, window_start: int, window_end: int) -> None:

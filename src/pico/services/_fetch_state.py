@@ -11,18 +11,18 @@ import time
 import micropython
 from micropython import const
 
+from scheduling.stream import DISABLED, ERROR, FRESH, STALE
+
 # Machine states.
 IDLE = const(0)
 DUE = const(1)
 FETCHING = const(2)
 BACKOFF = const(3)
 
-# Service freshness, derived from fetch timing.  DISABLED is set by a service
-# that has nothing to fetch (e.g. missing config); the machine never sets it.
-FRESH = const(0)
-STALE = const(1)
-ERROR = const(2)
-DISABLED = const(3)
+# Freshness codes (FRESH/STALE/ERROR/DISABLED) are re-exported from
+# scheduling.stream above so the renderer and the state machine share one
+# definition.  DISABLED is set by a service with nothing to fetch (e.g.
+# missing config); the machine never sets it.
 
 _DEFAULT_BACKOFF_BASE_MS = const(5_000)
 _DEFAULT_BACKOFF_MAX_MS = const(600_000)

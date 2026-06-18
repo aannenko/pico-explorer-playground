@@ -5,6 +5,7 @@ import pytest
 import displays.calendar as calendar
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
+from scheduling.stream import DISABLED, ERROR, STALE
 
 from conftest import RecordingRenderer
 
@@ -500,3 +501,62 @@ class TestTickMarks:
         assert tick_lines[0][0] == (900 - window_start) * 240 // 7200
         # Second mark at 1800s → x = (1800 - 100) * 240 // 7200 = 1700 * 240 // 7200 = 56
         assert tick_lines[1][0] == (1800 - window_start) * 240 // 7200
+
+
+class TestStatusGlyph:
+    """draw_rows paints a right-edge glyph (now_line pen, _STATUS_GLYPH_PX
+    square) on rows whose status is not FRESH/None, so a stale or broken
+    network row never looks like a silently-empty one.
+
+    With palette ((1, 2),) the bar pens are 1/2 and the row background is
+    pen 3, so filtering rectangles by the now_line pen (4) isolates glyphs.
+    """
+
+    _GLYPH_PEN = 4  # now_line in _make_renderer's Colors
+
+    def _glyphs(self, gfx: FakeGfx) -> list:
+        g = calendar._STATUS_GLYPH_PX
+        return [r for r in gfx.rect_calls if r[0] == self._GLYPH_PEN and r[3] == g and r[4] == g]
+
+    def _window(self, status, specs=()) -> EventWindow:
+        return EventWindow(
+            iter([_make_event(*s) for s in specs]),
+            palette=((1, 2),),
+            status_fn=(None if status is None else (lambda: status)),
+        )
+
+    def test_no_glyph_when_fresh(self):
+        renderer, gfx = _make_renderer()
+        ew = self._window(calendar.FRESH, specs=[("a", 0, 1800)])
+
+        renderer.draw_rows([ew], 0, 7200)
+
+        assert self._glyphs(gfx) == []
+
+    def test_no_glyph_when_status_none(self):
+        renderer, gfx = _make_renderer()
+        ew = self._window(None, specs=[("a", 0, 1800)])
+
+        renderer.draw_rows([ew], 0, 7200)
+
+        assert self._glyphs(gfx) == []
+
+    @pytest.mark.parametrize("status", [STALE, ERROR, DISABLED])
+    def test_glyph_drawn_when_not_fresh(self, status):
+        renderer, gfx = _make_renderer()
+        ew = self._window(status, specs=[("a", 0, 1800)])
+
+        renderer.draw_rows([ew], 0, 7200)
+
+        glyphs = self._glyphs(gfx)
+        assert len(glyphs) == 1
+        assert glyphs[0][1] == 240 - calendar._STATUS_GLYPH_PX  # right-edge x
+
+    def test_glyph_drawn_on_empty_row(self):
+        renderer, gfx = _make_renderer()
+        ew = self._window(ERROR, specs=[])  # an error row with no events
+
+        renderer.draw_rows([ew], 0, 7200)
+
+        assert len(self._glyphs(gfx)) == 1
+

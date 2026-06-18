@@ -175,6 +175,12 @@ def test_timeout_passed_through(fake_urequests):
     assert fake_urequests.calls[0][2] == 5
 
 
+def test_default_timeout_is_3s(fake_urequests):
+    get_json(_URL)
+
+    assert fake_urequests.calls[0][2] == 3
+
+
 def test_typed_exceptions_subclass_http_error():
     for exc_type in (
         HttpTimeout,
