@@ -67,6 +67,7 @@ class FetchState:
         backoff_max_ms: int = _DEFAULT_BACKOFF_MAX_MS,
         stale_after_ms: int | None = None,
         error_after_failures: int = _DEFAULT_ERROR_AFTER,
+        name: str = "fetch",  # log label, to tell services apart
     ) -> None:
         self._fetcher = fetcher
         self._on_success = on_success
@@ -79,6 +80,7 @@ class FetchState:
         self._backoff_max_ms = backoff_max_ms
         self._stale_after_ms = stale_after_ms if stale_after_ms is not None else 2 * interval_ms
         self._error_after_failures = error_after_failures
+        self._name = name
 
         self._state: int = IDLE
         self._next_due: int = clock()  # due immediately at boot
@@ -104,7 +106,7 @@ class FetchState:
         try:
             self._advance()
         except Exception as exc:
-            print("[fetch] tick err:", exc)
+            print("[%s] tick err:" % self._name, exc)
 
     def _advance(self) -> None:
         now = self._clock()
@@ -145,12 +147,13 @@ class FetchState:
         try:
             self._on_success(result)
         except Exception as exc:
-            print("[fetch] on_success err:", exc)
+            print("[%s] on_success err:" % self._name, exc)
 
     def _on_failure(self, exc) -> None:
-        print("[fetch] err:", exc)
         self._failures += 1
-        self._next_due = time.ticks_add(self._clock(), self._backoff_delay())
+        delay = self._backoff_delay()
+        print("[%s] err (fail #%d, retry in %dms):" % (self._name, self._failures, delay), exc)
+        self._next_due = time.ticks_add(self._clock(), delay)
         self._state = BACKOFF
 
     def _backoff_delay(self) -> int:

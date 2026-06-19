@@ -26,6 +26,14 @@ WIFI_PASSWORD = "YourPassword"
 # Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
 HTTP_TIMEOUT_S = const(3)
 
+# Precipitation forecast (Open-Meteo).  Leave LATITUDE/LONGITUDE at 0.0/0.0
+# to keep the precip row disabled (no fetch; a "CFG?" glyph marks it) — set
+# your coordinates in config.py to enable.  PRECIP_PROB_THRESHOLD gates which
+# hours show a bar (skip hours below this % precipitation probability).
+LATITUDE = 0.0
+LONGITUDE = 0.0
+PRECIP_PROB_THRESHOLD = const(30)
+
 TIME_ZONE_OFFSET = const(1)  # Prague winter time (UTC+1)
 
 # Daylight Saving Time rules: (month, week, weekday, hour)

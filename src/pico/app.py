@@ -29,11 +29,13 @@ from hardware.explorer import (
 from scheduling.event_window import EventWindow, build_event_windows
 from scheduling.providers import waste, work_week
 from scheduling.stream import Stream
+from services._fetch_state import FetchCoordinator
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.pimoroni_bme690 import PimoroniBME690
+from services.precip_service import PrecipService
 from services.ring_history import RingHistory
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
@@ -159,12 +161,14 @@ def _build_sensors_display(
     )
 
 
-def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeService):
-    # Calendar lays out 5 rows; real streams first, demos fill the rest.
+def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeService, network_streams):
+    # Calendar lays out 5 rows: local generators, then network streams,
+    # then demos fill any remaining slots.
     streams: list[Stream] = [
         work_week.build_stream(time_service),
         waste.build_stream(time_service, config.WASTE_SCHEDULE),
     ]
+    streams.extend(network_streams)
     streams.extend(demo_streams.build_demo_streams(time_service)[: 5 - len(streams)])
 
     stream_palette = build_stream_pen_pairs(pico_graphics, STREAM_COLORS)
@@ -266,6 +270,26 @@ def build_app(pico_graphics, schedule_fn) -> App:
         tick_scheduler=tick_scheduler,
     )
 
+    # Network calendar streams: long-lived services sharing one fetch
+    # coordinator (single in-flight fetch across all of them).
+    fetch_coordinator = FetchCoordinator()
+    precip_service = PrecipService(
+        latitude=config.LATITUDE,
+        longitude=config.LONGITUDE,
+        prob_threshold=config.PRECIP_PROB_THRESHOLD,
+        wifi=wifi_client,
+        coordinator=fetch_coordinator,
+        schedule=schedule_fn,
+        timeout_s=config.HTTP_TIMEOUT_S,
+        tick_scheduler=tick_scheduler,
+    )
+    precip_stream = Stream(
+        precip_service.events_iter(),
+        events_fn=precip_service.events_iter,
+        generation_fn=lambda: precip_service.generation,
+        status_fn=lambda: precip_service.status,
+    )
+
     sensors_display = _build_sensors_display(
         pico_graphics,
         palette,
@@ -276,7 +300,9 @@ def build_app(pico_graphics, schedule_fn) -> App:
         sensor_history,
     )
     countdown_display = _build_countdown_display(pico_graphics, palette, tick_scheduler)
-    calendar_display = _build_calendar_display(pico_graphics, palette, time_service)
+    calendar_display = _build_calendar_display(
+        pico_graphics, palette, time_service, [precip_stream]
+    )
 
     display_manager = DisplayManager(
         displays=[sensors_display, countdown_display, calendar_display],

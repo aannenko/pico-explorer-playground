@@ -7,15 +7,16 @@ individual display modules and app composition code.
 from micropython import const
 
 # Curated stream-color palette: each Event's ``color_index`` is a 0-based
-# index into this list (use the STREAM_* constants below).  Each entry is a
-# ``(main, alt)`` RGB pair — a run of the same index alternates main/alt so
-# adjacent same-category bars stay distinguishable; differing indices each
-# render their ``main``.
+# index into this list (use the STREAM_* constants below).  An entry is
+# either a ``(main, alt)`` RGB pair — a run of the same index alternates
+# main/alt so adjacent same-category bars stay distinguishable — or a single
+# RGB triple, which renders as one solid color (no alternation).
 #
 # Okabe-Ito based, brightened for black-text contrast and color-blind
 # safety.  Quantised to RGB332 on-device.
 #   0=Amber 1=SkyBlue 2=Yellow 3=Pink 4=Teal 5=RedBrown 6=Gray
-STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = [
+#   7=Green 8=Red  (precip intensity ramp; solid so merged bars look continuous)
+STREAM_COLORS: list[tuple] = [
     ((240, 180, 50), (255, 210, 90)),    # 0 amber / light amber
     ((100, 190, 245), (150, 210, 255)),  # 1 sky blue / light blue
     ((180, 200, 50), (210, 240, 130)),   # 2 yellow / chartreuse
@@ -23,6 +24,8 @@ STREAM_COLORS: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = [
     ((80, 200, 160), (130, 240, 230)),   # 4 teal / aqua
     ((200, 130, 95), (220, 160, 125)),   # 5 red-brown / tan (waste: bio)
     ((160, 160, 160), (195, 195, 195)),  # 6 gray / light gray (waste: mixed)
+    (90, 205, 100),                      # 7 green (precip: light)
+    (235, 80, 65),                       # 8 red (precip: heavy)
 ]
 
 # Named indices into STREAM_COLORS, so producers avoid magic slot numbers.
@@ -33,6 +36,8 @@ STREAM_PINK = const(3)
 STREAM_TEAL = const(4)
 STREAM_REDBROWN = const(5)
 STREAM_GRAY = const(6)
+STREAM_GREEN = const(7)
+STREAM_RED = const(8)
 
 
 # Sensor-view band colors: 4 rows × 4 bands × (pastel, bright) × (r, g, b).

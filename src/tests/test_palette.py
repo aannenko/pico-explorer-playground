@@ -31,10 +31,13 @@ def test_sensor_band_rgb_shape() -> None:
                 assert 0 <= ch <= 255, f"channel out of range in row {row_idx} band {band_idx}"
 
 
-def test_stream_colors_are_main_alt_rgb_pairs() -> None:
+def test_stream_colors_are_rgb_triples_or_main_alt_pairs() -> None:
     for idx, entry in enumerate(STREAM_COLORS):
-        main, alt = entry  # each entry is (main_rgb, alt_rgb)
-        for rgb in (main, alt):
+        if isinstance(entry[0], int):
+            rgbs = (entry,)  # single solid RGB triple
+        else:
+            rgbs = entry  # (main_rgb, alt_rgb)
+        for rgb in rgbs:
             assert len(rgb) == 3, f"entry {idx} must be an (r,g,b) triple"
             for ch in rgb:
                 assert 0 <= ch <= 255, f"entry {idx} channel out of range"
@@ -49,7 +52,9 @@ def test_stream_color_constants_match_positions() -> None:
     assert palette.STREAM_TEAL == 4
     assert palette.STREAM_REDBROWN == 5
     assert palette.STREAM_GRAY == 6
-    assert palette.STREAM_GRAY == len(STREAM_COLORS) - 1
+    assert palette.STREAM_GREEN == 7
+    assert palette.STREAM_RED == 8
+    assert palette.STREAM_RED == len(STREAM_COLORS) - 1
 
 
 def test_waste_default_indices_are_in_range() -> None:

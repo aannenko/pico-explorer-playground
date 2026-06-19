@@ -9,8 +9,8 @@ import pytest
 
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
+from _stub_service import StubService
 from services._fetch_state import BACKOFF, FETCHING, FetchCoordinator
-from services._stub_service import StubService
 from services.http_client import HttpConnectError
 
 
