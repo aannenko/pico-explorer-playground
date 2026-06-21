@@ -26,13 +26,26 @@ WIFI_PASSWORD = "YourPassword"
 # Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
 HTTP_TIMEOUT_S = const(3)
 
-# Precipitation forecast (Open-Meteo).  Leave LATITUDE/LONGITUDE at 0.0/0.0
-# to keep the precip row disabled (no fetch; a "CFG?" glyph marks it) — set
-# your coordinates in config.py to enable.  PRECIP_PROB_THRESHOLD gates which
-# hours show a bar (skip hours below this % precipitation probability).
+# Weather forecast (Open-Meteo).  Leave LATITUDE/LONGITUDE at 0.0/0.0 to keep
+# the weather row disabled (no fetch; a "CFG?" glyph marks it) — set your
+# coordinates in config.py to enable.  The weather row mixes precipitation and
+# UV (they rarely coincide).  PRECIP_PROB_THRESHOLD gates which hours show a
+# precip bar (skip hours below this % probability); UV_THRESHOLDS is the UV
+# ``(warning, severe)`` pair on the WHO scale.
 LATITUDE = 0.0
 LONGITUDE = 0.0
 PRECIP_PROB_THRESHOLD = const(30)
+UV_THRESHOLDS = (6, 8)
+
+# Outdoor air quality (Open-Meteo air-quality).  Shares LATITUDE/LONGITUDE
+# above (0.0/0.0 keeps the row disabled).  Each threshold tuple is
+# ``(warning, severe)``: at/above the first edge shows an amber bar, at/above
+# the second a red one.  AQI uses the European AQI scale, pollen grains/m³ (one
+# shared pair across all species).  POLLEN_SPECIES is variadic — add/remove
+# Open-Meteo ``*_pollen`` names freely.
+AQI_THRESHOLDS = (60, 80)
+POLLEN_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
+POLLEN_THRESHOLDS = (50, 100)
 
 TIME_ZONE_OFFSET = const(1)  # Prague winter time (UTC+1)
 

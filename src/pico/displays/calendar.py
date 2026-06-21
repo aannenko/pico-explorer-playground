@@ -9,9 +9,9 @@ from displays.shared.header import format_header_time
 from scheduling.event_window import EventWindow
 from scheduling.stream import FRESH
 
-_WINDOW_PAST_SEC = const(30 * 60)      # 30 minutes of past
-_WINDOW_FUTURE_SEC = const(90 * 60)    # 90 minutes of future
-_WINDOW_TOTAL_SEC = const(_WINDOW_PAST_SEC + _WINDOW_FUTURE_SEC)  # 7200s
+WINDOW_PAST_SEC = const(30 * 60)      # 30 minutes of past
+WINDOW_FUTURE_SEC = const(90 * 60)    # 90 minutes of future
+WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)  # 7200s
 
 _MAX_STREAMS = const(5)
 _HEADER_MARGIN = const(6)
@@ -145,7 +145,7 @@ class Renderer:
         geom = self._geom
         gfx = self._gfx
         width = geom.width
-        now = window_start + _WINDOW_PAST_SEC
+        now = window_start + WINDOW_PAST_SEC
 
         gfx.set_font(geom.bar_font)
 
@@ -173,8 +173,8 @@ class Renderer:
                         ev_end = next_start
 
                 # Clip to window
-                x0 = max(0, (ev_start - window_start) * width // _WINDOW_TOTAL_SEC)
-                x1 = min(width, (ev_end - window_start) * width // _WINDOW_TOTAL_SEC)
+                x0 = max(0, (ev_start - window_start) * width // WINDOW_TOTAL_SEC)
+                x1 = min(width, (ev_end - window_start) * width // WINDOW_TOTAL_SEC)
 
                 if x1 <= x0:
                     continue
@@ -249,7 +249,7 @@ class Renderer:
 
         t = first_q
         while t < window_end:
-            x = (t - window_start) * width // _WINDOW_TOTAL_SEC
+            x = (t - window_start) * width // WINDOW_TOTAL_SEC
 
             if 0 <= x < width:
                 gfx.set_pen(self._colors.now_line)
@@ -301,8 +301,8 @@ class Display(_Display):
 
     def _redraw(self) -> None:
         now = self._get_time()
-        window_start = now - _WINDOW_PAST_SEC
-        window_end = now + _WINDOW_FUTURE_SEC
+        window_start = now - WINDOW_PAST_SEC
+        window_end = now + WINDOW_FUTURE_SEC
 
         self._renderer.header_write(format_header_time(now))
         self._renderer.draw_rows(self._streams, window_start, window_end)

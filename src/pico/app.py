@@ -30,19 +30,36 @@ from scheduling.event_window import EventWindow, build_event_windows
 from scheduling.providers import waste, work_week
 from scheduling.stream import Stream
 from services._fetch_state import FetchCoordinator
+from services.air_service import AirService
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.pimoroni_bme690 import PimoroniBME690
-from services.precip_service import PrecipService
 from services.ring_history import RingHistory
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
+from services.weather_service import WeatherService
 from services.wifi_client import WifiClient
 
 
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
+
+# Single source of truth for the weather/air fetch cadence.
+_STREAM_REFRESH_MS = const(30 * 60 * 1000)
+
+# How many hours of forecast to request — derived here because app.py is the one
+# place that sees both the calendar's future window (owned by displays.calendar)
+# and the fetch cadence above.  Smallest horizon that keeps the window populated:
+# ceil((future_window + 2*refresh + 1 h) / 1 h) — 2x refresh covers scroll + a
+# couple of failed retries, +1 h absorbs the snap to the current hour boundary.
+_STREAM_HORIZON_SEC = calendar.WINDOW_FUTURE_SEC + 2 * (_STREAM_REFRESH_MS // 1000) + 3600
+_STREAM_FORECAST_HOURS = (_STREAM_HORIZON_SEC + 3599) // 3600
+
+# How many past hours to request so the calendar's past window (left of the
+# now-line) stays populated: the API's forecast_hours starts at the current
+# hour, so without this the past strip would render blank.  ceil(past / 1 h).
+_STREAM_PAST_HOURS = (calendar.WINDOW_PAST_SEC + 3599) // 3600
 
 
 _SENSOR_BANDS_KEYS = (
@@ -273,21 +290,47 @@ def build_app(pico_graphics, schedule_fn) -> App:
     # Network calendar streams: long-lived services sharing one fetch
     # coordinator (single in-flight fetch across all of them).
     fetch_coordinator = FetchCoordinator()
-    precip_service = PrecipService(
+    weather_service = WeatherService(
         latitude=config.LATITUDE,
         longitude=config.LONGITUDE,
         prob_threshold=config.PRECIP_PROB_THRESHOLD,
+        uv_thresholds=config.UV_THRESHOLDS,
         wifi=wifi_client,
         coordinator=fetch_coordinator,
         schedule=schedule_fn,
+        interval_ms=_STREAM_REFRESH_MS,
+        forecast_hours=_STREAM_FORECAST_HOURS,
+        past_hours=_STREAM_PAST_HOURS,
         timeout_s=config.HTTP_TIMEOUT_S,
         tick_scheduler=tick_scheduler,
     )
-    precip_stream = Stream(
-        precip_service.events_iter(),
-        events_fn=precip_service.events_iter,
-        generation_fn=lambda: precip_service.generation,
-        status_fn=lambda: precip_service.status,
+    weather_stream = Stream(
+        weather_service.events_iter(),
+        events_fn=weather_service.events_iter,
+        generation_fn=lambda: weather_service.generation,
+        status_fn=lambda: weather_service.status,
+    )
+
+    air_service = AirService(
+        latitude=config.LATITUDE,
+        longitude=config.LONGITUDE,
+        species=config.POLLEN_SPECIES,
+        aqi_thresholds=config.AQI_THRESHOLDS,
+        pollen_thresholds=config.POLLEN_THRESHOLDS,
+        wifi=wifi_client,
+        coordinator=fetch_coordinator,
+        schedule=schedule_fn,
+        interval_ms=_STREAM_REFRESH_MS,
+        forecast_hours=_STREAM_FORECAST_HOURS,
+        past_hours=_STREAM_PAST_HOURS,
+        timeout_s=config.HTTP_TIMEOUT_S,
+        tick_scheduler=tick_scheduler,
+    )
+    air_stream = Stream(
+        air_service.events_iter(),
+        events_fn=air_service.events_iter,
+        generation_fn=lambda: air_service.generation,
+        status_fn=lambda: air_service.status,
     )
 
     sensors_display = _build_sensors_display(
@@ -301,7 +344,7 @@ def build_app(pico_graphics, schedule_fn) -> App:
     )
     countdown_display = _build_countdown_display(pico_graphics, palette, tick_scheduler)
     calendar_display = _build_calendar_display(
-        pico_graphics, palette, time_service, [precip_stream]
+        pico_graphics, palette, time_service, [weather_stream, air_stream]
     )
 
     display_manager = DisplayManager(
