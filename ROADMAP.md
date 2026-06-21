@@ -7,41 +7,46 @@ leaves them ambiguous.
 ## Implemented
 
 - **Multi-screen UI** — hardware buttons (X/Y) cycle between independent
-  views. Three views today: Sensors, Countdown, Calendar. Each has a
-  lifecycle (`initialize` / `deinitialize`); A/B button presses are
-  forwarded to the active view (Countdown is the only consumer today).
+  views (Sensors, Countdown, Calendar). Each view owns its rendering and
+  state with an `initialize` / `deinitialize` lifecycle; A/B presses are
+  forwarded to the active view.
 
 - **Countdown timer** — preset durations cycled via A/B. The buzzer fires
   on completion and is silenced by any preset change. The timer keeps
   ticking (and the buzzer keeps firing) while the user is on a different
   view.
 
-- **Calendar view** — horizontal timeline where time progresses
-  left-to-right. 2-hour sliding window (30 min past + 90 min future) with
-  a "now" marker at 25 % from the left. Up to 5 event-stream rows rendered
-  as horizontal bar rows with two alternating colors per stream. Labels
-  truncate to fit narrow bars; right-aligned remaining-time labels
-  (`-HH:mm`) appear when an event extends beyond the visible window.
-  15-minute tick marks on the baseline, hour labels below. Auto-scrolling;
-  no button interaction. Currently fed by one `work_week_loop` stream plus
-  4 demo streams (slated for replacement — see _Planned_).
+- **Calendar view** — horizontal timeline (time flows left-to-right) with a
+  2-hour sliding window (30 min past, 90 min future) and a "now" marker.
+  Shows up to 5 event-stream rows as colored bars; per-event color encodes
+  meaning (e.g. precipitation intensity, UV / air-quality severity) rather
+  than mere row striping. Bar labels and right-aligned remaining-time markers
+  adapt to bar width. Auto-scrolling, no button interaction.
+
+- **Calendar streams** — built-in rows that work out of the box, each a
+  long-lived data source the calendar reads passively:
+  - **Work week** and **waste collection** — local generators driven by
+    `config`.
+  - **Weather** (precipitation + UV) and **air quality** (European AQI +
+    pollen) — fetched from Open-Meteo; disabled until coordinates are set in
+    `config.py`.
+  Rows left over are filled by temporary demo streams until bus departures
+  and web configuration land.
 
 - **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
-  gas resistance) with a header showing local time. Each row carries a
-  **24-hour history graph** to the right of the value: 1-px columns
-  spaced ~14 min apart, filled with a pastel band-color spanning the row
-  height. A bright pixel inside each column marks the value's Y position
-  when in-range; out-of-range columns show the band fill alone; NaN
-  columns are skipped. Per-row cap range and band thresholds both come
-  from `config.SENSOR_*_BANDS` (one 5-tuple per metric). The gas row's
-  graph is hidden while the heater is warming; on the Warming→Stable
-  transition the full row repaints from the captured history. Value text
-  is auto-sized to leave room for the graph. No persistence across
-  reboots.
+  gas resistance) with a local-time header. Each row pairs the current value
+  with a 24-hour history graph coloured by per-metric bands from
+  `config.SENSOR_*_BANDS`. The gas row hides its graph while the heater warms
+  up. No persistence across reboots.
 
 ## Partially implemented
 
-_(none currently)_
+- **Bus departures** (calendar stream) — Prague Integrated Transport
+  realtime via Golemio: one configured stop plus an optional destination
+  filter. Blocked on transport — the API is HTTPS-only and on-device TLS
+  exhausts the RP2040 heap, so it needs a local HTTPS proxy (which can also
+  hold the API token) or an offline GTFS-static fallback. A demo stream
+  holds its row until then.
 
 ## Planned
 
@@ -51,15 +56,18 @@ _(none currently)_
   (similar to the current ring timer behavior). Will replace
   `demo_streams.py` as the source of stream definitions (up to 5).
 
+- **Electricity tariff windows** (deferred) — static weekly tariff
+  schedule (peak / mid / low).  Structurally distinct from waste
+  (dense partition vs. sparse events) so likely a separate
+  `TARIFF_SCHEDULE` shape.  Possible future variant: day-ahead spot
+  prices from ENTSO-E / OTE.
+
 ## Design implications
 
-- Keep views modular (separate rendering + state per view); do not
-  hard-code assumptions that there is only one screen.
-- Due to the 240×240 display constraint, only the Sensors and Calendar
-  views share a common header (time / date); other views may use the full
-  screen.
-- Header typography (Sensors / Calendar): `bitmap8` at x3 scale, single
-  line, plus 6 px bottom margin.
+- Keep views modular (separate rendering + state per view); do not assume
+  there is only one screen.
+- On the 240×240 display, only the Sensors and Calendar views share a
+  common header (time / date); other views may use the full screen.
 - Prefer clean boundaries between data acquisition (sensors / network),
   scheduling, and rendering.
 - Be mindful of MicroPython constraints: small memory footprint and
