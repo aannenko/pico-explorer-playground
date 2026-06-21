@@ -14,9 +14,8 @@ import time
 from displays.palette import STREAM_GREEN, STREAM_YELLOW, STREAM_RED
 from scheduling import event_runs
 from scheduling.event import Event
-from scheduling.stream import DISABLED
 from services import http_client, openmeteo_client
-from services._fetch_state import FetchState
+from services._event_stream_service import EventStreamService
 
 _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
@@ -112,7 +111,7 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
     return event_runs.merge_runs(emitted)
 
 
-class WeatherService:
+class WeatherService(EventStreamService):
     """Drives weather fetch/parse/publish; the calendar reads it passively."""
 
     def __init__(
@@ -132,53 +131,23 @@ class WeatherService:
         timeout_s: int = 3,
         tick_scheduler=None,
     ) -> None:
-        self._lat = latitude
-        self._lon = longitude
         self._threshold = prob_threshold
         self._uv_thr = uv_thresholds
-        self._http_get = http_get
-        self._timeout_s = timeout_s
-        self._forecast_hours = forecast_hours
-        self._past_hours = past_hours
-        # Coordinates left at 0.0/0.0 mean "unconfigured": stay disabled
-        # rather than silently fetch Gulf-of-Guinea weather.
-        self._enabled = not (latitude == 0.0 and longitude == 0.0)
-
-        self._events: list[Event] = []
-        self._generation: int = 0
-        self._fetch = FetchState(
-            self._fetch_and_parse,
-            self._store,
+        super().__init__(
+            latitude,
+            longitude,
             wifi,
             coordinator,
+            schedule,
             interval_ms,
-            schedule=schedule,
+            forecast_hours,
+            past_hours,
+            "weather",
             clock=clock,
-            name="weather",
+            http_get=http_get,
+            timeout_s=timeout_s,
+            tick_scheduler=tick_scheduler,
         )
-        self._tick_ref = self.tick
-        if tick_scheduler is not None:
-            tick_scheduler.register(self._tick_ref)
-
-        if self._enabled:
-            print("[weather] enabled: lat=%s lon=%s" % (latitude, longitude))
-        else:
-            print("[weather] disabled: set LATITUDE/LONGITUDE in config.py")
-
-    def tick(self) -> None:
-        if self._enabled:
-            self._fetch.tick()
-
-    def events_iter(self):  # -> Iterator[Event]
-        return iter(self._events)
-
-    @property
-    def generation(self) -> int:
-        return self._generation
-
-    @property
-    def status(self) -> int:
-        return self._fetch.status if self._enabled else DISABLED
 
     def _fetch_and_parse(self) -> list[Event]:
         # Fallible: HTTP error or malformed payload raises -> state machine
@@ -189,9 +158,3 @@ class WeatherService:
             self._forecast_hours, self._past_hours,
         )
         return _build_events(payload, self._threshold, self._uv_thr)
-
-    def _store(self, events: list[Event]) -> None:
-        # Infallible: publish the parsed snapshot and bump the generation.
-        self._events = events
-        self._generation += 1
-        print("[weather] published %d events (gen %d)" % (len(self._events), self._generation))

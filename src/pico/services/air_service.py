@@ -11,9 +11,8 @@ import time
 from displays.palette import STREAM_YELLOW, STREAM_RED
 from scheduling import event_runs
 from scheduling.event import Event
-from scheduling.stream import DISABLED
 from services import http_client, openmeteo_client
-from services._fetch_state import FetchState
+from services._event_stream_service import EventStreamService
 
 # Severity level (1 warning / 2 severe) -> global palette index.
 _LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
@@ -77,7 +76,7 @@ def _build_events(aq_payload, species, aqi_thr, pollen_thr) -> list[Event]:
     return event_runs.merge_runs(emitted)
 
 
-class AirService:
+class AirService(EventStreamService):
     """Drives air fetch/parse/publish; the calendar reads it passively."""
 
     def __init__(
@@ -98,57 +97,27 @@ class AirService:
         timeout_s: int = 3,
         tick_scheduler=None,
     ) -> None:
-        self._lat = latitude
-        self._lon = longitude
         self._species = tuple(species)
         self._aqi_thr = aqi_thresholds
         self._pollen_thr = pollen_thresholds
-        self._http_get = http_get
-        self._timeout_s = timeout_s
-        self._forecast_hours = forecast_hours
-        self._past_hours = past_hours
         # Empty POLLEN_SPECIES is a valid (AQI-only) config, so build the metrics
         # string from a field list to avoid a trailing comma the API rejects.
         self._metrics = ",".join(["european_aqi"] + [s + "_pollen" for s in self._species])
-        # Coordinates left at 0.0/0.0 mean "unconfigured": stay disabled rather
-        # than silently fetch Gulf-of-Guinea air quality.
-        self._enabled = not (latitude == 0.0 and longitude == 0.0)
-
-        self._events: list[Event] = []
-        self._generation: int = 0
-        self._fetch = FetchState(
-            self._fetch_and_parse,
-            self._store,
+        super().__init__(
+            latitude,
+            longitude,
             wifi,
             coordinator,
+            schedule,
             interval_ms,
-            schedule=schedule,
+            forecast_hours,
+            past_hours,
+            "air",
             clock=clock,
-            name="air",
+            http_get=http_get,
+            timeout_s=timeout_s,
+            tick_scheduler=tick_scheduler,
         )
-        self._tick_ref = self.tick
-        if tick_scheduler is not None:
-            tick_scheduler.register(self._tick_ref)
-
-        if self._enabled:
-            print("[air] enabled: lat=%s lon=%s" % (latitude, longitude))
-        else:
-            print("[air] disabled: set LATITUDE/LONGITUDE in config.py")
-
-    def tick(self) -> None:
-        if self._enabled:
-            self._fetch.tick()
-
-    def events_iter(self):  # -> Iterator[Event]
-        return iter(self._events)
-
-    @property
-    def generation(self) -> int:
-        return self._generation
-
-    @property
-    def status(self) -> int:
-        return self._fetch.status if self._enabled else DISABLED
 
     def _fetch_and_parse(self) -> list[Event]:
         # Fallible: HTTP error or malformed payload raises -> state machine
@@ -159,9 +128,3 @@ class AirService:
             self._forecast_hours, self._past_hours,
         )
         return _build_events(payload, self._species, self._aqi_thr, self._pollen_thr)
-
-    def _store(self, events: list[Event]) -> None:
-        # Infallible: publish the parsed snapshot and bump the generation.
-        self._events = events
-        self._generation += 1
-        print("[air] published %d events (gen %d)" % (len(self._events), self._generation))
