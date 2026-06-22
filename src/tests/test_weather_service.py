@@ -12,7 +12,7 @@ from displays.palette import (
 )
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
-from services._fetch_state import BACKOFF, FetchCoordinator
+from services._fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
 from services.weather_service import (
     WeatherService,
@@ -352,8 +352,9 @@ def test_fetch_publishes_events_and_goes_fresh():
     assert h.service.status == STALE
 
     h.schedule.run_all()
-
     assert len(h.get_calls) == 1
+
+    h.service.tick()  # harvest: publish the parsed snapshot
     assert h.service.generation == 1
     assert h.visible_names() == ["RAIN"]
     assert h.service.status == FRESH
@@ -380,6 +381,7 @@ def test_uv_renders_through_the_service():
     h.payload = _payload((_T0, 0, 0.0, 0), uv=[9])  # no precip, severe UV
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest
     assert h.visible_names() == ["UV"]
 
 
@@ -387,12 +389,14 @@ def test_second_fetch_refreshes_window():
     h = _Harness()
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest
     assert h.visible_names() == ["RAIN"]
 
     h.payload = _payload((_T0, 80, 1.0, 71))  # now SNOW
     h.advance(1000)
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest
 
     assert h.service.generation == 2
     assert h.visible_names() == ["SNOW"]
@@ -413,14 +417,16 @@ def test_http_error_backs_off_and_keeps_prior_snapshot():
     h = _Harness()
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest -> ["RAIN"]
     assert h.visible_names() == ["RAIN"]
 
     h.raise_exc = HttpConnectError("down")
     h.advance(1000)
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest the failure -> backoff
 
-    assert h.service._fetch.state == BACKOFF
+    assert h.service._failures == 1
     assert h.service.generation == 1
     assert h.visible_names() == ["RAIN"]
 
@@ -431,9 +437,10 @@ def test_malformed_payload_backs_off_without_publishing():
 
     h.service.tick()
     h.schedule.run_all()
-
     assert len(h.get_calls) == 1
-    assert h.service._fetch.state == BACKOFF
+
+    h.service.tick()  # harvest the parse failure -> backoff
+    assert h.service._failures == 1
     assert h.service.generation == 0
     assert h.visible_names() == []
 
@@ -446,6 +453,7 @@ def test_error_status_after_repeated_failures():
         h.advance(700_000)
         h.service.tick()
         h.schedule.run_all()
+        h.service.tick()  # harvest records the failure
 
     assert h.service.status == ERROR
     assert h.window.status() == ERROR

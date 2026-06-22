@@ -7,7 +7,7 @@ import pytest
 from displays.palette import STREAM_COLORS, STREAM_RED, STREAM_YELLOW
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
-from services._fetch_state import BACKOFF, FetchCoordinator
+from services._fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
 from services.air_service import (
     AirService,
@@ -260,8 +260,9 @@ def test_fetch_publishes_events_and_goes_fresh():
     assert h.service.status == STALE
 
     h.schedule.run_all()
-
     assert len(h.get_calls) == 1
+
+    h.service.tick()  # harvest: publish the parsed snapshot
     assert h.service.generation == 1
     assert h.visible_names() == ["AQI"]
     assert h.service.status == FRESH
@@ -285,14 +286,16 @@ def test_http_error_backs_off_and_keeps_prior_snapshot():
     h = _Harness()
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest -> ["AQI"]
     assert h.visible_names() == ["AQI"]
 
     h.raise_exc = HttpConnectError("down")
     h.advance(1000)
     h.service.tick()
     h.schedule.run_all()
+    h.service.tick()  # harvest the failure -> backoff
 
-    assert h.service._fetch.state == BACKOFF
+    assert h.service._failures == 1
     assert h.service.generation == 1
     assert h.visible_names() == ["AQI"]
 
@@ -303,9 +306,10 @@ def test_malformed_payload_backs_off_without_publishing():
 
     h.service.tick()
     h.schedule.run_all()
-
     assert len(h.get_calls) == 1
-    assert h.service._fetch.state == BACKOFF
+
+    h.service.tick()  # harvest the parse failure -> backoff
+    assert h.service._failures == 1
     assert h.service.generation == 0
     assert h.visible_names() == []
 
@@ -329,6 +333,7 @@ def test_error_status_after_repeated_failures():
         h.advance(700_000)
         h.service.tick()
         h.schedule.run_all()
+        h.service.tick()  # harvest records the failure
 
     assert h.service.status == ERROR
     assert h.window.status() == ERROR

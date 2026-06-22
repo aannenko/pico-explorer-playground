@@ -29,7 +29,7 @@ from hardware.explorer import (
 from scheduling.event_window import EventWindow, build_event_windows
 from scheduling.providers import waste, work_week
 from scheduling.stream import Stream
-from services._fetch_state import FetchCoordinator
+from services._fetch_machine import FetchCoordinator
 from services.air_service import AirService
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer

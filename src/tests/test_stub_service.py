@@ -1,8 +1,12 @@
 """End-to-end test of the network substrate via the stub service.
 
-Drives the full path a real network row will use: tick -> fetch state
-machine -> schedule(fetch) -> parse+store -> generation bump ->
-EventWindow refresh -> what the renderer reads (get_visible / status).
+Drives the full path a real network row uses: tick -> FetchMachine -> schedule
+(fetch) -> harvest (parse+store) -> generation bump -> EventWindow refresh ->
+what the renderer reads (get_visible / status).
+
+Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but
+is published on the *next* ``tick()`` (the harvest), so published-state asserts
+(generation / visible / FRESH / ERROR) come after an extra ``tick()``.
 """
 
 import pytest
@@ -10,7 +14,7 @@ import pytest
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
 from _stub_service import StubService
-from services._fetch_state import BACKOFF, FETCHING, FetchCoordinator
+from services._fetch_machine import FETCHING, INITIAL, FetchCoordinator
 from services.http_client import HttpConnectError
 
 
@@ -84,6 +88,12 @@ class _Harness:
     def advance(self, ms: int) -> None:
         self.clock_val += ms
 
+    def fetch_and_harvest(self) -> None:
+        """One full cycle: dispatch (tick), run the deferred fetch, harvest (tick)."""
+        self.service.tick()
+        self.schedule.run_all()
+        self.service.tick()
+
     def visible_names(self) -> list[str]:
         return [e.name for e, _ in self.window.get_visible(0, 10_000)]
 
@@ -103,13 +113,15 @@ def test_disabled_service_never_fetches_and_reports_disabled():
 def test_fetch_flows_through_to_visible_events():
     h = _Harness()
 
-    h.service.tick()  # IDLE/DUE -> FETCHING, fetch deferred
+    h.service.tick()  # INITIAL -> FETCHING, fetch deferred
     assert h.fetch_calls == 0  # blocking work not run inline
     assert h.window.status() == STALE  # no data yet -> glyph
 
-    h.schedule.run_all()  # fetch + parse + store, generation 0 -> 1
-
+    h.schedule.run_all()  # _do_fetch: fetch + parse, result staged (not yet published)
     assert h.fetch_calls == 1
+    assert h.service.generation == 0  # harvest hasn't run yet
+
+    h.service.tick()  # harvest: store, generation 0 -> 1
     assert h.service.generation == 1
     assert h.visible_names() == ["A"]
     assert h.window.status() == FRESH  # fresh -> no glyph
@@ -117,14 +129,12 @@ def test_fetch_flows_through_to_visible_events():
 
 def test_second_fetch_refreshes_the_window():
     h = _Harness(interval_ms=1000)
-    h.service.tick()
-    h.schedule.run_all()
+    h.fetch_and_harvest()
     assert h.visible_names() == ["A"]
 
     h.payload = _payload(("B", 0, 100), ("C", 200, 100))
     h.advance(1000)  # next interval due
-    h.service.tick()
-    h.schedule.run_all()
+    h.fetch_and_harvest()
 
     assert h.service.generation == 2
     assert h.visible_names() == ["B", "C"]
@@ -144,16 +154,14 @@ def test_wifi_down_holds_without_fetching():
 
 def test_http_error_backs_off_and_keeps_prior_snapshot():
     h = _Harness(interval_ms=1000)
-    h.service.tick()
-    h.schedule.run_all()  # first fetch ok -> ["A"]
+    h.fetch_and_harvest()  # first fetch ok -> ["A"]
     assert h.visible_names() == ["A"]
 
     h.raise_exc = HttpConnectError("down")
     h.advance(1000)
-    h.service.tick()
-    h.schedule.run_all()  # fetch raises -> BACKOFF, generation unchanged
+    h.fetch_and_harvest()  # fetch raises -> backoff, generation unchanged
 
-    assert h.service._fetch.state == BACKOFF
+    assert h.service._failures == 1  # one failure recorded -> backing off
     assert h.service.generation == 1  # no bump on failure
     assert h.visible_names() == ["A"]  # prior snapshot retained
     # A single failure with a still-recent success stays FRESH on purpose:
@@ -165,11 +173,10 @@ def test_malformed_payload_backs_off_and_emits_nothing():
     h = _Harness()
     h.payload = {"unexpected": "shape"}  # missing "events" -> KeyError in parse
 
-    h.service.tick()
-    h.schedule.run_all()
+    h.fetch_and_harvest()
 
     assert h.fetch_calls == 1
-    assert h.service._fetch.state == BACKOFF
+    assert h.service._failures == 1  # parse failure counts as a fetch failure
     assert h.service.generation == 0  # parse failure -> no store
     assert h.visible_names() == []
 
@@ -178,15 +185,87 @@ def test_error_status_after_repeated_failures():
     h = _Harness(interval_ms=1000)
     h.raise_exc = HttpConnectError("down")
 
-    # Default error threshold is 3 consecutive failures; advance past the
-    # (capped) backoff each round so the next retry is actually due.
+    # Default error threshold is 3 consecutive failures.  Each failure is
+    # recorded on the harvest tick (inside fetch_and_harvest), so the loop
+    # advances past the (capped) backoff and runs a full cycle each round.
     for _ in range(3):
         h.advance(700_000)
-        h.service.tick()
-        h.schedule.run_all()
+        h.fetch_and_harvest()
 
     assert h.service.status == ERROR
     assert h.window.status() == ERROR
+
+
+def test_backoff_grows_exponentially_and_caps():
+    h = _Harness()
+    s = h.service
+    s._backoff_base_ms = 100
+    s._backoff_max_ms = 300
+
+    s._failures = 1
+    assert s._backoff_delay() == 100
+    s._failures = 2
+    assert s._backoff_delay() == 200
+    s._failures = 3
+    assert s._backoff_delay() == 300  # 400 capped to 300
+    s._failures = 10
+    assert s._backoff_delay() == 300
+
+
+def test_status_goes_stale_after_cutoff():
+    h = _Harness(interval_ms=1000)  # stale_after = 2 * interval = 2000
+    h.fetch_and_harvest()  # success at clock 0
+    assert h.service.status == FRESH
+
+    h.advance(2000)  # boundary is inclusive
+    assert h.service.status == FRESH
+
+    h.advance(1)
+    assert h.service.status == STALE
+
+
+def test_store_exception_is_swallowed_but_success_recorded():
+    h = _Harness()
+
+    def boom(_events):
+        raise RuntimeError("store blew up")
+
+    h.service._store = boom
+    h.fetch_and_harvest()
+
+    # The store error is swallowed (health is updated *before* the store call),
+    # so the fetch still counts as a success, but nothing gets published.
+    assert h.service.status == FRESH
+    assert h.service._failures == 0
+    assert h.service.generation == 0  # store never completed its bump
+
+
+def test_success_after_failure_resets_failures():
+    h = _Harness(interval_ms=1000)
+    h.raise_exc = HttpConnectError("down")
+    h.fetch_and_harvest()  # one failure
+    assert h.service._failures == 1
+
+    h.raise_exc = None  # recovery
+    h.advance(700_000)  # past the (capped) backoff so the retry is due
+    h.fetch_and_harvest()  # success
+
+    assert h.service._failures == 0  # a success clears the failure count
+    assert h.service.status == FRESH
+
+
+def test_not_due_does_not_fetch_before_interval():
+    h = _Harness(interval_ms=1000)
+    h.fetch_and_harvest()  # success at clock 0 -> next due at 1000
+    assert h.fetch_calls == 1
+    assert h.service.generation == 1
+
+    h.advance(999)  # still before the interval elapses
+    h.service.tick()
+
+    assert h.fetch_calls == 1  # no second fetch yet
+    assert h.service.generation == 1
+    assert h.schedule.queue == []  # nothing dispatched
 
 
 def test_only_one_stub_fetches_under_shared_coordinator():
@@ -199,5 +278,5 @@ def test_only_one_stub_fetches_under_shared_coordinator():
     a.tick()
     b.tick()
 
-    assert a._fetch.state == FETCHING
-    assert b._fetch.state != FETCHING  # blocked by single-active invariant
+    assert a._fetch.stage == FETCHING
+    assert b._fetch.stage == INITIAL  # held by the single-active invariant
