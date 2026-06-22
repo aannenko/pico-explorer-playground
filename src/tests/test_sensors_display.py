@@ -481,27 +481,39 @@ def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -
     assert not any(c[0] == "header_write" for c in renderer.calls)
 
 
-def test_header_rewrites_only_on_minute_change(monkeypatch) -> None:
-    """The header clock is gated on the minute stamp: header_write fires on a new
-    minute and is skipped within the same minute, so the 1 s render doesn't
-    rebuild the clock string every tick."""
+def test_header_rewrites_only_on_minute_change(monkeypatch, fake_ticks) -> None:
+    """The header clock read is gated on the next minute boundary via the
+    monotonic ms clock: it re-reads the (big-int-allocating) wall clock only once
+    the deadline passes, and rewrites the header only when the minute changes."""
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
     renderer = RecordingRenderer()
     clock = [0]
+    fake_ticks[0] = 0
     d = _make_display(renderer=renderer)
     d._time_service = _FakeTime(lambda: clock[0])
 
+    # First render: deadline starts "due" → reads the clock, draws the header.
     d._update_display()
     assert any(c[0] == "header_write" for c in renderer.calls)
 
-    # Same minute (+30 s) → header_write skipped.
+    # Within the gate (deadline ~60 s out): clock not re-read despite wall time
+    # advancing → header skipped.
     clock[0] = 30
+    fake_ticks[0] = 30_000
     renderer.calls.clear()
     d._update_display()
     assert not any(c[0] == "header_write" for c in renderer.calls)
 
-    # New minute (+60 s) → header_write fires again.
-    clock[0] = 60
+    # Past the deadline but same minute → re-reads clock, header still skipped.
+    clock[0] = 30
+    fake_ticks[0] = 61_000
+    renderer.calls.clear()
+    d._update_display()
+    assert not any(c[0] == "header_write" for c in renderer.calls)
+
+    # Past the deadline AND a new minute → header rewritten.
+    clock[0] = 90
+    fake_ticks[0] = 122_000
     renderer.calls.clear()
     d._update_display()
     assert any(c[0] == "header_write" for c in renderer.calls)

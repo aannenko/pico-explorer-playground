@@ -330,3 +330,72 @@ def test_real_geometry_raises_when_font_too_large() -> None:
             text_scale=3,
             tick_period_ms=500,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Frame-dirty gating: update() flushes only when something was drawn.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_update_skips_flush_when_nothing_was_drawn() -> None:
+    r, gfx, _ = _mk()
+
+    # Fresh renderer, no draw calls → nothing to push to the panel.
+    r.update()
+
+    assert ("update", (), {}) not in gfx.calls
+
+
+def test_update_flushes_after_a_draw_then_skips_until_next_draw() -> None:
+    r, gfx, _ = _mk()
+
+    r.value_write(0, "23.4")
+    gfx.calls.clear()
+
+    r.update()
+    assert gfx.calls == [("update", (), {})]  # one flush for the pending draw
+
+    gfx.calls.clear()
+    r.update()
+    assert gfx.calls == []  # nothing drew since the flush → no redundant flush
+
+
+def test_update_skips_when_all_writes_short_circuit() -> None:
+    r, gfx, _ = _mk()
+
+    # Prime the per-line/header caches and flush them.
+    r.header_write("2026-06-22 12:00")
+    r.value_write(0, "23.4")
+    r.update()
+    gfx.calls.clear()
+
+    # Same content → header_write / value_write both short-circuit (no draw),
+    # so the frame stays clean and update() skips the SPI flush — this is the
+    # steady-state no-op tick the optimization targets.
+    r.header_write("2026-06-22 12:00")
+    r.value_write(0, "23.4")
+    r.update()
+
+    assert gfx.calls == []
+
+
+def test_reset_marks_frame_dirty_so_first_update_flushes() -> None:
+    r, gfx, _ = _mk()
+
+    r.reset()
+    gfx.calls.clear()
+
+    r.update()
+
+    assert ("update", (), {}) in gfx.calls
+
+
+def test_out_of_range_writes_do_not_dirty_the_frame() -> None:
+    r, gfx, _ = _mk()
+
+    r.value_write(99, "x")
+    r.draw_graph_clear(-1)
+    r.draw_graph_column(99, 0, 1, 2, 3)
+    r.update()
+
+    assert ("update", (), {}) not in gfx.calls

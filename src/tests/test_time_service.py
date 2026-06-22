@@ -312,6 +312,43 @@ def test_tick_fall_back_transition():
     assert svc.now() == clock[0] + 1 * 3600  # CET
 
 
+def test_tick_throttles_wall_clock_reads(fake_ticks):
+    """``_tick`` samples the (big-int-allocating) wall clock ~once a minute, not
+    every tick — the DST boundary is far away, so per-tick reads are pure churn.
+    """
+    clock = [_utc_epoch(2026, 1, 15, 12, 0, 0)]  # winter, far from any transition
+    reads = [0]
+
+    def get_time():
+        reads[0] += 1
+        return clock[0]
+
+    fake_ticks[0] = 0
+    svc = TimeService(
+        tz_offset=1,
+        dst_start=_DST_START,
+        dst_end=_DST_END,
+        dst_offset=1,
+        get_time=get_time,
+    )
+    reads_after_init = reads[0]
+
+    # First tick (gate initialised to construction time) is due → one read.
+    svc._tick()
+    assert reads[0] == reads_after_init + 1
+
+    # Ticks within the throttle window must not touch the wall clock.
+    for t in (1, 250, 30_000, 59_999):
+        fake_ticks[0] = t
+        svc._tick()
+    assert reads[0] == reads_after_init + 1
+
+    # Once the window elapses, it samples again.
+    fake_ticks[0] = 60_000
+    svc._tick()
+    assert reads[0] == reads_after_init + 2
+
+
 def test_constructor_registers_tick():
     sched = FakeScheduler()
     TimeService(

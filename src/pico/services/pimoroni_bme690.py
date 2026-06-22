@@ -72,11 +72,19 @@ class PimoroniBME690:
         self._timer.deinit()
 
     def _do_read(self) -> None:
-        temp, press, hum, gas_r, status = self._bme.read()[0:5]
-        temp += self._temp_offset
-        hum += self._hum_offset
+        # Index the driver's result directly rather than slicing ``[0:5]`` — the
+        # slice would allocate a throwaway tuple on every read (~5 s, runs even
+        # when the Sensors view isn't active).
+        reading = self._bme.read()
+        status = reading[4]
         heater = "Stable" if status & STATUS_HEATER_STABLE else "Unstable"
-        self._last_reading = (temp, press / 100 + self._prsr_offset, hum, gas_r / 1000, heater)
+        self._last_reading = (
+            reading[0] + self._temp_offset,
+            reading[1] / 100 + self._prsr_offset,
+            reading[2] + self._hum_offset,
+            reading[3] / 1000,
+            heater,
+        )
 
     def _do_read_scheduled(self, _: int) -> None:
         try:

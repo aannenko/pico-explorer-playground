@@ -1,4 +1,5 @@
 import micropython
+import time
 
 from micropython import const
 
@@ -137,6 +138,7 @@ class Renderer:
 
         self._last_header = ""
         self._last_lines = ["", "", "", "", "", ""]
+        self._update_needed = False
 
     def reset(self) -> None:
         self._last_header = ""
@@ -145,6 +147,7 @@ class Renderer:
         self._gfx.set_font(self._geom.font)
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
+        self._update_needed = True
 
     def draw_left_column(
         self,
@@ -161,6 +164,7 @@ class Renderer:
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
+        self._update_needed = True
         g = self._geom
         y = g.line_y[line_idx]
         icons_symbols.draw_icon(self._gfx, icon_cell, g.icon_x, y - g.icon_y_offset, g.icon_scale)
@@ -170,6 +174,7 @@ class Renderer:
         if text == self._last_header:
             return
         self._last_header = text
+        self._update_needed = True
 
         self._gfx.set_pen(self._colors.background)
         x, y, w, h = self._geom.header_rect
@@ -187,6 +192,7 @@ class Renderer:
         if text == self._last_lines[line_idx]:
             return
 
+        self._update_needed = True
         g = self._geom
         # Clear value-column rect only; left-column icon + unit are static,
         # and the graph rect (graph_x .. graph_x+graph_width) is never
@@ -204,6 +210,7 @@ class Renderer:
         """Replace the icon at ``line_idx`` with a different sprite cell."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
+        self._update_needed = True
         g = self._geom
         icon_y = g.line_y[line_idx] - g.icon_y_offset
         self._gfx.set_pen(self._colors.background)
@@ -220,6 +227,7 @@ class Renderer:
         """Paint the row's graph rect with the background pen."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
+        self._update_needed = True
         g = self._geom
         self._gfx.set_pen(self._colors.background)
         self._gfx.rectangle(g.graph_x, g.line_y[line_idx], g.graph_width, g.graph_height)
@@ -243,6 +251,7 @@ class Renderer:
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
+        self._update_needed = True
         g = self._geom
         x = g.graph_x + col
         y = g.line_y[line_idx]
@@ -253,6 +262,9 @@ class Renderer:
             self._gfx.pixel(x, y + value_y)
 
     def update(self) -> None:
+        if not self._update_needed:
+            return
+        self._update_needed = False
         self._gfx.update()
 
 
@@ -337,10 +349,13 @@ class Display(_Display):
         # values force a redraw on first ``_update_display`` after init.
         self._last_commit: int = -1
         self._gas_was_stable = None  # bool | None — None means "force redraw"
-        # The header clock changes once a minute; gate the format on the minute
-        # stamp so the 1 s render doesn't rebuild the string (and its temporaries)
-        # every tick.  ``-1`` forces a redraw on first ``_update_display``.
+        # The header clock changes once a minute.  ``-1`` forces a redraw on the
+        # first ``_update_display``; ``_next_header_check_ms`` gates the
+        # (big-int-allocating, 1970-epoch) wall-clock read to once per minute
+        # boundary (see ``_update_display``) so the 1 s render doesn't read the
+        # clock every tick.
         self._last_header_minute: int = -1
+        self._next_header_check_ms: int = 0
 
         # Validate at startup so a bad config raises here, not on the first
         # sensor read.
@@ -493,11 +508,21 @@ class Display(_Display):
                 )
 
     def _update_display(self) -> None:
-        now = self._time_service.now()
-        minute = now // 60
-        if minute != self._last_header_minute:
-            self._last_header_minute = minute
-            self._renderer.header_write(format_header_time(now))
+        # Reading the wall clock allocates a big int (1970-epoch build), so only
+        # do it when the next minute boundary is due — gated by the alloc-free ms
+        # clock.  The header still updates within one render of the rollover.
+        now_ms = time.ticks_ms()
+        if time.ticks_diff(now_ms, self._next_header_check_ms) >= 0:
+            now = self._time_service.now()
+            minute = now // 60
+            if minute != self._last_header_minute:
+                self._last_header_minute = minute
+                self._renderer.header_write(format_header_time(now))
+            # Re-anchor to the next minute boundary.  No slack margin: a read that
+            # lands a hair early sees ``now % 60 ≈ 59`` and recomputes a ~1 s
+            # deadline, so the rollover is still caught within one render — a
+            # margin would instead delay the catch by a render in some phases.
+            self._next_header_check_ms = time.ticks_add(now_ms, (60 - now % 60) * 1000)
 
         reading = self._bme690_reader.read()
 
@@ -521,11 +546,14 @@ class Display(_Display):
             temp, press, hum, gas_r, status = reading
 
             # Gas row only follows the reading when the heater is stable.
-            for i, value in enumerate((temp, press, hum, gas_r)):
+            # Index ``reading`` directly via ``range`` (a counting loop) rather
+            # than ``enumerate((temp, press, hum, gas_r))`` — the latter
+            # allocates a throwaway tuple *and* an enumerate object every read.
+            for i in range(len(self._rows)):
                 if i == self._GAS_ROW and status != "Stable":
                     continue
                 _unit, edges, icons = self._rows[i]
-                self._maybe_swap_icon(i, icons[self._band_index(value, edges)])
+                self._maybe_swap_icon(i, icons[self._band_index(reading[i], edges)])
 
             self._renderer.value_write(0, self._fit_chars(temp, 1))
             self._renderer.value_write(1, self._fit_chars(press, 0))
@@ -559,6 +587,8 @@ class Display(_Display):
         self._last_commit = -1
         self._gas_was_stable = None
         self._last_header_minute = -1
+        # Force the gated header clock-read on the first render after (re)entry.
+        self._next_header_check_ms = time.ticks_ms()
         self._update_display()
 
     def deinitialize(self) -> None:

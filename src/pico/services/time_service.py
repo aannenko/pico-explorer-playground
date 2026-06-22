@@ -6,6 +6,14 @@ _SAKAMOTO_T = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
 _DAYS_IN_MONTH = (0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 _SEC_PER_HOUR = const(3600)
 
+# How often ``_tick`` samples the wall clock to check for a DST transition.
+# ``time.time()`` heap-allocates a big int on builds whose epoch puts the
+# current year past the small-int range (e.g. the 1970-epoch rp2 build, where
+# 2026 ≈ 1.78e9 > 2**30), so reading it every 500 ms tick to compare against a
+# boundary that is *months* away is pure allocation churn.  A minute of slack on
+# the transition instant is imperceptible.
+_DST_CHECK_INTERVAL_MS = const(60_000)
+
 
 def _is_leap(year: int) -> bool:
     return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
@@ -114,6 +122,8 @@ class TimeService:
         self._offset_sec: int = tz_offset * _SEC_PER_HOUR
         self._dst_active: bool = False
         self._next_transition: int = 0
+        # Monotonic-clock gate for the wall-clock DST check (see _tick).
+        self._next_dst_check_ms: int = time.ticks_ms()
 
         self._update_dst()
 
@@ -157,6 +167,12 @@ class TimeService:
         return self.to_utc(local_start + wall_clock_sec) - self.to_utc(local_start)
 
     def _tick(self) -> None:
+        # Throttle the (big-int-allocating) wall-clock read to ~once a minute
+        # via the allocation-free ms clock; the DST boundary is far away.
+        now_ms = time.ticks_ms()
+        if time.ticks_diff(now_ms, self._next_dst_check_ms) < 0:
+            return
+        self._next_dst_check_ms = time.ticks_add(now_ms, _DST_CHECK_INTERVAL_MS)
         if self._next_transition > 0 and self._get_time() >= self._next_transition:
             self._update_dst()
 
