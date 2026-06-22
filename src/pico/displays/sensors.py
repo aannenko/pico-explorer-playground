@@ -337,6 +337,10 @@ class Display(_Display):
         # values force a redraw on first ``_update_display`` after init.
         self._last_commit: int = -1
         self._gas_was_stable = None  # bool | None — None means "force redraw"
+        # The header clock changes once a minute; gate the format on the minute
+        # stamp so the 1 s render doesn't rebuild the string (and its temporaries)
+        # every tick.  ``-1`` forces a redraw on first ``_update_display``.
+        self._last_header_minute: int = -1
 
         # Validate at startup so a bad config raises here, not on the first
         # sensor read.
@@ -489,7 +493,11 @@ class Display(_Display):
                 )
 
     def _update_display(self) -> None:
-        self._renderer.header_write(format_header_time(self._time_service.now()))
+        now = self._time_service.now()
+        minute = now // 60
+        if minute != self._last_header_minute:
+            self._last_header_minute = minute
+            self._renderer.header_write(format_header_time(now))
 
         reading = self._bme690_reader.read()
 
@@ -550,6 +558,7 @@ class Display(_Display):
         # Force a graph redraw on re-entry (the screen was cleared by reset()).
         self._last_commit = -1
         self._gas_was_stable = None
+        self._last_header_minute = -1
         self._update_display()
 
     def deinitialize(self) -> None:

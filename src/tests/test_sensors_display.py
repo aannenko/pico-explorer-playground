@@ -476,7 +476,34 @@ def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -
     renderer.calls.clear()
     d._update_display()
     assert not any(c[0] == "value_write" for c in renderer.calls)
-    # Header still writes every tick (time advances).
+    # Header is gated on the minute stamp: now() is constant here, so the same
+    # minute means header_write is skipped too (no per-tick clock rebuild).
+    assert not any(c[0] == "header_write" for c in renderer.calls)
+
+
+def test_header_rewrites_only_on_minute_change(monkeypatch) -> None:
+    """The header clock is gated on the minute stamp: header_write fires on a new
+    minute and is skipped within the same minute, so the 1 s render doesn't
+    rebuild the clock string every tick."""
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+    renderer = RecordingRenderer()
+    clock = [0]
+    d = _make_display(renderer=renderer)
+    d._time_service = _FakeTime(lambda: clock[0])
+
+    d._update_display()
+    assert any(c[0] == "header_write" for c in renderer.calls)
+
+    # Same minute (+30 s) → header_write skipped.
+    clock[0] = 30
+    renderer.calls.clear()
+    d._update_display()
+    assert not any(c[0] == "header_write" for c in renderer.calls)
+
+    # New minute (+60 s) → header_write fires again.
+    clock[0] = 60
+    renderer.calls.clear()
+    d._update_display()
     assert any(c[0] == "header_write" for c in renderer.calls)
 
 
