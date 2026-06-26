@@ -4,7 +4,17 @@ import time
 from micropython import const
 
 from displays.base import Display as _Display
-from displays.shared import icons_symbols
+from displays.palette import (
+    BLUE,
+    GREEN,
+    LABEL_FOR_SLOT,
+    ORANGE,
+    RED,
+    RPURPLE,
+    SKY,
+    YELLOW,
+)
+from displays.shared import _icons_data, icons_p4
 from displays.shared.header import format_header_time
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
@@ -152,23 +162,23 @@ class Renderer:
     def draw_left_column(
         self,
         line_idx: int,
-        icon_cell: tuple[int, int],
-        unit_cell: tuple[int, int],
+        icon: tuple,
+        unit: tuple,
     ) -> None:
-        """Paint icon (2x2 cells) + unit label (1 cell) in the left column.
+        """Paint icon (16x16) + unit label (8x8) in the left column.
 
         Called once per row on view entry; icons/units are static afterwards.
-        Delegates to ``displays.shared.icons_symbols`` helpers, which pass
-        ``transparent=0`` so the 1px black border around each icon never
-        leaves a halo.
+        Delegates to the ``icons_p4`` blitter, which skips slot-0 (BLACK)
+        pixels so the icon background never leaves a halo on the black view.
+        ``icon`` / ``unit`` are ``(w, h, blob)`` tuples from ``_icons_data``.
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
         g = self._geom
         y = g.line_y[line_idx]
-        icons_symbols.draw_icon(self._gfx, icon_cell, g.icon_x, y - g.icon_y_offset, g.icon_scale)
-        icons_symbols.draw_sprite(self._gfx, unit_cell, g.unit_x, y, g.unit_scale)
+        icons_p4.draw_icon(self._gfx, icon, g.icon_x, y - g.icon_y_offset, g.icon_scale)
+        icons_p4.draw_icon(self._gfx, unit, g.unit_x, y, g.unit_scale)
 
     def header_write(self, text: str) -> None:
         if text == self._last_header:
@@ -206,8 +216,8 @@ class Renderer:
 
         self._last_lines[line_idx] = text
 
-    def redraw_row_icon(self, line_idx: int, icon_cell: tuple[int, int]) -> None:
-        """Replace the icon at ``line_idx`` with a different sprite cell."""
+    def redraw_row_icon(self, line_idx: int, icon: tuple) -> None:
+        """Replace the icon at ``line_idx`` with a different ``(w, h, blob)``."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
@@ -215,7 +225,7 @@ class Renderer:
         icon_y = g.line_y[line_idx] - g.icon_y_offset
         self._gfx.set_pen(self._colors.background)
         self._gfx.rectangle(g.icon_x, icon_y, g.icon_size_px, g.icon_size_px)
-        icons_symbols.draw_icon(self._gfx, icon_cell, g.icon_x, icon_y, g.icon_scale)
+        icons_p4.draw_icon(self._gfx, icon, g.icon_x, icon_y, g.icon_scale)
 
     def value_write(self, line_idx: int, text: str) -> None:
         self.line_write(line_idx, text, pen=self._colors.value_text)
@@ -237,17 +247,17 @@ class Renderer:
         self,
         line_idx: int,
         col: int,
-        pastel_pen: int,
-        bright_pen,  # int | None
+        fill_pen: int,
+        marker_pen,  # int | None
         value_y,     # int | None
     ) -> None:
-        """Paint one 1×graph_height column: full-height pastel fill, plus an
-        optional single bright pixel at ``value_y`` inside the column.
+        """Paint one 1×graph_height column: full-height band fill, plus an
+        optional single auto-contrast marker pixel at ``value_y``.
 
         ``col`` is the column index 0..graph_width-1 within the graph rect
         (caller maps history value_idx → col).  ``value_y`` is the y offset
-        inside the row (0 = top, graph_height-1 = bottom); the bright pixel
-        is only drawn when both ``bright_pen`` and ``value_y`` are not None.
+        inside the row (0 = top, graph_height-1 = bottom); the marker pixel
+        is only drawn when both ``marker_pen`` and ``value_y`` are not None.
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
@@ -255,10 +265,10 @@ class Renderer:
         g = self._geom
         x = g.graph_x + col
         y = g.line_y[line_idx]
-        self._gfx.set_pen(pastel_pen)
+        self._gfx.set_pen(fill_pen)
         self._gfx.rectangle(x, y, 1, g.graph_height)
-        if bright_pen is not None and value_y is not None:
-            self._gfx.set_pen(bright_pen)
+        if marker_pen is not None and value_y is not None:
+            self._gfx.set_pen(marker_pen)
             self._gfx.pixel(x, y + value_y)
 
     def update(self) -> None:
@@ -269,49 +279,52 @@ class Renderer:
 
 
 class Display(_Display):
-    # Static per-row schema in display order: (unit_cell, icons_low_to_high).
-    # Band thresholds arrive via ``__init__`` from ``config.SENSOR_*_BANDS``
-    # and are merged into ``self._rows`` as ``(unit, edges, icons)`` triples.
-    # ``edges`` is a 5-tuple ``(cap_min, t1, t2, t3, cap_max)``; the inner
-    # three drive icon classification, the outer two bound the history
-    # graph's Y axis.
-    # ``icons[1]`` (MID_LOW) is what ``initialize`` paints by default so a
-    # centered indoor reading needs no first swap.
+    # Static per-row schema in display order: ``(unit, cells)`` where ``cells``
+    # is the 4 bands low→high, each a ``(icon, fill_slot)`` pair — colocating the
+    # band icon and its graph-fill colour so they're a single source and can't
+    # drift.  ``unit`` and each ``icon`` are ``(w, h, blob)`` tuples from
+    # ``_icons_data``; ``fill_slot`` is a ``displays.palette`` slot index.
+    # Band thresholds arrive via ``__init__`` from ``config.SENSOR_*_BANDS`` and
+    # are merged into ``self._rows`` as ``(unit, edges, cells)`` triples.
+    # ``edges`` is a 5-tuple ``(cap_min, t1, t2, t3, cap_max)``; the inner three
+    # drive band classification, the outer two bound the history graph's Y axis.
+    # ``cells[1]`` is what ``initialize`` paints by default so a centered indoor
+    # reading needs no first swap.
     ROWS = (
         (
-            icons_symbols.UNIT_DEG_C,
+            _icons_data.UNIT_CELSIUS,
             (
-                icons_symbols.ICON_THERMO_BLUE,
-                icons_symbols.ICON_THERMO_GREEN,
-                icons_symbols.ICON_THERMO_YELLOW,
-                icons_symbols.ICON_THERMO_RED,
+                (_icons_data.ICON_THERMO_BLUE, SKY),
+                (_icons_data.ICON_THERMO_GREEN, GREEN),
+                (_icons_data.ICON_THERMO_ORANGE, ORANGE),
+                (_icons_data.ICON_THERMO_RED, RED),
             ),
         ),
         (
-            icons_symbols.UNIT_MB,
+            _icons_data.UNIT_MBAR,
             (
-                icons_symbols.ICON_GAUGE_LOW,
-                icons_symbols.ICON_GAUGE_MID_LOW,
-                icons_symbols.ICON_GAUGE_MID_HIGH,
-                icons_symbols.ICON_GAUGE_HIGH,
+                (_icons_data.ICON_GAUGE_MIN, RPURPLE),
+                (_icons_data.ICON_GAUGE_LOW, GREEN),
+                (_icons_data.ICON_GAUGE_HIGH, YELLOW),
+                (_icons_data.ICON_GAUGE_MAX, ORANGE),
             ),
         ),
         (
-            icons_symbols.UNIT_PCT,
+            _icons_data.UNIT_PERCENT,
             (
-                icons_symbols.ICON_DROP_LOW,
-                icons_symbols.ICON_DROP_MID_LOW,
-                icons_symbols.ICON_DROP_MID_HIGH,
-                icons_symbols.ICON_DROP_HIGH,
+                (_icons_data.ICON_DROP_LOW, YELLOW),
+                (_icons_data.ICON_DROP_MED, GREEN),
+                (_icons_data.ICON_DROP_HIGH, SKY),
+                (_icons_data.ICON_DROP_MAX, BLUE),
             ),
         ),
         (
-            icons_symbols.UNIT_KOHM,
+            _icons_data.UNIT_KOHM,
             (
-                icons_symbols.ICON_GAS_LOW,
-                icons_symbols.ICON_GAS_MID_LOW,
-                icons_symbols.ICON_GAS_MID_HIGH,
-                icons_symbols.ICON_GAS_HIGH,
+                (_icons_data.ICON_MASK_RED, RED),
+                (_icons_data.ICON_MASK_ORANGE, ORANGE),
+                (_icons_data.ICON_MASK_GREEN, GREEN),
+                (_icons_data.ICON_MASK_BLUE, SKY),
             ),
         ),
     )
@@ -325,7 +338,6 @@ class Display(_Display):
         bme690_reader: PimoroniBME690,
         time_service,
         history,
-        band_pens,
         graph_height: int,
         *,
         temp_bands: tuple,
@@ -337,12 +349,13 @@ class Display(_Display):
         self._time_service = time_service
         self._bme690_reader = bme690_reader
         self._history = history
-        self._band_pens = band_pens
+        # Per-band (fill, marker) pens; see build_sensor_band_pens.
+        self._band_pens = build_sensor_band_pens()
         self._graph_height = graph_height
         self._active = False
-        # Currently painted icon cell per row; ``None`` forces the first
+        # Currently painted icon per row; ``None`` forces the first
         # ``_maybe_swap_icon`` to paint.  Populated by ``initialize``.
-        self._row_icons: list[tuple[int, int] | None] = [None] * len(self.ROWS)
+        self._row_icons: list[tuple | None] = [None] * len(self.ROWS)
         self._last_rendered_reading: tuple | None = None
         # Graph redraw triggers: track the last commit_count we drew for, and
         # the last gas heater stable-state we rendered.  ``-1`` / ``None``
@@ -361,8 +374,8 @@ class Display(_Display):
         # sensor read.
         bands_per_row = (temp_bands, pressure_bands, humidity_bands, gas_bands)
         self._rows = tuple(
-            (unit_cell, self._validated_bands(i, bands_per_row[i]), icons)
-            for i, (unit_cell, icons) in enumerate(self.ROWS)
+            (unit, self._validated_bands(i, bands_per_row[i]), cells)
+            for i, (unit, cells) in enumerate(self.ROWS)
         )
 
     @staticmethod
@@ -412,7 +425,7 @@ class Display(_Display):
         ``cap_max`` (edges[-1]) → ``y=0`` (top), ``cap_min`` (edges[0]) →
         ``y=graph_height-1`` (bottom).  Both caps inclusive.  Returns
         ``None`` for values outside the cap range — the caller draws the
-        column pastel-only (no bright pixel).  NaN handling lives at the
+        column fill-only (no marker pixel).  NaN handling lives at the
         caller (``_redraw_graphs``), not here; this stays pure math.
         """
         cap_min = edges[0]
@@ -453,10 +466,10 @@ class Display(_Display):
             return "-999"
         return str(i)
 
-    def _maybe_swap_icon(self, line_idx: int, new_cell: tuple[int, int]) -> None:
-        if new_cell != self._row_icons[line_idx]:
-            self._renderer.redraw_row_icon(line_idx, new_cell)
-            self._row_icons[line_idx] = new_cell
+    def _maybe_swap_icon(self, line_idx: int, new_icon: tuple) -> None:
+        if new_icon != self._row_icons[line_idx]:
+            self._renderer.redraw_row_icon(line_idx, new_icon)
+            self._row_icons[line_idx] = new_icon
 
     @micropython.native
     def _redraw_graphs(self, gas_stable_now: bool) -> None:
@@ -475,7 +488,7 @@ class Display(_Display):
         gas_row = self._GAS_ROW
 
         for metric_idx in range(len(self._rows)):
-            _unit, edges, _icons = self._rows[metric_idx]
+            _unit, edges, _cells = self._rows[metric_idx]
 
             if metric_idx == gas_row:
                 if not gas_stable_now:
@@ -496,14 +509,14 @@ class Display(_Display):
                 if value != value:  # NaN — leave the column as cleared background
                     continue
                 band = self._band_index(value, edges)
-                pastel_pen, bright_pen = pens_row[band]
+                fill_pen, marker_pen = pens_row[band]
                 y = self._y_for(value, edges, graph_height)
                 col = capacity - 1 - i
                 renderer.draw_graph_column(
                     metric_idx,
                     col,
-                    pastel_pen,
-                    bright_pen if y is not None else None,
+                    fill_pen,
+                    marker_pen if y is not None else None,
                     y,
                 )
 
@@ -529,6 +542,14 @@ class Display(_Display):
         # Graph-redraw check lives BEFORE the reading-identity guard so a
         # history commit observed on a "reading unchanged" tick still fires.
         gas_stable_now = (reading[4] == "Stable")
+        # MOX gas sensor needs heater warm-up: its first samples are NaN and the
+        # boot commit captured one.  The instant it goes stable, backfill the
+        # latest gas slot with the live reading so the gas column appears at once
+        # rather than at the next periodic commit.  ``_gas_was_stable`` is still
+        # not-True on this warming→stable edge (the redraw block below flips it),
+        # so the redraw fires too.
+        if gas_stable_now and self._gas_was_stable is not True:
+            self._history.update_latest(self._GAS_ROW, reading[3])
         commit_now = self._history.commit_count
         if (
             commit_now != self._last_commit
@@ -552,8 +573,8 @@ class Display(_Display):
             for i in range(len(self._rows)):
                 if i == self._GAS_ROW and status != "Stable":
                     continue
-                _unit, edges, icons = self._rows[i]
-                self._maybe_swap_icon(i, icons[self._band_index(reading[i], edges)])
+                _unit, edges, cells = self._rows[i]
+                self._maybe_swap_icon(i, cells[self._band_index(reading[i], edges)][0])
 
             self._renderer.value_write(0, self._fit_chars(temp, 1))
             self._renderer.value_write(1, self._fit_chars(press, 0))
@@ -576,9 +597,9 @@ class Display(_Display):
             return
         self._active = True
         self._renderer.reset()
-        for i, (unit_cell, _bands, icons) in enumerate(self._rows):
-            default_icon = icons[1]
-            self._renderer.draw_left_column(i, default_icon, unit_cell)
+        for i, (unit, _edges, cells) in enumerate(self._rows):
+            default_icon = cells[1][0]
+            self._renderer.draw_left_column(i, default_icon, unit)
             self._row_icons[i] = default_icon
         # Force first _update_display to paint values even if the reader
         # returns the same tuple object as the last time we were active.
@@ -595,3 +616,16 @@ class Display(_Display):
         if not self._active:
             return
         self._active = False
+
+
+def build_sensor_band_pens():
+    """Derive the 4x4 grid of ``(fill_slot, marker_slot)`` pairs from
+    ``Display.ROWS`` — the single source that colocates each band's
+    ``(icon, fill)``.  ``marker`` is the fill's auto-contrast (BLACK/WHITE),
+    precomputed here so the render loop never does luminance work.  Indexed
+    ``pens[metric_idx][band_idx]``.
+    """
+    return tuple(
+        tuple((fill, LABEL_FOR_SLOT[fill]) for _icon, fill in cells)
+        for _unit, cells in Display.ROWS
+    )

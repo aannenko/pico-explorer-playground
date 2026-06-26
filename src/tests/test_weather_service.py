@@ -366,7 +366,7 @@ def test_url_includes_coordinates_uv_and_timeout():
     h.schedule.run_all()
 
     url, timeout = h.get_calls[0]
-    assert url.startswith("http://")  # HTTP on purpose — avoids RP2040 TLS ENOMEM
+    assert url.startswith("http://")  # HTTP on purpose, not HTTPS
     assert "latitude=50.5" in url
     assert "longitude=14.25" in url
     assert "timezone=auto" in url

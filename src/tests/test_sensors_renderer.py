@@ -139,51 +139,64 @@ def test_line_write_clears_only_value_column_not_icons() -> None:
             )
 
 
-def test_draw_left_column_draws_four_icon_cells_and_one_unit_cell() -> None:
+def test_draw_left_column_blits_icon_then_unit() -> None:
     r, gfx, geom = _mk()
 
-    # Arbitrary icon (sx=2, sy=0) and unit (sx=3, sy=15).
-    r.draw_left_column(1, (2, 0), (3, 15))
+    # Tiny synthetic 1x1 icon/unit so the per-pixel blit is easy to assert.
+    icon = (1, 1, bytes([0x40]))  # one pixel, slot 4
+    unit = (1, 1, bytes([0x20]))  # one pixel, slot 2
+    r.draw_left_column(1, icon, unit)
 
-    step = 8 * geom.icon_scale
     icon_y = geom.line_y[1] - geom.icon_y_offset
-    # Four 8x8 cells forming the 2x2 icon, at icon_scale with transparent=0.
-    assert ("sprite", (2, 0, geom.icon_x,        icon_y,        geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (3, 0, geom.icon_x + step, icon_y,        geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (2, 1, geom.icon_x,        icon_y + step, geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (3, 1, geom.icon_x + step, icon_y + step, geom.icon_scale, 0), {}) in gfx.calls
-    # Single unit-label cell at text scale aligned to text baseline.
-    assert ("sprite", (3, 15, geom.unit_x, geom.line_y[1], geom.unit_scale, 0), {}) in gfx.calls
+    assert gfx.calls == [
+        ("set_pen", (4,), {}),
+        ("rectangle", (geom.icon_x, icon_y, geom.icon_scale, geom.icon_scale), {}),
+        ("set_pen", (2,), {}),
+        ("rectangle", (geom.unit_x, geom.line_y[1], geom.unit_scale, geom.unit_scale), {}),
+    ]
+
+
+def test_draw_left_column_skips_transparent_pixels() -> None:
+    r, gfx, geom = _mk()
+
+    # 2x2 icon: (0,0)=4, (1,0)=0, (0,1)=0, (1,1)=5 → only two pixels drawn.
+    icon = (2, 2, bytes([0x40, 0x05]))
+    unit = (1, 1, bytes([0x00]))  # fully transparent unit → nothing drawn
+    r.draw_left_column(0, icon, unit)
+
+    icon_y = geom.line_y[0] - geom.icon_y_offset
+    s = geom.icon_scale
+    assert gfx.calls == [
+        ("set_pen", (4,), {}),
+        ("rectangle", (geom.icon_x, icon_y, s, s), {}),
+        ("set_pen", (5,), {}),
+        ("rectangle", (geom.icon_x + s, icon_y + s, s, s), {}),
+    ]
 
 
 def test_draw_left_column_out_of_range_is_noop() -> None:
     r, gfx, _ = _mk()
 
-    r.draw_left_column(99, (0, 0), (0, 15))
-    r.draw_left_column(-1, (0, 0), (0, 15))
+    icon = (1, 1, bytes([0x40]))
+    r.draw_left_column(99, icon, icon)
+    r.draw_left_column(-1, icon, icon)
 
     assert gfx.calls == []
 
 
-def test_redraw_row_icon_clears_icon_rect_then_draws_new_icon() -> None:
+def test_redraw_row_icon_clears_icon_rect_then_blits_new_icon() -> None:
     r, gfx, geom = _mk()
 
-    r.redraw_row_icon(0, (4, 0))
+    icon = (1, 1, bytes([0x40]))  # one pixel, slot 4
+    r.redraw_row_icon(0, icon)
 
     icon_y = geom.line_y[0] - geom.icon_y_offset
-    # Background-pen set, then icon-footprint rect cleared, then 4 sprite cells drawn.
-    assert ("set_pen", (1,), {}) in gfx.calls  # background pen
-    assert (
-        "rectangle",
-        (geom.icon_x, icon_y, geom.icon_size_px, geom.icon_size_px),
-        {},
-    ) in gfx.calls
-    # All four 2x2 sprite cells drawn at icon_scale with transparent=0.
-    step = 8 * geom.icon_scale
-    assert ("sprite", (4, 0, geom.icon_x,        icon_y,        geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (5, 0, geom.icon_x + step, icon_y,        geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (4, 1, geom.icon_x,        icon_y + step, geom.icon_scale, 0), {}) in gfx.calls
-    assert ("sprite", (5, 1, geom.icon_x + step, icon_y + step, geom.icon_scale, 0), {}) in gfx.calls
+    assert gfx.calls == [
+        ("set_pen", (1,), {}),  # background pen
+        ("rectangle", (geom.icon_x, icon_y, geom.icon_size_px, geom.icon_size_px), {}),
+        ("set_pen", (4,), {}),
+        ("rectangle", (geom.icon_x, icon_y, geom.icon_scale, geom.icon_scale), {}),
+    ]
     # Value-column rect must NOT be cleared — only the icon footprint.
     assert not any(
         c[0] == "rectangle" and c[1] == (geom.value_x, geom.line_y[0], geom.value_clear_width, geom.value_rect_height)
@@ -194,8 +207,9 @@ def test_redraw_row_icon_clears_icon_rect_then_draws_new_icon() -> None:
 def test_redraw_row_icon_out_of_range_is_noop() -> None:
     r, gfx, _ = _mk()
 
-    r.redraw_row_icon(99, (0, 0))
-    r.redraw_row_icon(-1, (0, 0))
+    icon = (1, 1, bytes([0x40]))
+    r.redraw_row_icon(99, icon)
+    r.redraw_row_icon(-1, icon)
 
     assert gfx.calls == []
 
@@ -226,10 +240,10 @@ def test_draw_graph_clear_out_of_range_is_noop() -> None:
     assert gfx.calls == []
 
 
-def test_draw_graph_column_with_value_draws_pastel_rect_and_bright_pixel() -> None:
+def test_draw_graph_column_with_value_draws_fill_rect_and_marker_pixel() -> None:
     r, gfx, geom = _mk()
 
-    r.draw_graph_column(line_idx=1, col=5, pastel_pen=10, bright_pen=20, value_y=7)
+    r.draw_graph_column(line_idx=1, col=5, fill_pen=10, marker_pen=20, value_y=7)
 
     x = geom.graph_x + 5
     y = geom.line_y[1]
@@ -239,24 +253,24 @@ def test_draw_graph_column_with_value_draws_pastel_rect_and_bright_pixel() -> No
     assert ("pixel", (x, y + 7), {}) in gfx.calls
 
 
-def test_draw_graph_column_skips_bright_when_value_y_is_none() -> None:
-    """Out-of-cap: pastel column only, no pixel call."""
+def test_draw_graph_column_skips_marker_when_value_y_is_none() -> None:
+    """Out-of-cap: fill column only, no pixel call."""
     r, gfx, geom = _mk()
 
-    r.draw_graph_column(line_idx=2, col=0, pastel_pen=10, bright_pen=20, value_y=None)
+    r.draw_graph_column(line_idx=2, col=0, fill_pen=10, marker_pen=20, value_y=None)
 
     assert ("set_pen", (10,), {}) in gfx.calls
     assert ("rectangle", (geom.graph_x + 0, geom.line_y[2], 1, geom.graph_height), {}) in gfx.calls
-    # No bright pen set, no pixel.
+    # No marker pen set, no pixel.
     assert ("set_pen", (20,), {}) not in gfx.calls
     assert not any(c[0] == "pixel" for c in gfx.calls)
 
 
-def test_draw_graph_column_skips_bright_when_pen_is_none() -> None:
-    """``bright_pen=None`` also suppresses the pixel call (parity with value_y=None)."""
+def test_draw_graph_column_skips_marker_when_pen_is_none() -> None:
+    """``marker_pen=None`` also suppresses the pixel call (parity with value_y=None)."""
     r, gfx, _ = _mk()
 
-    r.draw_graph_column(line_idx=0, col=10, pastel_pen=5, bright_pen=None, value_y=7)
+    r.draw_graph_column(line_idx=0, col=10, fill_pen=5, marker_pen=None, value_y=7)
     assert not any(c[0] == "pixel" for c in gfx.calls)
 
 

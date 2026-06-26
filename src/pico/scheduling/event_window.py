@@ -1,7 +1,7 @@
 from scheduling.event import Event
 
 
-def build_event_windows(palette, streams):  # palette: tuple[tuple[int,int],...]; streams: Iterable[Stream]
+def build_event_windows(palette, streams):  # palette: list[int]; streams: Iterable[Stream]
     """Build one ``EventWindow`` per stream, all sharing ``palette``.
 
     Kept import-free of config/hardware so it is unit-testable with a
@@ -24,26 +24,22 @@ class EventWindow:
     """Per-row calendar view-model: a sliding buffer that also colors its bars.
 
     Each ``get_visible`` fills the buffer forward and prunes events that
-    ended before the window start.  The pen is resolved and cached at
-    fill time (not at draw time) so pruning the leftmost bar can't
-    re-phase the run-gated alternation; ``get_visible`` returns
-    ``(Event, pen)`` so the renderer stays pure geometry.  ``palette`` is
-    a list of ``(main_pen, alt_pen)`` pairs indexed by ``color_index``.
+    ended before the window start.  The pen is resolved at fill time so
+    ``get_visible`` returns ``(Event, pen)`` and the renderer stays pure
+    geometry.  ``palette`` is a list of pen slots indexed by ``color_index``.
     """
 
     def __init__(
         self,
         events_iter,  # Iterator[Event]
-        palette: tuple[tuple[int, int], ...],  # (main_pen, alt_pen) per category
+        palette: list[int],  # pen slot per category, indexed by color_index
         events_fn=None,  # () -> Iterator[Event]; fresh-iterator factory for refresh
         generation_fn=None,  # () -> int; bumps when the source snapshot changes
         status_fn=None,  # () -> int; freshness, or None for static streams
     ) -> None:
         self._events = events_iter
-        self._palette: tuple[tuple[int, int], ...] = palette
+        self._palette: list[int] = palette
         self._buffer: list[tuple[Event, int]] = []
-        self._use_alt: bool = False
-        self._prev_color_index: int = -1
         self._next: tuple[Event, int] | None = None
         self._exhausted: bool = False
         self._events_fn = events_fn
@@ -52,7 +48,7 @@ class EventWindow:
         self._generation: int = -1
 
     @property
-    def palette(self) -> tuple[tuple[int, int], ...]:
+    def palette(self) -> list[int]:
         return self._palette
 
     def get_visible(
@@ -83,42 +79,25 @@ class EventWindow:
         """Swap in a fresh event iterator, discarding all buffered state.
 
         Required for network-backed streams whose underlying data is
-        re-fetched periodically: the buffer, peek slot, alternation state
-        and exhaustion latch are all reset so the next ``get_visible``
-        repopulates from ``event_iter`` and restarts coloring from each
-        category's main pen.  Unlike the forward-only fill path, this is
-        the only way to clear ``_exhausted`` once a bounded iterator has
-        run out.
+        re-fetched periodically: the buffer, peek slot and exhaustion latch
+        are all reset so the next ``get_visible`` repopulates from
+        ``event_iter``.  Unlike the forward-only fill path, this is the only
+        way to clear ``_exhausted`` once a bounded iterator has run out.
         """
         self._events = event_iter
         self._buffer = []
-        self._use_alt = False
-        self._prev_color_index = -1
         self._next = None
         self._exhausted = False
 
     def _resolve_pen(self, color_index: int) -> int:
-        """Pick the pen for ``color_index`` using run-gated alternation.
+        """Pick the pen slot for ``color_index``.
 
-        Within a run of the same ``color_index`` the pen toggles
-        main/alt/main/alt so adjacent same-category bars stay
-        distinguishable; a different ``color_index`` resets to main.
-        Keyed on the previously emitted event, so it is interleave-safe.
-        A ``(main, alt)`` pair with ``main == alt`` collapses the toggle
-        to a single solid color.  Out-of-range indices clamp to the last
-        palette entry.
+        Out-of-range indices clamp to the last palette entry.
         """
-        if color_index == self._prev_color_index:
-            self._use_alt = not self._use_alt
-        else:
-            self._use_alt = False
-        self._prev_color_index = color_index
-
         idx = color_index
         if idx >= len(self._palette):
             idx = len(self._palette) - 1
-        pair = self._palette[idx]
-        return pair[1] if self._use_alt else pair[0]
+        return self._palette[idx]
 
     def _refresh_if_changed(self) -> None:
         # Pull a fresh snapshot when the source's generation has advanced.

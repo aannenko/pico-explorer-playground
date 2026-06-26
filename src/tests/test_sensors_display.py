@@ -33,6 +33,8 @@ class _FakeRingHistory:
         self.commit_count = 0
         # Per-metric list of samples, newest first.  Empty == nothing to draw.
         self._samples: list[list[float]] = [[] for _ in range(4)]
+        # Records (metric_idx, value) backfills so tests can assert them.
+        self.update_latest_calls: list[tuple[int, float]] = []
 
     def filled(self, metric_idx: int) -> int:
         return min(len(self._samples[metric_idx]), self.capacity)
@@ -43,24 +45,15 @@ class _FakeRingHistory:
     def set_samples(self, metric_idx: int, samples_newest_first: list[float]) -> None:
         self._samples[metric_idx] = list(samples_newest_first)
 
+    def update_latest(self, metric_idx: int, value: float) -> None:
+        self.update_latest_calls.append((metric_idx, value))
+        if self._samples[metric_idx]:
+            self._samples[metric_idx][0] = value
+
     def bump_commit(self) -> None:
         self.commit_count += 1
 
 
-# A 4×4×2 band-pen fake; each pen is a distinct int so test assertions can
-# pinpoint which (metric, band, pastel/bright) triggered a draw.
-def _make_band_pens() -> tuple:
-    """metric m, band b, pen kind k (0=pastel, 1=bright) → 1000 + m*100 + b*10 + k."""
-    return tuple(
-        tuple(
-            (1000 + m * 100 + b * 10 + 0, 1000 + m * 100 + b * 10 + 1)
-            for b in range(4)
-        )
-        for m in range(4)
-    )
-
-
-_FAKE_BAND_PENS = _make_band_pens()
 _FAKE_GRAPH_HEIGHT = 24
 
 
@@ -91,7 +84,6 @@ def _make_display(
         bme690_reader=reader or FakeBME690Reader((22.0, 1010.0, 50.0, 100.0, "Stable")),
         time_service=_FakeTime(lambda: 0),
         history=history or _FakeRingHistory(),
-        band_pens=_FAKE_BAND_PENS,
         graph_height=_FAKE_GRAPH_HEIGHT,
         **(band_kwargs or _TEST_BAND_KWARGS),
     )
@@ -316,32 +308,37 @@ def test_band_index_classifies_each_metric() -> None:
 
 
 def test_rows_schema_invariants(monkeypatch) -> None:
-    """ROWS holds static (unit, icons); ``_rows`` adds validated 5-edge bands."""
-    # Static class-level ROWS: (unit_cell, icons) 2-tuples.
+    """ROWS holds static (unit, cells); ``_rows`` adds validated 5-edge bands."""
+    # Static class-level ROWS: (unit, cells) 2-tuples; each cell is an
+    # (icon, fill_slot) pair.  Units are 8x8 (w,h,blob), metric icons 16x16,
+    # fills are palette slot indices.
     for i, row in enumerate(sensors.Display.ROWS):
-        assert len(row) == 2, f"ROWS[{i}] must be (unit, icons)"
-        unit, icons = row
-        assert len(unit) == 2, f"ROWS[{i}] unit_cell must be (sx, sy)"
-        assert len(icons) == 4, f"ROWS[{i}] icons must hold 4 cells"
-        for cell in icons:
-            assert len(cell) == 2, f"ROWS[{i}] icons must contain (sx, sy) tuples"
+        assert len(row) == 2, f"ROWS[{i}] must be (unit, cells)"
+        unit, cells = row
+        assert len(unit) == 3, f"ROWS[{i}] unit must be (w, h, blob)"
+        assert (unit[0], unit[1]) == (8, 8), f"ROWS[{i}] unit must be 8x8"
+        assert len(cells) == 4, f"ROWS[{i}] must hold 4 bands"
+        for icon, fill in cells:
+            assert len(icon) == 3, f"ROWS[{i}] icon must be (w, h, blob)"
+            assert (icon[0], icon[1]) == (16, 16), f"ROWS[{i}] icons must be 16x16"
+            assert 0 <= fill <= 15, f"ROWS[{i}] fill must be a palette slot"
 
-    # Per-instance _rows: (unit, edges, icons) with validated 5-element
+    # Per-instance _rows: (unit, edges, cells) with validated 5-element
     # strictly-ascending edge tuples.
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
     d = _make_display(reader=FakeBME690Reader((20.0, 1005.0, 40.0, 70.0, "Stable")))
     assert len(d._rows) == len(sensors.Display.ROWS)
     for i, row in enumerate(d._rows):
-        assert len(row) == 3, f"_rows[{i}] must be (unit, edges, icons)"
-        unit, edges, icons = row
+        assert len(row) == 3, f"_rows[{i}] must be (unit, edges, cells)"
+        unit, edges, cells = row
         assert unit == sensors.Display.ROWS[i][0]
-        assert icons == sensors.Display.ROWS[i][1]
+        assert cells == sensors.Display.ROWS[i][1]
         assert len(edges) == 5, f"_rows[{i}] edges must hold 5 values"
         assert list(edges) == sorted(edges), f"_rows[{i}] edges must be ascending"
 
 
 def test_band_change_triggers_single_icon_repaint_per_metric(monkeypatch) -> None:
-    import displays.shared.icons_symbols as ics
+    import displays.shared._icons_data as ics
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     renderer = RecordingRenderer()
@@ -361,35 +358,35 @@ def test_band_change_triggers_single_icon_repaint_per_metric(monkeypatch) -> Non
     d._update_display()
     assert not any(c[0] == "redraw_row_icon" for c in renderer.calls)
 
-    # Crossing temperature into yellow band — exactly one repaint, row 0.
+    # Crossing temperature into the warm (band 2) icon — exactly one repaint, row 0.
     renderer.calls.clear()
     reader._reading = (25.0, 1010.0, 45.0, 80.0, "Stable")
     d._update_display()
     repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (0, ics.ICON_THERMO_YELLOW), {})]
+    assert repaints == [("redraw_row_icon", (0, ics.ICON_THERMO_ORANGE), {})]
 
-    # Crossing pressure into HIGH band — exactly one repaint, row 1.
+    # Crossing pressure into the top (band 3) gauge — exactly one repaint, row 1.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 45.0, 80.0, "Stable")
     d._update_display()
     repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (1, ics.ICON_GAUGE_HIGH), {})]
+    assert repaints == [("redraw_row_icon", (1, ics.ICON_GAUGE_MAX), {})]
 
-    # Crossing humidity into HIGH band — exactly one repaint, row 2.
+    # Crossing humidity into the top (band 3) drop — exactly one repaint, row 2.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 75.0, 80.0, "Stable")
     d._update_display()
     repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (2, ics.ICON_DROP_HIGH), {})]
+    assert repaints == [("redraw_row_icon", (2, ics.ICON_DROP_MAX), {})]
 
-    # Crossing gas into MID_HIGH band — exactly one repaint, row 3.
+    # Crossing gas into band 2 (green mask) — exactly one repaint, row 3.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 75.0, 150.0, "Stable")
     d._update_display()
     repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (3, ics.ICON_GAS_MID_HIGH), {})]
+    assert repaints == [("redraw_row_icon", (3, ics.ICON_MASK_GREEN), {})]
 
-    # Dropping temperature into blue — single row-0 repaint.
+    # Dropping temperature into the cold (band 0) icon — single row-0 repaint.
     renderer.calls.clear()
     reader._reading = (5.0, 1030.0, 75.0, 150.0, "Stable")
     d._update_display()
@@ -399,14 +396,14 @@ def test_band_change_triggers_single_icon_repaint_per_metric(monkeypatch) -> Non
 
 def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
     """While ``status != "Stable"`` the gas row icon must not follow gas_r."""
-    import displays.shared.icons_symbols as ics
+    import displays.shared._icons_data as ics
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
     renderer = RecordingRenderer()
     reader = FakeBME690Reader((20.0, 1005.0, 40.0, 70.0, "Stable"))
     d = _make_display(renderer=renderer, reader=reader)
     d.initialize()
-    assert d._row_icons[3] == ics.ICON_GAS_MID_LOW
+    assert d._row_icons[3] == ics.ICON_MASK_ORANGE
 
     # New reading: gas value would change band, but heater is warming → no swap.
     renderer.calls.clear()
@@ -415,14 +412,14 @@ def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
     assert not any(
         c[0] == "redraw_row_icon" and c[1][0] == 3 for c in renderer.calls
     )
-    assert d._row_icons[3] == ics.ICON_GAS_MID_LOW
+    assert d._row_icons[3] == ics.ICON_MASK_ORANGE
 
     # When the heater stabilises again, the icon catches up in a single swap.
     renderer.calls.clear()
     reader._reading = (20.0, 1005.0, 40.0, 250.0, "Stable")
     d._update_display()
     repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (3, ics.ICON_GAS_HIGH), {})]
+    assert repaints == [("redraw_row_icon", (3, ics.ICON_MASK_BLUE), {})]
 
 
 def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
@@ -440,15 +437,14 @@ def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
 
     assert d._active is True
     assert ("reset", (), {}) in renderer.calls
-    # Display no longer loads the spritesheet — app.build_app does that once
-    # at startup while the heap is fresh.
+    # Display never loads a spritesheet — P4 draws icons from 4-bit blobs.
     assert not any(c[0] == "load_spritesheet" for c in renderer.calls)
     # One draw_left_column call per configured row, in order. The default
-    # icon for each row is the MID_LOW-band icon (icons[1]).
+    # icon for each row is its band-1 icon (cells[1][0]).
     dlc_calls = [c for c in renderer.calls if c[0] == "draw_left_column"]
     assert len(dlc_calls) == len(sensors.Display.ROWS)
-    for i, (unit, icons) in enumerate(sensors.Display.ROWS):
-        default_icon = icons[1]
+    for i, (unit, cells) in enumerate(sensors.Display.ROWS):
+        default_icon = cells[1][0]
         assert dlc_calls[i] == ("draw_left_column", (i, default_icon, unit), {})
     assert renderer.update_calls == 1
 
@@ -743,6 +739,32 @@ def test_warming_to_stable_transition_triggers_gas_redraw(monkeypatch) -> None:
     assert any(c[0] == "draw_graph_column" for c in gas_calls)
 
 
+def test_gas_column_backfilled_when_heater_becomes_stable(monkeypatch) -> None:
+    """The instant the heater stabilises, the latest gas history slot is
+    backfilled with the live reading so a gas column appears at once instead of
+    waiting for the next periodic commit (the boot commit stored NaN)."""
+    monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
+
+    history = _FakeRingHistory()
+    history.set_samples(3, [float("nan")])  # boot commit: NaN gas while warming
+    reader = FakeBME690Reader((20.0, 1005.0, 40.0, 250.0, "Warming"))
+    d = _make_display(reader=reader, history=history)
+    d.initialize()
+
+    # Still warming → no backfill yet.
+    assert history.update_latest_calls == []
+
+    # Heater stabilises → backfill the latest gas slot with the live reading.
+    reader._reading = (20.0, 1005.0, 40.0, 250.0, "Stable")
+    d._update_display()
+    assert history.update_latest_calls == [(3, 250.0)]
+
+    # Idempotent: a later stable tick does not backfill again.
+    history.update_latest_calls.clear()
+    d._update_display()
+    assert history.update_latest_calls == []
+
+
 def test_stable_to_warming_transition_clears_gas_row_once(monkeypatch) -> None:
     """R2.3 regression: Stable→Warming clears the gas row once to wipe stale
     columns from the prior Stable state; no draw_graph_column for gas."""
@@ -784,8 +806,8 @@ def test_subsequent_warming_ticks_do_nothing_to_gas_row(monkeypatch) -> None:
     assert _graph_calls(renderer) == []
 
 
-def test_out_of_cap_value_renders_pastel_only(monkeypatch) -> None:
-    """Out-of-cap: bright_pen is None and value_y is None in the draw call."""
+def test_out_of_cap_value_renders_fill_only(monkeypatch) -> None:
+    """Out-of-cap: marker_pen is None and value_y is None in the draw call."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -799,15 +821,15 @@ def test_out_of_cap_value_renders_pastel_only(monkeypatch) -> None:
     col_calls = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
-    line_idx, col, pastel_pen, bright_pen, value_y = args
-    # Pastel pen present (band 3 for above-cap), bright suppressed.
-    assert pastel_pen == _FAKE_BAND_PENS[0][3][0]
-    assert bright_pen is None
+    line_idx, col, fill_pen, marker_pen, value_y = args
+    # Fill pen present (band 3 for above-cap), marker suppressed.
+    assert fill_pen == d._band_pens[0][3][0]
+    assert marker_pen is None
     assert value_y is None
 
 
-def test_in_cap_value_renders_pastel_and_bright(monkeypatch) -> None:
-    """In-cap: both pastel and bright pens present; value_y is a valid int."""
+def test_in_cap_value_renders_fill_and_marker(monkeypatch) -> None:
+    """In-cap: both fill and marker pens present; value_y is a valid int."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -820,9 +842,9 @@ def test_in_cap_value_renders_pastel_and_bright(monkeypatch) -> None:
     col_calls = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
-    _line, _col, pastel_pen, bright_pen, value_y = args
-    assert pastel_pen == _FAKE_BAND_PENS[0][2][0]
-    assert bright_pen == _FAKE_BAND_PENS[0][2][1]
+    _line, _col, fill_pen, marker_pen, value_y = args
+    assert fill_pen == d._band_pens[0][2][0]
+    assert marker_pen == d._band_pens[0][2][1]
     # value_y matches the documented _y_for formula for graph_height=24.
     expected = sensors.Display._y_for(25.0, _TEST_BAND_KWARGS["temp_bands"], _FAKE_GRAPH_HEIGHT)
     assert value_y == expected
@@ -846,7 +868,7 @@ def test_nan_value_skips_the_column_entirely(monkeypatch) -> None:
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
     # The valid sample is the second-most-recent (rel_index=1) → col = capacity - 1 - 1.
-    _line, col, _pastel, _bright, _y = args
+    _line, col, _fill, _marker, _y = args
     assert col == history.capacity - 1 - 1
 
 

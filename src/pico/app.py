@@ -13,11 +13,12 @@ import demo_streams
 from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
 from displays.palette import (
-    Palette,
+    BLACK,
+    DKGRAY,
+    GRAY,
+    ORANGE,
     STREAM_COLORS,
-    build_palette,
-    build_sensor_band_pens,
-    build_stream_pen_pairs,
+    WHITE,
 )
 from displays.status import StatusDisplay
 from hardware.explorer import (
@@ -114,7 +115,7 @@ class App:
         self.network_service = network_service
 
 
-def _build_countdown_display(pico_graphics, palette: Palette, tick_scheduler: TickScheduler):
+def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
     buzzer = ExplorerBuzzer()
     timer = CountdownTimer(
         on_done=buzzer.play_alert,
@@ -130,10 +131,10 @@ def _build_countdown_display(pico_graphics, palette: Palette, tick_scheduler: Ti
                 text_scale=config.TEXT_SCALE,
             ),
             colors=ring.Colors(
-                background=palette.black,
-                ring=palette.orange,
-                primary_text=palette.white,
-                secondary_text=palette.gray,
+                background=BLACK,
+                ring=ORANGE,
+                primary_text=WHITE,
+                secondary_text=GRAY,
             ),
         ),
         countdown_timer=timer,
@@ -142,34 +143,32 @@ def _build_countdown_display(pico_graphics, palette: Palette, tick_scheduler: Ti
 
 def _build_sensors_display(
     pico_graphics,
-    palette: Palette,
     bme690_reader,
     time_service: TimeService,
     geometry: "sensors.Geometry",
-    band_pens,
     history: RingHistory,
 ):
     """Construct the sensors Display from pre-built parts.
 
-    Geometry, band pens, and history are built earlier in ``build_app`` so
-    sensor capture can start before the blocking network sync.  This helper
-    just wires the Display object once ``time_service`` (which needs NTP)
-    is available.
+    Geometry and history are built earlier in ``build_app`` so sensor capture
+    can start before the blocking network sync.  This helper just wires the
+    Display object once ``time_service`` (which needs NTP) is available.  The
+    per-band ``(fill, marker)`` pens are derived inside the Display from its
+    ``ROWS`` table (single source for band icon + fill).
     """
     return sensors.Display(
         renderer=sensors.Renderer(
             geometry=geometry,
             colors=sensors.Colors(
-                background=palette.black,
-                header_text=palette.white,
-                value_text=palette.white,
-                secondary_text=palette.gray,
+                background=BLACK,
+                header_text=WHITE,
+                value_text=WHITE,
+                secondary_text=GRAY,
             ),
         ),
         bme690_reader=bme690_reader,
         time_service=time_service,
         history=history,
-        band_pens=band_pens,
         graph_height=geometry.graph_height,
         temp_bands=config.SENSOR_TEMP_BANDS,
         pressure_bands=config.SENSOR_PRESSURE_BANDS,
@@ -178,7 +177,7 @@ def _build_sensors_display(
     )
 
 
-def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeService, network_streams):
+def _build_calendar_display(pico_graphics, time_service: TimeService, network_streams):
     # Calendar lays out 5 rows: local generators, then network streams,
     # then demos fill any remaining slots.
     streams: list[Stream] = [
@@ -188,8 +187,7 @@ def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeS
     streams.extend(network_streams)
     streams.extend(demo_streams.build_demo_streams(time_service)[: 5 - len(streams)])
 
-    stream_palette = build_stream_pen_pairs(pico_graphics, STREAM_COLORS)
-    windows: list[EventWindow] = build_event_windows(stream_palette, streams)
+    windows: list[EventWindow] = build_event_windows(STREAM_COLORS, streams)
 
     return calendar.Display(
         renderer=calendar.Renderer(
@@ -203,11 +201,11 @@ def _build_calendar_display(pico_graphics, palette: Palette, time_service: TimeS
                 bar_text_scale=const(2),
             ),
             colors=calendar.Colors(
-                background=palette.black,
-                header_text=palette.white,
-                axis_text=palette.white,
-                empty_row=palette.dark_gray,
-                now_line=palette.white,
+                background=BLACK,
+                header_text=WHITE,
+                axis_text=WHITE,
+                empty_row=DKGRAY,
+                now_line=WHITE,
             ),
         ),
         streams=windows,
@@ -221,16 +219,14 @@ def build_app(pico_graphics, schedule_fn) -> App:
     ``schedule_fn`` is ``micropython.schedule`` on-device; tests can pass
     a synchronous substitute.
     """
-    palette = build_palette(pico_graphics)
-
     status_display = StatusDisplay(
         pico_graphics=pico_graphics,
         font=config.FONT,
         font_height=config.FONT_HEIGHT,
         text_scale=config.TEXT_SCALE,
-        background=palette.black,
-        foreground=palette.white,
-        subtext_color=palette.gray,
+        background=BLACK,
+        foreground=WHITE,
+        subtext_color=GRAY,
     )
 
     # Done while ``status_display`` is still alive so a malformed band shows
@@ -257,7 +253,6 @@ def build_app(pico_graphics, schedule_fn) -> App:
         text_scale=config.TEXT_SCALE,
         tick_period_ms=tick_scheduler.ms_per_tick,
     )
-    sensors_band_pens = build_sensor_band_pens(pico_graphics)
     sensor_history = RingHistory(
         bme690_reader.read,
         num_metrics=4,
@@ -335,16 +330,14 @@ def build_app(pico_graphics, schedule_fn) -> App:
 
     sensors_display = _build_sensors_display(
         pico_graphics,
-        palette,
         bme690_reader,
         time_service,
         sensors_geometry,
-        sensors_band_pens,
         sensor_history,
     )
-    countdown_display = _build_countdown_display(pico_graphics, palette, tick_scheduler)
+    countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
     calendar_display = _build_calendar_display(
-        pico_graphics, palette, time_service, [weather_stream, air_stream]
+        pico_graphics, time_service, [weather_stream, air_stream]
     )
 
     display_manager = DisplayManager(

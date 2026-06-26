@@ -85,6 +85,21 @@ class RingHistory:
             i += self._capacity
         return self._buffers[metric_idx][i]
 
+    def update_latest(self, metric_idx: int, value: float) -> None:
+        """Overwrite the most-recent sample for one metric, without advancing.
+
+        Lets a consumer backfill a value that wasn't valid at commit time — e.g.
+        the BME690 gas reading committed while the heater was still warming —
+        the moment a good reading arrives, so it appears without waiting for the
+        next commit.
+        """
+        if self._filled == 0:
+            return
+        i = self._head - 1
+        if i < 0:
+            i += self._capacity
+        self._buffers[metric_idx][i] = value
+
     def _tick(self) -> None:
         """TickScheduler subscriber — zero-arg (scheduler calls ``callback()``).
 

@@ -24,11 +24,6 @@ def _iter_events(*specs):
     return iter(_make_events(*specs))
 
 
-# A one-entry palette whose main/alt pens differ, so a color_index-0 run
-# alternates and tests can read the resolved pen directly.
-_ALT = ((10, 20),)
-
-
 # ---------------------------------------------------------------------------
 # Buffer fill / prune
 # ---------------------------------------------------------------------------
@@ -40,7 +35,7 @@ class TestGetVisible:
             ("B", 300, 200),   # 300..500
             ("C", 500, 200),   # 500..700
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(250, 550)
 
@@ -53,7 +48,7 @@ class TestGetVisible:
             ("B", 200, 100),   # 200..300
             ("C", 300, 100),   # 300..400
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(300, 500)
 
@@ -64,7 +59,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 500),   # 0..500 — spans into window
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(200, 400)
 
@@ -77,7 +72,7 @@ class TestGetVisible:
             ("B", 100, 100),   # 100..200
             ("C", 200, 100),   # 200..300
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         ew.get_visible(0, 300)
         assert len(ew._buffer) == 3
@@ -87,7 +82,7 @@ class TestGetVisible:
         assert names == ["C"]
 
     def test_empty_iterator_returns_empty(self):
-        ew = EventWindow(iter([]), palette=((1, 2),))
+        ew = EventWindow(iter([]), palette=[1])
 
         visible = ew.get_visible(0, 1000)
 
@@ -97,7 +92,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 100),   # 0..100 — entirely before window
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(200, 400)
 
@@ -105,79 +100,37 @@ class TestGetVisible:
 
 
 # ---------------------------------------------------------------------------
-# Run-gated color resolution
+# Color resolution (flat palette: pen == palette[color_index])
 # ---------------------------------------------------------------------------
 
-class TestRunGatedColor:
-    """The window resolves each event's pen at fill time.
+class TestColorResolution:
+    """The window resolves each event's pen from its flat palette at fill
+    time (``palette[color_index]``), so the renderer stays pure geometry."""
 
-    Within a run of the same ``color_index`` the pen toggles main/alt so
-    adjacent same-category bars stay distinguishable; a different
-    ``color_index`` resets to that category's main pen.
-    """
-
-    def test_alternates_main_alt_within_a_run(self):
-        # Bus case: a single distinct (main, alt) pair → A, B, A, B.
-        events = _iter_events(
-            ("A", 0, 100),
-            ("B", 100, 100),
-            ("C", 200, 100),
-            ("D", 300, 100),
-        )
-        ew = EventWindow(events, palette=_ALT)
-
-        visible = ew.get_visible(0, 500)
-
-        pens = [pen for _, pen in visible]
-        assert pens == [10, 20, 10, 20]
-
-    def test_first_event_uses_main_pen(self):
-        events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, palette=_ALT)
-
-        visible = ew.get_visible(0, 200)
-
-        assert visible[0][1] == 10  # main pen
-
-    def test_equal_pair_merges_run(self):
-        # Precip case: a (C, C) pair makes a same-category run read as one block.
-        events = _iter_events(
-            ("rain", 0, 100),
-            ("rain", 100, 100),
-            ("rain", 200, 100),
-        )
-        ew = EventWindow(events, palette=((10, 10),))
-
-        visible = ew.get_visible(0, 400)
-
-        pens = [pen for _, pen in visible]
-        assert pens == [10, 10, 10]
-
-    def test_category_change_resets_to_main(self):
-        # color_index 0,0,1,1 → main, alt, main(reset), alt.
+    def test_resolves_pen_from_palette_by_color_index(self):
+        # color_index 0,0,1,1 → palette[0], palette[0], palette[1], palette[1].
         events = _iter_events(
             ("a", 0, 100, 0),
             ("b", 100, 100, 0),
             ("c", 200, 100, 1),
             ("d", 300, 100, 1),
         )
-        ew = EventWindow(events, palette=((10, 20), (30, 40)))
+        ew = EventWindow(events, palette=[10, 30])
 
         visible = ew.get_visible(0, 500)
 
         pens = [pen for _, pen in visible]
-        assert pens == [10, 20, 30, 40]
+        assert pens == [10, 10, 30, 30]
 
-    def test_interleaved_categories_each_reset_to_main(self):
-        # color_index 0,1,0,1 — every event differs from its predecessor,
-        # so each resets to its category's main pen (interleave-safe).
+    def test_interleaved_categories_resolve_independently(self):
+        # color_index 0,1,0,1 — each maps to its own slot regardless of order.
         events = _iter_events(
             ("a", 0, 100, 0),
             ("b", 100, 100, 1),
             ("c", 200, 100, 0),
             ("d", 300, 100, 1),
         )
-        ew = EventWindow(events, palette=((10, 20), (30, 40)))
+        ew = EventWindow(events, palette=[10, 30])
 
         visible = ew.get_visible(0, 500)
 
@@ -186,26 +139,25 @@ class TestRunGatedColor:
 
     def test_out_of_range_color_index_clamps_to_last_entry(self):
         events = _iter_events(("x", 0, 100, 99),)
-        ew = EventWindow(events, palette=((10, 11), (20, 21), (30, 31)))
+        ew = EventWindow(events, palette=[10, 20, 30])
 
         visible = ew.get_visible(0, 200)
 
-        assert visible[0][1] == 30  # main pen of the last palette entry
+        assert visible[0][1] == 30  # last palette entry
 
-    def test_pen_resolution_persists_after_prune(self):
+    def test_pen_persists_after_prune(self):
         events = _iter_events(
             ("A", 0, 100),
             ("B", 100, 100),
             ("C", 200, 100),
         )
-        ew = EventWindow(events, palette=_ALT)
+        ew = EventWindow(events, palette=[10])
 
         ew.get_visible(0, 300)
-        # A=main(10), B=alt(20), C=main(10); prune A away.
-        visible = ew.get_visible(100, 300)
+        visible = ew.get_visible(100, 300)  # prune A away
 
         pens = [(e.name, pen) for e, pen in visible]
-        assert pens == [("B", 20), ("C", 10)]
+        assert pens == [("B", 10), ("C", 10)]
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +167,7 @@ class TestRunGatedColor:
 class TestIteratorExhaustion:
     def test_does_not_raise_on_exhausted_iterator(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         ew.get_visible(0, 200)
         visible = ew.get_visible(200, 400)
@@ -224,7 +176,7 @@ class TestIteratorExhaustion:
 
     def test_successive_calls_after_exhaustion(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -243,7 +195,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),     # ends at 100
             ("B", 100, 100),   # starts at 100
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(100, 300)
 
@@ -255,7 +207,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),
             ("B", 100, 100),
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         # Window [0, 100) — B starts at 100, should not appear
         visible = ew.get_visible(0, 100)
@@ -268,7 +220,7 @@ class TestBoundaryConditions:
             ("A", 100, 0),
             ("B", 100, 200),
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(50, 300)
 
@@ -278,7 +230,7 @@ class TestBoundaryConditions:
 
     def test_single_long_event_spanning_entire_window(self):
         events = _iter_events(("A", 0, 10000),)
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(1000, 2000)
 
@@ -290,7 +242,7 @@ class TestBoundaryConditions:
             ("A", 0, 50),       # 0..50
             ("B", 1000, 100),   # 1000..1100 — far beyond window
         )
-        ew = EventWindow(events, palette=((1, 2),))
+        ew = EventWindow(events, palette=[1])
 
         visible = ew.get_visible(100, 200)
 
@@ -303,7 +255,7 @@ class TestBoundaryConditions:
 
 class TestReplace:
     def test_clears_all_internal_state(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=[1])
         ew.get_visible(0, 300)
         # Buffer is now populated.
         assert ew._buffer
@@ -311,13 +263,11 @@ class TestReplace:
         ew.replace(_iter_events(("X", 0, 100)))
 
         assert ew._buffer == []
-        assert ew._use_alt is False
-        assert ew._prev_color_index == -1
         assert ew._next is None
         assert ew._exhausted is False
 
     def test_replace_after_exhaustion_refills_from_new_event_iter(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[1])
         # Drive past the only event so the iterator exhausts and latches.
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -333,7 +283,7 @@ class TestReplace:
     def test_replace_discards_stale_buffered_events(self):
         ew = EventWindow(
             _iter_events(("A", 0, 100), ("B", 100, 100), ("C", 200, 100)),
-            palette=((1, 2),),
+            palette=[1],
         )
         ew.get_visible(0, 300)
         assert [e.name for e, _ in ew._buffer] == ["A", "B", "C"]
@@ -345,7 +295,7 @@ class TestReplace:
         assert names == ["X", "Y"]
 
     def test_replace_with_empty_iter_yields_empty(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=[1])
         ew.get_visible(0, 300)
 
         ew.replace(iter([]))
@@ -353,24 +303,9 @@ class TestReplace:
 
         assert visible == []
 
-    def test_replace_restarts_color_alternation(self):
-        ew = EventWindow(
-            _iter_events(("A", 0, 100), ("B", 100, 100)),
-            palette=_ALT,
-        )
-        ew.get_visible(0, 300)
-        # Alternation has advanced (A=main, B=alt), so without a reset the
-        # next event would continue from alt.
-
-        ew.replace(_iter_events(("X", 0, 100), ("Y", 100, 100)))
-        visible = ew.get_visible(0, 300)
-
-        pens = [pen for _, pen in visible]
-        assert pens == [10, 20]  # restarts from the main pen
-
     def test_replace_clears_pending_peek_slot(self):
         # B starts beyond the window, so it is held in the peek slot.
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), palette=[1])
         ew.get_visible(0, 200)
         assert ew._next is not None  # B is peeked
 
@@ -386,22 +321,22 @@ class TestReplace:
 # ---------------------------------------------------------------------------
 
 class TestPalette:
-    def test_palette_pairs_stored(self):
-        ew = EventWindow(iter([]), palette=((10, 11), (12, 13)))
-        assert ew.palette == ((10, 11), (12, 13))
+    def test_palette_stored(self):
+        ew = EventWindow(iter([]), palette=[10, 12])
+        assert ew.palette == [10, 12]
 
     def test_palette_is_read_only(self):
-        ew = EventWindow(iter([]), palette=((10, 11),))
+        ew = EventWindow(iter([]), palette=[10, 11])
         with pytest.raises(AttributeError):
-            ew.palette = ((1, 2),)
+            ew.palette = [1, 2]
 
     def test_replace_preserves_palette(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=((10, 11), (12, 13)))
+        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[10, 12])
         ew.get_visible(0, 200)
 
         ew.replace(_iter_events(("B", 0, 100)))
 
-        assert ew.palette == ((10, 11), (12, 13))
+        assert ew.palette == [10, 12]
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +344,7 @@ class TestPalette:
 # ---------------------------------------------------------------------------
 
 class TestBuildEventWindows:
-    _PALETTE = ((10, 11), (20, 21), (30, 31))
+    _PALETTE = [10, 20, 30]
 
     def test_one_window_per_stream(self):
         streams = [
@@ -427,7 +362,7 @@ class TestBuildEventWindows:
 
         windows = build_event_windows(self._PALETTE, streams)
 
-        # The same immutable palette object is handed to every row.
+        # The same palette object is handed to every row.
         for w in windows:
             assert w.palette is self._PALETTE
 
@@ -451,7 +386,7 @@ class TestBuildEventWindows:
         windows = build_event_windows(self._PALETTE, [stream])
         visible = windows[0].get_visible(0, 200)
 
-        assert visible[0][1] == 30  # main pen of palette[2]
+        assert visible[0][1] == 30  # palette[2]
 
     def test_empty_stream_list_yields_no_windows(self):
         assert build_event_windows(self._PALETTE, []) == []
@@ -464,7 +399,7 @@ class TestBuildEventWindows:
 class TestOverlapFill:
     def test_later_event_overlapping_long_earlier_is_not_dropped(self):
         # A is long and ends past window_end; B starts inside the window.
-        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), palette=[1])
 
         visible = ew.get_visible(0, 500)
 
@@ -473,7 +408,7 @@ class TestOverlapFill:
     def test_multiple_events_overlapping_one_long_event(self):
         ew = EventWindow(
             _iter_events(("A", 0, 1000), ("B", 100, 50), ("C", 200, 50)),
-            palette=((1, 2),),
+            palette=[1],
         )
 
         visible = ew.get_visible(0, 500)
@@ -481,7 +416,7 @@ class TestOverlapFill:
         assert [e.name for e, _ in visible] == ["A", "B", "C"]
 
     def test_long_event_then_exhausts_finite_iterator(self):
-        ew = EventWindow(_iter_events(("A", 0, 10000)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 10000)), palette=[1])
 
         visible = ew.get_visible(1000, 2000)
 
@@ -515,10 +450,10 @@ class _FakeSource:
     def stat(self) -> int:
         return self.status
 
-    def _window(self, palette=((1, 2),)) -> EventWindow:
+    def _window(self, palette=None) -> EventWindow:
         return EventWindow(
             self.events_iter(),
-            palette=palette,
+            palette=palette if palette is not None else [1],
             events_fn=self.events_iter,
             generation_fn=self.gen,
             status_fn=self.stat,
@@ -527,13 +462,13 @@ class _FakeSource:
 
 class TestStatus:
     def test_status_none_without_status_fn(self):
-        ew = EventWindow(iter([]), palette=((1, 2),))
+        ew = EventWindow(iter([]), palette=[1])
 
         assert ew.status() is None
 
     def test_status_delegates_to_status_fn(self):
         box = {"v": FRESH}
-        ew = EventWindow(iter([]), palette=((1, 2),), status_fn=lambda: box["v"])
+        ew = EventWindow(iter([]), palette=[1], status_fn=lambda: box["v"])
 
         assert ew.status() == FRESH
         box["v"] = ERROR
@@ -564,28 +499,9 @@ class TestGenerationRefresh:
         # events_fn was not invoked again while generation stayed at 5.
         assert src.iter_calls == calls_after_first
 
-    def test_refresh_restarts_alternation_from_main(self):
-        # color_index-0 run alternates main(10)/alt(20); after a refresh the
-        # first bar must be main again, proving replace() reset the toggle.
-        src = _FakeSource([("A", 0, 100), ("B", 100, 100)], generation=0)
-        ew = EventWindow(
-            src.events_iter(),
-            palette=_ALT,
-            events_fn=src.events_iter,
-            generation_fn=src.gen,
-            status_fn=src.stat,
-        )
-
-        first = ew.get_visible(0, 1000)
-        assert [pen for _, pen in first] == [10, 20]
-
-        src.generation = 1
-        second = ew.get_visible(0, 1000)
-        assert [pen for _, pen in second] == [10, 20]
-
     def test_static_window_never_refreshes(self):
         # No generation_fn → the initial iterator is used forever.
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=((1, 2),))
+        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[1])
 
         assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
         assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
@@ -601,7 +517,7 @@ class TestBuildEventWindowsThreading:
             status_fn=src.stat,
         )
 
-        window = build_event_windows(((1, 2),), [stream])[0]
+        window = build_event_windows([1], [stream])[0]
 
         assert window.status() == STALE
         assert [e.name for e, _ in window.get_visible(0, 1000)] == ["A"]
@@ -609,5 +525,3 @@ class TestBuildEventWindowsThreading:
         src.specs = [("B", 0, 100)]
         src.generation = 1
         assert [e.name for e, _ in window.get_visible(0, 1000)] == ["B"]
-
-

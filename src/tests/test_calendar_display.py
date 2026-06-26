@@ -23,10 +23,10 @@ def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> E
     )
 
 
-def _make_stream(*specs, palette: tuple = ((1, 2),)) -> EventWindow:
+def _make_stream(*specs, palette=None) -> EventWindow:
     return EventWindow(
         iter([_make_event(*spec) for spec in specs]),
-        palette=palette,
+        palette=palette if palette is not None else [1],
     )
 
 
@@ -250,7 +250,7 @@ class TestRemainingTime:
 
         # Event: started 10 min ago, lasts 3 hours (end well beyond window)
         ev_duration = 3 * 3600
-        stream = _make_stream(("work", now - 600, ev_duration), palette=((10, 11),))
+        stream = _make_stream(("work", now - 600, ev_duration), palette=[10])
         stream.get_visible(window_start, window_end)  # prime the buffer
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -268,7 +268,7 @@ class TestRemainingTime:
         window_end = now + 5400
 
         # Event: started 10 min ago, lasts 30 min (ends within window)
-        stream = _make_stream(("short", now - 600, 1800), palette=((10, 11),))
+        stream = _make_stream(("short", now - 600, 1800), palette=[10])
         stream.get_visible(window_start, window_end)
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -287,7 +287,7 @@ class TestRemainingTime:
         # extending beyond — bar is wide but label fills it
         stream = _make_stream(
             ("AVERYLONGEVENTNAME", now + 4800, 7200),
-            palette=((10, 11),),
+            palette=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -309,36 +309,20 @@ class TestRemainingTime:
 
 class TestBarColors:
     """``draw_rows`` is pure geometry: it paints each bar with the pen the
-    window resolved at fill time (run-gated alternation is owned and
-    tested by ``EventWindow``).
+    window resolved at fill time (``palette[color_index]``).
 
     The palette pens are distinct from the renderer's ``empty_row`` pen
     (3), so filtering recorded rectangles to palette pens isolates the
     event bars from the per-row background fill.
     """
 
-    # Two (main, alt) categories.
-    _PALETTE = ((10, 20), (30, 40))
-    _PENS = (10, 20, 30, 40)
+    # Two categories — in-range palette slots (pen == slot under PEN_P4, so the
+    # bar pen also indexes LABEL_FOR_SLOT for the label colour).
+    _PALETTE = [10, 8]
+    _PENS = (10, 8)
 
     def _bar_pens(self, gfx: FakeGfx) -> list[int]:
         return [pen for (pen, *_rest) in gfx.rect_calls if pen in self._PENS]
-
-    def test_single_category_run_alternates_main_alt(self):
-        renderer, gfx = _make_renderer()
-        window_start, window_end = 0, 7200
-        stream = EventWindow(
-            iter([
-                _make_event("a", 0, 1800),       # main -> 10
-                _make_event("b", 1800, 1800),    # alt  -> 20
-            ]),
-            palette=self._PALETTE,
-        )
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end)
-
-        assert self._bar_pens(gfx) == [10, 20]
 
     def test_color_index_selects_category(self):
         renderer, gfx = _make_renderer()
@@ -346,7 +330,7 @@ class TestBarColors:
         stream = EventWindow(
             iter([
                 _make_event("p", 0, 1800, color_index=0),       # -> 10
-                _make_event("q", 1800, 1800, color_index=1),    # -> 30
+                _make_event("q", 1800, 1800, color_index=1),    # -> 8
             ]),
             palette=self._PALETTE,
         )
@@ -354,9 +338,9 @@ class TestBarColors:
 
         renderer.draw_rows([stream], window_start, window_end)
 
-        assert self._bar_pens(gfx) == [10, 30]
+        assert self._bar_pens(gfx) == [10, 8]
 
-    def test_equal_pair_merges_adjacent_bars(self):
+    def test_same_category_renders_one_colour(self):
         renderer, gfx = _make_renderer()
         window_start, window_end = 0, 7200
         stream = EventWindow(
@@ -364,7 +348,7 @@ class TestBarColors:
                 _make_event("r", 0, 1800),
                 _make_event("r", 1800, 1800),
             ]),
-            palette=((10, 10),),
+            palette=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -383,7 +367,51 @@ class TestBarColors:
 
         renderer.draw_rows([stream], window_start, window_end)
 
-        assert self._bar_pens(gfx) == [30]  # main pen of the last entry
+        assert self._bar_pens(gfx) == [8]  # last palette entry (clamped)
+
+
+# ---------------------------------------------------------------------------
+# Bar seams — every bar is bracketed by 1px empty-row separators
+# ---------------------------------------------------------------------------
+
+class TestBarSeams:
+    """draw_rows brackets every bar with 1px empty-row seams — at x0-1 and the
+    bar's last column x1-1 — so adjacent / overlapping bars never merge.  The
+    row-background fill is full-width, so the only 1px-wide empty-row rectangles
+    are seams.
+
+    Geometry: window 0..7200 over 240 px → 1 px per 30 s.
+    """
+
+    _EMPTY = 3  # empty_row pen in _make_renderer's Colors
+
+    def _seam_xs(self, gfx: FakeGfx) -> list[int]:
+        return sorted(x for (p, x, _y, w, _h) in gfx.rect_calls if p == self._EMPTY and w == 1)
+
+    def test_isolated_bar_seam_at_last_column(self):
+        renderer, gfx = _make_renderer()
+        # One event 0..1800 → x0=0, x1=60.  x0-1=-1 is off-screen (skipped),
+        # x1-1=59 is drawn.
+        stream = EventWindow(iter([_make_event("a", 0, 1800)]), palette=[10])
+        stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 0, 7200)
+
+        assert self._seam_xs(gfx) == [59]
+
+    def test_adjacent_bars_share_a_seam_at_the_boundary(self):
+        renderer, gfx = _make_renderer()
+        # a: 0..1800 (x0=0, x1=60); b: 1800..3600 (x0=60, x1=120).
+        stream = EventWindow(
+            iter([_make_event("a", 0, 1800, 0), _make_event("b", 1800, 1800, 1)]),
+            palette=[10, 11],
+        )
+        stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 0, 7200)
+
+        # a → seam 59 (x1-1); b → seam 59 (x0-1, coincides) + seam 119 (x1-1).
+        assert set(self._seam_xs(gfx)) == {59, 119}
 
 
 # ---------------------------------------------------------------------------
@@ -403,22 +431,22 @@ class TestBarTruncation:
     def test_overlapping_bar_clipped_to_next_start(self):
         renderer, gfx = _make_renderer()
         stream = EventWindow(
-            iter([_make_event("A", 0, 3600), _make_event("B", 1800, 1800)]),
-            palette=((10, 11),),
+            iter([_make_event("A", 0, 3600, 0), _make_event("B", 1800, 1800, 1)]),
+            palette=[10, 11],
         )
         stream.get_visible(0, 7200)
 
         renderer.draw_rows([stream], 0, 7200)
 
-        # A (main pen 10) clips to B's start: 1800 s → 60 px, not its full 3600 s.
+        # A (pen 10) clips to B's start: 1800 s → 60 px, not its full 3600 s.
         assert self._rects_for_pen(gfx, 10) == [(0, 60)]
         assert self._rects_for_pen(gfx, 11) == [(60, 60)]  # B: 1800..3600
 
     def test_contiguous_bars_not_truncated(self):
         renderer, gfx = _make_renderer()
         stream = EventWindow(
-            iter([_make_event("A", 0, 1800), _make_event("B", 1800, 1800)]),
-            palette=((10, 11),),
+            iter([_make_event("A", 0, 1800, 0), _make_event("B", 1800, 1800, 1)]),
+            palette=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -430,8 +458,8 @@ class TestBarTruncation:
     def test_exact_same_start_earlier_is_zero_width(self):
         renderer, gfx = _make_renderer()
         stream = EventWindow(
-            iter([_make_event("A", 1800, 1800), _make_event("B", 1800, 1800)]),
-            palette=((10, 11),),
+            iter([_make_event("A", 1800, 1800, 0), _make_event("B", 1800, 1800, 1)]),
+            palette=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -450,7 +478,7 @@ class TestBarTruncation:
                 _make_event("A", now - 600, 3 * 3600),
                 _make_event("B", now + 600, 1800),
             ]),
-            palette=((10, 11),),
+            palette=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -508,8 +536,8 @@ class TestStatusGlyph:
     square) on rows whose status is not FRESH/None, so a stale or broken
     network row never looks like a silently-empty one.
 
-    With palette ((1, 2),) the bar pens are 1/2 and the row background is
-    pen 3, so filtering rectangles by the now_line pen (4) isolates glyphs.
+    With palette ``[1]`` the bar pen is 1 and the row background is pen 3,
+    so filtering rectangles by the now_line pen (4) isolates glyphs.
     """
 
     _GLYPH_PEN = 4  # now_line in _make_renderer's Colors
@@ -521,7 +549,7 @@ class TestStatusGlyph:
     def _window(self, status, specs=()) -> EventWindow:
         return EventWindow(
             iter([_make_event(*s) for s in specs]),
-            palette=((1, 2),),
+            palette=[1],
             status_fn=(None if status is None else (lambda: status)),
         )
 

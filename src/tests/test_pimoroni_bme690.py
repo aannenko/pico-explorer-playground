@@ -85,6 +85,28 @@ def test_read_maps_unstable_status() -> None:
     assert heater == "Unstable"
 
 
+def test_gas_is_nan_while_heater_unstable() -> None:
+    # Gas resistance is meaningless during heater warm-up, so it must report NaN
+    # — a real value would enter RingHistory as a spurious history column.  The
+    # other metrics stay valid while warming.
+    FakeBreakoutBME69X.next_reading = (
+        20.0, 100_000.0, 50.0,
+        2_500.0,  # raw gas present in the driver tuple...
+        0,        # ...but heater unstable
+    )
+
+    reader = pimoroni_bme690.PimoroniBME690(
+        temp_offset=0.0,
+        hum_offset=0.0,
+        prsr_offset=0.0,
+    )
+
+    temp, _press, _hum, gas, heater = reader.read()
+    assert heater == "Unstable"
+    assert gas != gas, "gas must be NaN while the heater is unstable"
+    assert temp == 20.0, "non-gas metrics remain valid while warming"
+
+
 def test_init_starts_periodic_timer_at_configured_interval() -> None:
     FakeBreakoutBME69X.next_reading = (0.0, 0.0, 0.0, 0.0, 0)
 

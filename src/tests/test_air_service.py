@@ -274,7 +274,7 @@ def test_url_is_air_quality_with_species_and_timeout():
     h.schedule.run_all()
 
     url, timeout = h.get_calls[0]
-    assert url.startswith("http://air-quality-api.open-meteo.com")  # HTTP: avoids RP2040 TLS ENOMEM
+    assert url.startswith("http://air-quality-api.open-meteo.com")  # HTTP on purpose, not HTTPS
     assert "latitude=50.5" in url
     assert "past_hours=1" in url
     assert "hourly=european_aqi,grass_pollen,birch_pollen,alder_pollen,mugwort_pollen,ragweed_pollen" in url

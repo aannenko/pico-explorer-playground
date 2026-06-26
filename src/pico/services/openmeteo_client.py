@@ -3,9 +3,8 @@
 Builds the two endpoint URLs (forecast + air-quality), runs the fetch via an
 injected getter, and exposes the hourly-array helpers both consumers share.
 
-Plain HTTP (not HTTPS) on purpose: the data is public and keyless, and the
-RP2040's TLS handshake needs a large contiguous heap block that isn't reliably
-available after the framebuffer + WiFi stack (raises ENOMEM).
+Plain HTTP (not HTTPS) on purpose: the endpoints are public and keyless, and
+on-device HTTPS isn't available on this build.
 """
 
 import time
@@ -15,10 +14,8 @@ _AIR_QUALITY_URL = "http://air-quality-api.open-meteo.com/v1/air-quality"
 
 # ``hours`` (forecast_hours) and ``past_hours`` are supplied by the caller, not
 # hardcoded here: both are derived in app.py from the calendar windows + refresh
-# cadence (this module can't see either).  Keeping the span small matters on the
-# RP2040 — a larger response needs a bigger *contiguous* heap block to parse
-# (forecast_days=2 air-quality was ~2.5 KiB and raised ENOMEM); at ~1 past + ~4
-# forecast hours each body stays well under 1 KiB.
+# cadence (this module can't see either).  Keep the span small so each response
+# body stays under ~1 KiB — larger bodies fail to allocate on the device.
 
 
 def _build_url(

@@ -29,7 +29,7 @@ def test_fetch_forecast_builds_forecast_url_and_passes_timeout():
 
     assert result == {"hourly": {}}
     url, timeout = http.calls[0]
-    assert url.startswith("http://api.open-meteo.com/v1/forecast?")  # HTTP: avoids RP2040 TLS ENOMEM
+    assert url.startswith("http://api.open-meteo.com/v1/forecast?")  # HTTP on purpose, not HTTPS
     assert "latitude=50.5" in url
     assert "longitude=14.25" in url
     assert "hourly=precipitation" in url

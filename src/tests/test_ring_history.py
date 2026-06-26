@@ -197,6 +197,33 @@ def test_nan_value_is_stored_and_retrievable() -> None:
     assert math.isnan(v)
 
 
+def test_update_latest_overwrites_newest_without_advancing() -> None:
+    # Backfill path: replace the most-recent sample of one metric (e.g. gas
+    # committed as NaN while warming) without adding a column.
+    reader = _FakeReader((1.0, 2.0, 3.0, float("nan"), "Unstable"))
+    h = _make(reader)  # boot commit → newest gas is NaN
+    assert math.isnan(h.value_at(3, 0))
+    filled_before = h.filled(3)
+
+    h.update_latest(3, 99.0)
+
+    assert h.value_at(3, 0) == 99.0       # gas (metric 3) backfilled
+    assert h.value_at(0, 0) == 1.0        # other metrics untouched
+    assert h.filled(3) == filled_before   # no new sample added
+
+
+def test_update_latest_targets_the_most_recent_sample() -> None:
+    reader = _FakeReader((0.0, 0.0, 0.0, 10.0, "Stable"))
+    h = _make(reader, ticks_per_commit=1)  # boot commit: gas=10
+    reader.set((0.0, 0.0, 0.0, 20.0, "Stable"))
+    h._tick()  # second commit: gas=20 is now newest
+
+    h.update_latest(3, 99.0)
+
+    assert h.value_at(3, 0) == 99.0  # newest (the gas=20 slot) overwritten
+    assert h.value_at(3, 1) == 10.0  # the older sample is untouched
+
+
 def test_constructor_does_not_register_on_tick_scheduler() -> None:
     """RingHistory must NOT self-register; app.py is the single registration
     site.  Proof: the constructor takes no scheduler-shaped arg, so it can't."""

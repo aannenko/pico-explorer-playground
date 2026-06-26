@@ -76,14 +76,13 @@ class PimoroniBME690:
         # slice would allocate a throwaway tuple on every read (~5 s, runs even
         # when the Sensors view isn't active).
         reading = self._bme.read()
-        status = reading[4]
-        heater = "Stable" if status & STATUS_HEATER_STABLE else "Unstable"
+        heater_stable = reading[4] & STATUS_HEATER_STABLE
         self._last_reading = (
             reading[0] + self._temp_offset,
             reading[1] / 100 + self._prsr_offset,
             reading[2] + self._hum_offset,
-            reading[3] / 1000,
-            heater,
+            reading[3] / 1000 if heater_stable else float("nan"),
+            "Stable" if heater_stable else "Unstable",
         )
 
     def _do_read_scheduled(self, _: int) -> None:

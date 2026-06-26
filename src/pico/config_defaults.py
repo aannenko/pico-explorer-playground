@@ -65,8 +65,8 @@ BME690_PRSR_OFFSET = 45.0
 # the icon-swap band classification (4 bands per row: blue/green/yellow/red
 # style).  The outer two edges (``cap_min`` / ``cap_max``) bound the
 # 24-hour history graph: a value at ``cap_max`` plots at the top of the row,
-# ``cap_min`` at the bottom; values outside the range render as a pastel
-# column only (no bright value pixel).
+# ``cap_min`` at the bottom; values outside the range render as a fill
+# column only (no marker value pixel).
 SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm / hot
 SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: bracketing the 1013.25 hPa standard atmosphere
 SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid

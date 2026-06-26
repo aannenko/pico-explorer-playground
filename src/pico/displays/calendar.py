@@ -5,6 +5,7 @@ from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
+from displays.palette import LABEL_FOR_SLOT
 from displays.shared.header import format_header_time
 from scheduling.event_window import EventWindow
 from scheduling.stream import FRESH
@@ -182,6 +183,15 @@ class Renderer:
                 gfx.set_pen(pen)
                 gfx.rectangle(x0, row_top, x1 - x0, bar_h)
 
+                # Bracket every bar with 1px empty-row seams — at the column just
+                # before it (x0-1) and at its own last column (x1-1) — so
+                # adjacent or overlapping bars, same colour or not, always show a
+                # clean boundary.
+                gfx.set_pen(self._colors.empty_row)
+                if x0 - 1 >= 0:
+                    gfx.rectangle(x0 - 1, row_top, 1, bar_h)
+                gfx.rectangle(x1 - 1, row_top, 1, bar_h)
+
                 bar_px = x1 - x0
                 text_y = row_top + (bar_h - geom.bar_text_height) // 2 + 2
                 label_right = x0
@@ -205,7 +215,7 @@ class Renderer:
                         text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
 
                     if text_w <= usable_px:
-                        gfx.set_pen(self._colors.background)
+                        gfx.set_pen(LABEL_FOR_SLOT[pen])
                         gfx.text(label, x0 + _BAR_TEXT_MARGIN, text_y, scale=geom.bar_text_scale)
                         label_right = x0 + _BAR_TEXT_MARGIN + text_w
 
@@ -217,7 +227,7 @@ class Renderer:
                         rem_w = gfx.measure_text(rem_text, scale=geom.bar_text_scale)
                         rem_x = x1 - rem_w - _BAR_TEXT_MARGIN
                         if rem_x > label_right + 1:
-                            gfx.set_pen(self._colors.background)
+                            gfx.set_pen(LABEL_FOR_SLOT[pen])
                             gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
 
             # Right-edge glyph when this row's data isn't fresh (network rows
