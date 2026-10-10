@@ -23,30 +23,6 @@ TEXT_SCALE = const(3)
 WIFI_SSID = "YourSSID"
 WIFI_PASSWORD = "YourPassword"
 
-# Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
-HTTP_TIMEOUT_S = const(3)
-
-# Weather forecast (Open-Meteo).  Leave LATITUDE/LONGITUDE at 0.0/0.0 to keep
-# the weather row disabled (no fetch; a "CFG?" glyph marks it) — set your
-# coordinates in config.py to enable.  The weather row mixes precipitation and
-# UV (they rarely coincide).  PRECIP_PROB_THRESHOLD gates which hours show a
-# precip bar (skip hours below this % probability); UV_THRESHOLDS is the UV
-# ``(warning, severe)`` pair on the WHO scale.
-LATITUDE = 0.0
-LONGITUDE = 0.0
-PRECIP_PROB_THRESHOLD = const(30)
-UV_THRESHOLDS = (6, 8)
-
-# Outdoor air quality (Open-Meteo air-quality).  Shares LATITUDE/LONGITUDE
-# above (0.0/0.0 keeps the row disabled).  Each threshold tuple is
-# ``(warning, severe)``: at/above the first edge shows an amber bar, at/above
-# the second a red one.  AQI uses the European AQI scale, pollen grains/m³ (one
-# shared pair across all species).  POLLEN_SPECIES is variadic — add/remove
-# Open-Meteo ``*_pollen`` names freely.
-AQI_THRESHOLDS = (60, 80)
-POLLEN_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
-POLLEN_THRESHOLDS = (50, 100)
-
 TIME_ZONE_OFFSET = const(1)  # Prague winter time (UTC+1)
 
 # Daylight Saving Time rules: (month, week, weekday, hour)
@@ -55,27 +31,49 @@ DST_START = (3, -1, 6, 2)   # Last Sunday of March at 02:00 (standard time)
 DST_END = (10, -1, 6, 3)    # Last Sunday of October at 03:00 (DST time)
 DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
 
+# Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
+HTTP_TIMEOUT_S = const(3)
+
 SENSOR_READ_DELAY_MS = const(5_000)
 BME690_TEMP_OFFSET = -2.1
 BME690_HUM_OFFSET = 8.0
 BME690_PRSR_OFFSET = 45.0
 
-# Sensors-view band thresholds.  Each tuple holds 5 strictly ascending
-# edges: ``(cap_min, t1, t2, t3, cap_max)``.  The inner three edges drive
+# Sensors.  Each tuple holds 5 strictly ascending edges:
+# ``(cap_min, t1, t2, t3, cap_max)``.  The inner three edges drive
 # the icon-swap band classification (4 bands per row: blue/green/yellow/red
 # style).  The outer two edges (``cap_min`` / ``cap_max``) bound the
 # 24-hour history graph: a value at ``cap_max`` plots at the top of the row,
 # ``cap_min`` at the bottom; values outside the range render as a fill
 # column only (no marker value pixel).
 SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm / hot
-SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: bracketing the 1013.25 hPa standard atmosphere
+SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: low -> high
 SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid
 SENSOR_GAS_BANDS = (50, 100, 180, 280, 400)           # kΩ: polluted -> clean
 
-# Waste collection schedule.  Each entry:
+# Calendar: Weather forecast + UV row (Open-Meteo).
+# The weather row mixes precipitation and UV (they rarely coincide).
+# LATITUDE/LONGITUDE 0.0/0.0 disables fetching and showing weather and AQI.
+# Precipitation is shown if probability >= PRECIP_PROB_THRESHOLD.
+# UV_THRESHOLDS according to WHO UV index ``(warning, severe)``.
+LATITUDE = 0.0
+LONGITUDE = 0.0
+PRECIP_PROB_THRESHOLD = const(30)
+UV_THRESHOLDS = (6, 8)
+
+# Calendar: air quality (Euro AQI scale) + pollen grains/m³ row (Open-Meteo).
+# Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps the row disabled).
+# Each threshold tuple is ``(warning, severe)``: at/above the first edge
+# shows an amber bar, at/above the second a red one.
+# POLLEN_SPECIES is variadic — add/remove Open-Meteo ``*_pollen`` names.
+AQI_THRESHOLDS = (60, 80)
+POLLEN_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
+POLLEN_THRESHOLDS = (50, 100)
+
+# Calendar: waste collection schedule.  Each entry:
 #   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
 # label is shown on the bar; color_index picks the bar color, 0-based:
-#   0=amber 1=sky 2=yellow 3=pink 4=teal 5=red-brown 6=gray
+#   0=amber 1=sky 2=yellow 3=pink 4=sky 5=brown 6=gray
 # period_weeks: 1=weekly, 2=biweekly.  Set to [] to disable the row.
 WASTE_SCHEDULE = [
     ("BIO",   5, (2026, 6,  4), 8, 0, 120, 2),
