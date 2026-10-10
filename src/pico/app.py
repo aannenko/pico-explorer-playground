@@ -142,19 +142,17 @@ def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
 
 
 def _build_sensors_display(
-    pico_graphics,
     bme690_reader,
     time_service: TimeService,
-    geometry: "sensors.Geometry",
+    geometry: sensors.Geometry,
     history: RingHistory,
 ):
-    """Construct the sensors Display from pre-built parts.
+    """Wire the sensors Display from pre-built parts.
 
     Geometry and history are built earlier in ``build_app`` so sensor capture
-    can start before the blocking network sync.  This helper just wires the
-    Display object once ``time_service`` (which needs NTP) is available.  The
-    per-band ``(fill, marker)`` pens are derived inside the Display from its
-    ``ROWS`` table (single source for band icon + fill).
+    can start before the blocking network sync; this runs once ``time_service``
+    (which needs NTP) is available.  Per-band ``(fill, marker)`` pens are derived
+    inside the Display from its ``ROWS`` table (single source for icon + fill).
     """
     return sensors.Display(
         renderer=sensors.Renderer(
@@ -329,7 +327,6 @@ def build_app(pico_graphics, schedule_fn) -> App:
     )
 
     sensors_display = _build_sensors_display(
-        pico_graphics,
         bme690_reader,
         time_service,
         sensors_geometry,

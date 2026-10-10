@@ -20,14 +20,13 @@ from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
 
 
-_HISTORY_SECONDS = const(24 * 3600)   # 24 h of history per metric
-_L_GAP = const(3)                     # px between value text and graph
-_R_MARGIN = const(0)                  # px between graph right edge and screen edge
-# Widest realistic value the formatter can emit: a sub-zero outdoor
-# temperature with one decimal, e.g. "-88.8" (5 cells, 69 px at bitmap8
-# scale 3).  Sized so every realistic reading fits without overdrawing
-# the graph: e.g. "-12.3" (temp), "100.0" (humidity), "250.7" (gas).
-_GRAPH_VALUE_SAMPLE = "-88.8"
+_HISTORY_MS = const(24 * 3600 * 1000)  # 24 h of history per metric
+_L_GAP = const(3)  # px between value text and graph
+_R_MARGIN = const(0)  # px between graph right edge and screen edge
+# 63 px at bitmap8 scale 3 — the budget every value string must fit.  "-99.9"
+# is the widest _fit_chars can actually emit and also measures 63; integer
+# forms clamp to "9999" (57) / "-999" (54).
+_WIDEST_GRAPH_VALUE = "-88.8"
 
 
 def _largest_divisor_of(n: int, max_val: int) -> int:
@@ -87,7 +86,6 @@ class Geometry:
 
         self.values_top_y = self.text_height + self.line_spacing
 
-        # Precomputed y positions; 6 lines is more than enough for now.
         self.line_y = (
             self.values_top_y,
             self.values_top_y * 2,
@@ -120,7 +118,7 @@ class Geometry:
         # 4-character value at the current font/scale.  No hardcoded value
         # column width.
         value_max_text_width = pico_graphics.measure_text(
-            _GRAPH_VALUE_SAMPLE, scale=text_scale
+            _WIDEST_GRAPH_VALUE, scale=text_scale
         )
         self.graph_x = self.value_x + value_max_text_width + _L_GAP
         available = self.width - self.graph_x - _R_MARGIN
@@ -129,7 +127,7 @@ class Geometry:
                 "sensors geometry: no room for graph (font/scale too large)"
             )
         # 24 h of scheduler ticks; for 500 ms ticks → 172800.
-        total_ticks = _HISTORY_SECONDS * 1000 // tick_period_ms
+        total_ticks = _HISTORY_MS // tick_period_ms
         self.graph_width = _largest_divisor_of(total_ticks, available)
         self.ticks_per_commit = total_ticks // self.graph_width
         self.graph_height = self.text_height  # 24 px, matches row height
@@ -443,7 +441,7 @@ class Display(_Display):
         ``(-100, 100)``; otherwise drop to the integer form.  Integer
         outputs are clamped to ``"9999"`` / ``"-999"`` to guarantee the
         rendered width never exceeds the 63 px budget set by
-        ``_GRAPH_VALUE_SAMPLE = "-88.8"`` (``PicoGraphics.text()`` doesn't
+        ``_WIDEST_GRAPH_VALUE = "-88.8"`` (``PicoGraphics.text()`` doesn't
         clip, so an overflow would overdraw the history graph).
 
         Realistic readings (BME690 in the project's typical setup) all fit:

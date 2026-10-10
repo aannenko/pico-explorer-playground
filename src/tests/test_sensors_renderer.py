@@ -30,7 +30,7 @@ class FakeGeometry:
     value_x: int = 66
     # New layout fields (R2.6 / R2.7).  Defaults mirror the real Geometry
     # against the device-observed bitmap8/scale=3 measurements: with
-    # ``_GRAPH_VALUE_SAMPLE = "-88.8"`` measuring 63 px, L_GAP=3 and
+    # ``_WIDEST_GRAPH_VALUE = "-88.8"`` measuring 63 px, L_GAP=3 and
     # R_MARGIN=0 → graph_x=132, available=108, graph_width=108,
     # value_clear_width=66, ticks_per_commit=1600.
     value_clear_width: int = 66
@@ -290,7 +290,7 @@ def test_draw_graph_column_out_of_range_is_noop() -> None:
 def test_real_geometry_layout_invariants() -> None:
     """Construct the real ``Geometry`` against ``FakePicoGraphics`` and assert
     derived layout invariants hold without hardcoding magic numbers."""
-    from displays.sensors import Geometry, _HISTORY_SECONDS, _R_MARGIN
+    from displays.sensors import Geometry, _HISTORY_MS, _R_MARGIN
 
     gfx = FakePicoGraphics()
     geom = Geometry(
@@ -304,7 +304,7 @@ def test_real_geometry_layout_invariants() -> None:
     # Graph must fit on screen.
     assert geom.graph_x + geom.graph_width + _R_MARGIN <= geom.width
     # ticks_per_commit × graph_width covers exactly 24 h of ticks.
-    total_ticks = _HISTORY_SECONDS * 1000 // 500
+    total_ticks = _HISTORY_MS // 500
     assert geom.ticks_per_commit * geom.graph_width == total_ticks
     # value_clear_width covers value text + L-gap (stops just before graph_x).
     assert geom.value_clear_width == geom.graph_x - geom.value_x

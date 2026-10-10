@@ -3,8 +3,7 @@
 Builds the two endpoint URLs (forecast + air-quality), runs the fetch via an
 injected getter, and exposes the hourly-array helpers both consumers share.
 
-Plain HTTP (not HTTPS) on purpose: the endpoints are public and keyless, and
-on-device HTTPS isn't available on this build.
+HTTP (not HTTPS) on purpose: no TLS handshake, no contiguous-heap allocation.
 """
 
 import time

@@ -90,10 +90,7 @@ class EventWindow:
         self._exhausted = False
 
     def _resolve_pen(self, color_index: int) -> int:
-        """Pick the pen slot for ``color_index``.
-
-        Out-of-range indices clamp to the last palette entry.
-        """
+        """Map ``color_index`` to a pen slot, clamping out-of-range to the last."""
         idx = color_index
         if idx >= len(self._palette):
             idx = len(self._palette) - 1
@@ -101,8 +98,8 @@ class EventWindow:
 
     def _refresh_if_changed(self) -> None:
         # Pull a fresh snapshot when the source's generation has advanced.
-        # replace() resets the buffer/alternation/exhaustion latch so the
-        # next fill repopulates from the new iterator.
+        # replace() resets the buffer/exhaustion latch so the next fill
+        # repopulates from the new iterator.
         if self._generation_fn is None or self._events_fn is None:
             return
         gen = self._generation_fn()
@@ -117,7 +114,6 @@ class EventWindow:
             return
 
         while True:
-            # Get next event from peek slot or iterator
             if self._next is not None:
                 event, pen = self._next
                 self._next = None

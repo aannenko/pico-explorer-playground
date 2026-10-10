@@ -237,7 +237,7 @@ def test_fit_chars_helper_boundary_cases() -> None:
     assert fn(1234.7, 1) == "1235"
 
     # Clamp: integer outputs are bounded so the rendered width can't exceed
-    # the 63 px budget set by ``_GRAPH_VALUE_SAMPLE = "-88.8"``.
+    # the 63 px budget set by ``_WIDEST_GRAPH_VALUE = "-88.8"``.
     assert fn(9999.0, 0) == "9999"
     assert fn(10000.0, 0) == "9999"
     assert fn(99999.0, 1) == "9999"
