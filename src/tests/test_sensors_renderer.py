@@ -21,7 +21,6 @@ class FakeGeometry:
     line_y: tuple[int, ...] = (32, 64, 96, 128, 160, 192)
     icon_x: int = 0
     icon_scale: int = 2
-    icon_cells: int = 2
     icon_size_px: int = 32
     icon_y_offset: int = 6
     unit_x: int = 36
@@ -290,7 +289,7 @@ def test_draw_graph_column_out_of_range_is_noop() -> None:
 def test_real_geometry_layout_invariants() -> None:
     """Construct the real ``Geometry`` against ``FakePicoGraphics`` and assert
     derived layout invariants hold without hardcoding magic numbers."""
-    from displays.sensors import Geometry, _HISTORY_MS, _R_MARGIN
+    from displays.sensors import Geometry, _HISTORY_MS, _R_MARGIN, left_column_native_px
 
     gfx = FakePicoGraphics()
     geom = Geometry(
@@ -313,12 +312,37 @@ def test_real_geometry_layout_invariants() -> None:
     assert geom.graph_width >= 1
     # graph_height matches the row height.
     assert geom.graph_height == geom.text_height
+    # icon/unit footprints derive from the widest blob the rows actually draw,
+    # scaled — no dimension is hardcoded in Geometry.
+    icon_px, unit_px = left_column_native_px()
+    assert geom.icon_size_px == icon_px * geom.icon_scale
+    assert geom.unit_size_px == unit_px * geom.unit_scale
     # With the device-observed measure_text("-88.8",3)=63, derivation lands
     # on a 108-column graph (largest divisor of 172800 ≤ 108 available).
     # Would shift to a different divisor if the font/scale or value sample
     # changed — sanity check, not a hardcode.
     assert geom.graph_width == 108
     assert geom.ticks_per_commit == 1600
+
+
+def test_left_column_native_px_tracks_widest_blob(monkeypatch) -> None:
+    """The left-column footprint must follow the art in ``Display.ROWS`` — a
+    row swapped to larger icons widens the column with no constant to edit.
+
+    Fixture blobs are deliberately non-square: the real art is all 16x16 / 8x8,
+    so a width/height mix-up in the helper would otherwise go undetected.
+    """
+    from displays import sensors
+
+    wide_icon = (24, 16, b"")
+    wide_unit = (12, 8, b"")
+    rows = (
+        ((8, 8, b""), (((16, 16, b""), 1), (wide_icon, 2))),
+        (wide_unit, (((16, 16, b""), 3),)),
+    )
+    monkeypatch.setattr(sensors.Display, "ROWS", rows)
+
+    assert sensors.left_column_native_px() == (wide_icon[0], wide_unit[0])
 
 
 def test_real_geometry_raises_when_font_too_large() -> None:

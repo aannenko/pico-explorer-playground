@@ -23,6 +23,7 @@ from services.pimoroni_bme690 import PimoroniBME690
 _HISTORY_MS = const(24 * 3600 * 1000)  # 24 h of history per metric
 _L_GAP = const(3)  # px between value text and graph
 _R_MARGIN = const(0)  # px between graph right edge and screen edge
+_ICON_SCALE = const(2)  # band icons blit at 2x their native px
 # 63 px at bitmap8 scale 3 — the budget every value string must fit.  "-99.9"
 # is the widest _fit_chars can actually emit and also measures 63; integer
 # forms clamp to "9999" (57) / "-999" (54).
@@ -98,21 +99,23 @@ class Geometry:
         self.header_rect = (0, 0, self.width, self.text_height)
         self.value_rect_height = self.text_height
 
-        # Left-column layout: 32px icon (2x2 cells @scale=2) + 24px unit
-        # (1 cell @text scale, inline with the glyph row).
-        self.icon_scale = 2
-        self.icon_cells = 2
-        self.icon_size_px = 8 * self.icon_cells * self.icon_scale  # 32
-        # Center vertically on the text row, then nudge up 2px for
-        # optical balance against the glyph x-height.
-        self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + 2  # 6
+        # Left-column footprints come from the blobs the rows actually draw
+        # (every icon is self-describing ``(w, h, blob)``), so swapping in
+        # larger art widens the column with no constant to hand-edit.
+        icon_px, unit_px = left_column_native_px()
+
+        self.icon_scale = _ICON_SCALE
+        self.icon_size_px = icon_px * _ICON_SCALE
+        # Centre the icon on the text row, then lift it 2 px: bitmap8 glyph ink
+        # sits high in its cell, so a box-centred icon reads low against digits.
+        self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + 2
 
         self.unit_scale = text_scale
-        self.unit_size_px = 8 * self.unit_scale  # 24
+        self.unit_size_px = unit_px * self.unit_scale
 
         self.icon_x = 0
-        self.unit_x = self.icon_x + self.icon_size_px + 4   # 36
-        self.value_x = self.unit_x + self.unit_size_px + 6  # 66
+        self.unit_x = self.icon_x + self.icon_size_px + 4
+        self.value_x = self.unit_x + self.unit_size_px + 6
 
         # Graph layout — fully derived from the actual rendered width of a
         # 4-character value at the current font/scale.  No hardcoded value
@@ -163,12 +166,10 @@ class Renderer:
         icon: tuple,
         unit: tuple,
     ) -> None:
-        """Paint icon (16x16) + unit label (8x8) in the left column.
-
-        Called once per row on view entry; icons/units are static afterwards.
-        Delegates to the ``icons_p4`` blitter, which skips slot-0 (BLACK)
-        pixels so the icon background never leaves a halo on the black view.
-        ``icon`` / ``unit`` are ``(w, h, blob)`` tuples from ``_icons_data``.
+        """Paint the row's icon + unit glyph in the left column (static after
+        view entry).  The ``icons_p4`` blitter skips slot-0 (BLACK) pixels so
+        the icon never leaves a halo on the black view.  ``icon`` / ``unit``
+        are ``(w, h, blob)`` tuples from ``_icons_data``.
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
@@ -627,3 +628,23 @@ def build_sensor_band_pens():
         tuple((fill, LABEL_FOR_SLOT[fill]) for _icon, fill in cells)
         for _unit, cells in Display.ROWS
     )
+
+
+def left_column_native_px() -> tuple[int, int]:
+    """Return the ``(icon, unit)`` native pixel WIDTHS the left column must fit.
+
+    Widest blob wins per column: each entry in ``Display.ROWS`` is a
+    self-describing ``(w, h, blob)`` tuple, so the layout tracks the art
+    instead of a hardcoded (or generated) size constant.  Called once at
+    boot from ``Geometry``, which reuses the icon width as the vertical
+    footprint too — so band icons must stay square.
+    """
+    icon_px = 0
+    unit_px = 0
+    for unit, cells in Display.ROWS:
+        if unit[0] > unit_px:
+            unit_px = unit[0]
+        for icon, _fill in cells:
+            if icon[0] > icon_px:
+                icon_px = icon[0]
+    return icon_px, unit_px
