@@ -24,6 +24,17 @@ def _iter_events(*specs):
     return iter(_make_events(*specs))
 
 
+class _BudgetBuffer(list):
+    def __init__(self, capacity):
+        super().__init__()
+        self.capacity = capacity
+
+    def append(self, item):
+        if len(self) >= self.capacity:
+            raise MemoryError("event retention exceeded the window budget")
+        super().append(item)
+
+
 # ---------------------------------------------------------------------------
 # Buffer fill / prune
 # ---------------------------------------------------------------------------
@@ -97,6 +108,43 @@ class TestGetVisible:
         visible = ew.get_visible(200, 400)
 
         assert visible == []
+
+    @pytest.mark.parametrize("prime", [False, True])
+    def test_long_absence_only_retains_window_events(self, prime):
+        later = 30 * 24 * 3600
+        events = (
+            _make_event("A", start, 900)
+            for start in range(0, later + 9000, 900)
+        )
+        ew = EventWindow(events, palette=[1])
+        buffer = _BudgetBuffer(capacity=8)
+        ew._buffer = buffer
+        if prime:
+            ew.get_visible(0, 7200)
+
+        visible = ew.get_visible(later, later + 7200)
+
+        assert visible is buffer
+        assert [event.start_timestamp for event, _ in visible] == list(
+            range(later, later + 7200, 900)
+        )
+        assert ew._next[0].start_timestamp == later + 7200
+
+    def test_long_event_does_not_pin_expired_overlapping_history(self):
+        later = 30 * 24 * 3600
+
+        def events():
+            yield _make_event("long", 0, later + 10000)
+            for start in range(900, later, 900):
+                yield _make_event("interruption", start, 60)
+            yield _make_event("current", later, 900)
+
+        ew = EventWindow(events(), palette=[1])
+        ew._buffer = _BudgetBuffer(capacity=2)
+
+        visible = ew.get_visible(later, later + 7200)
+
+        assert [event.name for event, _ in visible] == ["current"]
 
 
 # ---------------------------------------------------------------------------

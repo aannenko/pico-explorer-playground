@@ -23,8 +23,8 @@ def build_event_windows(palette, streams):  # palette: list[int]; streams: Itera
 class EventWindow:
     """Per-row calendar view-model: a sliding buffer that also colors its bars.
 
-    Each ``get_visible`` fills the buffer forward and prunes events that
-    ended before the window start.  The pen is resolved at fill time so
+    Each ``get_visible`` prunes before and during forward fill so obsolete
+    history never accumulates in the buffer.  The pen is resolved at fill time so
     ``get_visible`` returns ``(Event, pen)`` and the renderer stays pure
     geometry.  ``palette`` is a list of pen slots indexed by ``color_index``.
     """
@@ -56,8 +56,9 @@ class EventWindow:
         window_start: int,
         window_end: int,
     ) -> list[tuple[Event, int]]:
-        """Return ``[(Event, pen), ...]`` overlapping ``[window_start, window_end)``.
+        """Return buffered ``(Event, pen)`` pairs for ``[window_start, window_end)``.
 
+        Events wholly before the window after next-start clipping are pruned.
         The pen is resolved from the window's ``palette`` at fill time, so
         the renderer only has to ``set_pen`` and draw geometry.
 
@@ -66,8 +67,8 @@ class EventWindow:
         avoids per-frame list allocations on the calendar's hot path.
         """
         self._refresh_if_changed()
-        self._fill_to(window_end)
         self._prune_before(window_start)
+        self._fill_to(window_start, window_end)
         return self._buffer
 
     def status(self) -> int | None:
@@ -107,9 +108,9 @@ class EventWindow:
             self._generation = gen
             self.replace(self._events_fn())
 
-    def _fill_to(self, window_end: int) -> None:
-        # Relies on events arriving in nondecreasing start order: the fill
-        # stops at the first event starting at/after window_end.
+    def _fill_to(self, window_start: int, window_end: int) -> None:
+        # Fill and clipping-aware pruning require nondecreasing start order.
+        # Stop at the first event starting at/after window_end.
         if self._exhausted:
             return
 
@@ -131,11 +132,17 @@ class EventWindow:
                 break
 
             self._buffer.append((event, pen))
+            self._prune_before(window_start)
 
     def _prune_before(self, window_start: int) -> None:
         buf = self._buffer
         while buf:
             event = buf[0][0]
-            if event.start_timestamp + event.wall_clock_duration_sec > window_start:
+            end = event.start_timestamp + event.wall_clock_duration_sec
+            # Match the renderer's next-start clipping: an interrupted long
+            # event must not pin expired successors or reappear without them.
+            if len(buf) > 1:
+                end = min(end, buf[1][0].start_timestamp)
+            if end > window_start:
                 break
             buf.pop(0)

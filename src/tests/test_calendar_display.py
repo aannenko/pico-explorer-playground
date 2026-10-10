@@ -482,6 +482,29 @@ class TestBarTruncation:
         assert self._rects_for_pen(gfx, 10) == [(0, 60)]
         assert self._rects_for_pen(gfx, 11) == [(60, 60)]  # B: 1800..3600
 
+    @pytest.mark.parametrize("prime", [False, True])
+    @pytest.mark.parametrize("interruption_duration", [0, 60])
+    def test_pruned_interruption_does_not_resurrect_long_bar(
+        self, prime, interruption_duration
+    ):
+        renderer, gfx = _make_renderer()
+        stream = EventWindow(
+            iter([
+                _make_event("long", 0, 20000, 0),
+                _make_event("interruption", 900, interruption_duration, 1),
+                _make_event("current", 2700, 900, 2),
+            ]),
+            palette=[10, 11, 8],
+        )
+        if prime:
+            stream.get_visible(0, 7200)
+
+        renderer.draw_rows([stream], 1800, 9000)
+
+        assert self._rects_for_pen(gfx, 10) == []
+        assert self._rects_for_pen(gfx, 11) == []
+        assert self._rects_for_pen(gfx, 8) == [(30, 30)]
+
     def test_contiguous_bars_not_truncated(self):
         renderer, gfx = _make_renderer()
         stream = EventWindow(
