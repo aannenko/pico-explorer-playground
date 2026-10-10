@@ -97,6 +97,7 @@ graph TD
 - Host pytest: `cd src && python -m pytest -q` (no MicroPython runtime needed).
 - `src/tests/conftest.py` shims MP-only modules (e.g. `micropython`, `machine`, `picographics`, `pimoroni`, `pimoroni_i2c`, `breakout_bme69x`, `ntptime`, `network`, `urequests`), the `const` builtin, and MP `time` funcs (`ticks_ms` / `ticks_diff` / `ticks_add` / `sleep_ms`, plus `mktime` / `gmtime` in UTC).
 - Services / displays are tested via direct method calls with injected fakes (`schedule`, `timer_factory`, `pwm_factory`, `pin_factory`, `get_time`) — no real timer / schedule mocking.
+- Use `_fakes.bitmap8_width(text, scale)` to measure text width in tests.
 - `app.py` composition has no host-test coverage (importing it needs `config` + machine shims), so verify wiring changes there manually and ask the user to also verify on-device.
 
 ## Coding conventions

@@ -7,6 +7,7 @@ from scheduling.event import Event
 from scheduling.event_window import EventWindow
 from scheduling.stream import DISABLED, ERROR, STALE
 
+from _fakes import bitmap8_width
 from conftest import RecordingRenderer
 
 
@@ -210,7 +211,7 @@ class FakeGfx:
         self.line_calls.append((x1, y1, x2, y2))
 
     def measure_text(self, text: str, *, scale: int) -> int:
-        return len(text) * 6 * scale
+        return bitmap8_width(text, scale)
 
     def text(self, text: str, x: int, y: int, *, scale: int) -> None:
         self.text_calls.append((text, x, y, scale))
@@ -224,11 +225,11 @@ def _make_renderer(gfx: FakeGfx | None = None) -> tuple[calendar.Renderer, FakeG
         gfx = FakeGfx()
     geom = calendar.Geometry(
         pico_graphics=gfx,
-        header_font="bitmap6",
-        header_font_height=6,
+        header_font="bitmap8",
+        header_font_height=8,
         header_text_scale=3,
-        bar_font="bitmap6",
-        bar_font_height=6,
+        bar_font="bitmap8",
+        bar_font_height=8,
         bar_text_scale=2,
     )
     colors = calendar.Colors(
@@ -587,4 +588,3 @@ class TestStatusGlyph:
         renderer.draw_rows([ew], 0, 7200)
 
         assert len(self._glyphs(gfx)) == 1
-

@@ -12,15 +12,47 @@ works from any test file regardless of how pytest was invoked.
 from __future__ import annotations
 
 
+# bitmap8 advance widths for printable ASCII, index = ``ord(c) - 32``.  Read off
+# the device with ``measure_text(chr(c), scale=1)``, which returns a single
+# glyph's raw width because the inter-glyph spacing term vanishes at n=1.
+# The font is proportional, not monospaced: 'I'/'l'/'1' are 3 px, 'M'/'W'/'m'/'w'
+# are 5, ':' is 1.
+_BITMAP8_WIDTHS = (
+    "31354441333323244344444444123334444444444344454444445445"
+    "444242334444444443443544444444454443134"
+)
+
+
+def bitmap8_width(text: str, scale: int) -> int:
+    """Firmware-accurate ``measure_text`` for the bitmap8 font.
+
+    PicoGraphics measures ``scale * (sum(glyph_widths) + len(text) - 1)``.
+    Shared by every host fake so layout assertions agree with the device
+    instead of with a per-file approximation.
+    """
+    if not text:
+        return 0
+    total = 0
+    for ch in text:
+        idx = ord(ch) - 32
+        if not 0 <= idx < len(_BITMAP8_WIDTHS):
+            raise ValueError(
+                "no bitmap8 width for %r - the table covers printable ASCII "
+                "only; measure it on-device to extend it" % ch
+            )
+        total += int(_BITMAP8_WIDTHS[idx])
+    return scale * (total + len(text) - 1)
+
+
 class FakePicoGraphics:
     """In-memory ``PicoGraphics`` substitute that records every draw call.
 
-    Sized to a 240×240 panel.  ``measure_text`` returns device-observed
-    widths for the strings the layout / formatter actually touches
-    (bitmap8, scale=3 — see ``files/brainstorm.md`` "Device-observed
-    measure_text data points"); any other input falls back to a
-    deterministic ``len * (scale*4 + 2)`` estimate so ad-hoc test inputs
-    still yield stable layout calculations.
+    Sized to a 240×240 panel.  ``measure_text`` reproduces the firmware's
+    own formula, ``scale * (sum(glyph_widths) + len(text) - 1)``, against a
+    glyph table measured on the device — so it is exact for any string at
+    any scale rather than approximating.  It deliberately raises on
+    non-ASCII instead of guessing: a silently wrong width is what a layout
+    test is least able to catch.
     """
 
     def __init__(self) -> None:
@@ -57,22 +89,7 @@ class FakePicoGraphics:
         return (240, 240)
 
     def measure_text(self, text: str, scale: int) -> int:
-        if scale == 3:
-            widths = {
-                "8888": 57,
-                "9999": 57,
-                "1000": 54,
-                "-999": 54,
-                "99.9": 51,
-                "-100": 51,
-                "-88.8": 63,
-                "-99.9": 63,
-                "100.0": 63,
-                "-100.0": 75,
-            }
-            if text in widths:
-                return widths[text]
-        return max(1, len(text) * (scale * 4 + 2))
+        return bitmap8_width(text, scale)
 
     def create_pen(self, r: int, g: int, b: int) -> int:
         self.calls.append(("create_pen", (r, g, b), {}))
