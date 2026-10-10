@@ -370,6 +370,35 @@ def test_real_geometry_raises_when_font_too_large() -> None:
         )
 
 
+def test_real_geometry_raises_when_header_too_wide() -> None:
+    """The header is drawn unmeasured at x=0, so an over-wide font must fail at
+    boot rather than silently clipping the date off the right edge.
+
+    The graph guard trips only at a much larger scale (the value column is the
+    more forgiving of the two), so it cannot stand in for this check: the fake
+    below keeps the value sample comfortably narrow and overflows the header
+    alone.
+    """
+    from displays.sensors import Geometry
+    from displays.shared.header import WIDEST_HEADER
+
+    class _WideHeaderOnly(FakePicoGraphics):
+        def measure_text(self, text, scale):
+            return 300 if text == WIDEST_HEADER else 63
+
+    gfx = _WideHeaderOnly()
+    import pytest
+
+    with pytest.raises(RuntimeError, match="no room for header"):
+        Geometry(
+            pico_graphics=gfx,
+            font="bitmap8",
+            font_height=8,
+            text_scale=3,
+            tick_period_ms=500,
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Frame-dirty gating: update() flushes only when something was drawn.
 # ─────────────────────────────────────────────────────────────────────

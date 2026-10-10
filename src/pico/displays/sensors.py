@@ -15,7 +15,7 @@ from displays.palette import (
     YELLOW,
 )
 from displays.shared import _icons_data, icons_p4
-from displays.shared.header import format_header_time
+from displays.shared.header import format_header_time, header_fits
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
 
@@ -97,6 +97,12 @@ class Geometry:
         )
 
         self.header_rect = (0, 0, self.width, self.text_height)
+
+        if not header_fits(pico_graphics, font, text_scale, self.width):
+            raise RuntimeError(
+                "sensors geometry: no room for header (font/scale too large)"
+            )
+
         self.value_rect_height = self.text_height
 
         # Left-column footprints come from the blobs the rows actually draw

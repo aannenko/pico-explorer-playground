@@ -6,7 +6,7 @@ from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
 from displays.palette import LABEL_FOR_SLOT
-from displays.shared.header import format_header_time
+from displays.shared.header import format_header_time, header_fits
 from scheduling.event_window import EventWindow
 from scheduling.stream import FRESH
 
@@ -67,6 +67,11 @@ class Geometry:
         self.header_text_scale = header_text_scale
         self.header_height = header_font_height * header_text_scale
         self.header_y = 0
+
+        if not header_fits(pico_graphics, header_font, header_text_scale, self.width):
+            raise RuntimeError(
+                "calendar geometry: no room for header (font/scale too large)"
+            )
 
         # Bar label geometry
         self.bar_font = bar_font

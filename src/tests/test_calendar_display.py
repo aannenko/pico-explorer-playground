@@ -242,6 +242,45 @@ def _make_renderer(gfx: FakeGfx | None = None) -> tuple[calendar.Renderer, FakeG
     return calendar.Renderer(geom, colors), gfx
 
 
+class TestHeaderGuard:
+    def test_shipped_font_and_scale_build_cleanly(self):
+        """bitmap8/scale 3 is 219 px on the 240 px panel — must not trip."""
+        _renderer, _gfx = _make_renderer()
+
+    def test_raises_when_header_too_wide(self):
+        """The calendar header is drawn unmeasured at x=0, and its font/scale
+        are wired separately from the Sensors view, so it needs its own boot
+        guard.  Today both views happen to share ``config.TEXT_SCALE``, which
+        means Sensors would halt boot first — this pins that the calendar does
+        not depend on that coincidence.
+        """
+        with pytest.raises(RuntimeError, match="no room for header"):
+            calendar.Geometry(
+                pico_graphics=FakeGfx(),
+                header_font="bitmap8",
+                header_font_height=8,
+                header_text_scale=4,  # 292 px on a 240 px panel
+                bar_font="bitmap8",
+                bar_font_height=8,
+                bar_text_scale=2,
+            )
+
+    def test_wider_panel_accepts_the_larger_scale(self):
+        """The guard is a function of panel width, not a hardcoded scale cap —
+        the same scale that fails at 240 px succeeds on a wider panel."""
+        geom = calendar.Geometry(
+            pico_graphics=FakeGfx(width=320, height=240),
+            header_font="bitmap8",
+            header_font_height=8,
+            header_text_scale=4,
+            bar_font="bitmap8",
+            bar_font_height=8,
+            bar_text_scale=2,
+        )
+
+        assert geom.width == 320
+
+
 class TestRemainingTime:
     def test_remaining_shown_when_event_extends_beyond_window(self):
         renderer, gfx = _make_renderer()
