@@ -1,5 +1,6 @@
 """Tests for the shared HTTP client wrapper."""
 
+import micropython
 import pytest
 
 import services.http_client as http_client
@@ -190,3 +191,31 @@ def test_typed_exceptions_subclass_http_error():
         HttpProtocolError,
     ):
         assert issubclass(exc_type, HttpError)
+
+
+def test_unclassified_failure_prints_heap_and_traceback_then_propagates(
+    fake_urequests, monkeypatch, capsys
+):
+    error = MemoryError("memory allocation failed, allocating 2560 bytes")
+    fake_urequests.raise_on_json = error
+    heap_summaries = []
+    monkeypatch.setattr(micropython, "mem_info", lambda: heap_summaries.append(1))
+
+    with pytest.raises(MemoryError) as info:
+        get_json(_URL)
+
+    assert info.value is error
+    assert heap_summaries == [1]
+    out = capsys.readouterr().out
+    assert out.startswith("[http] unclassified failure:")
+    assert "MemoryError: memory allocation failed, allocating 2560 bytes" in out
+    assert fake_urequests.responses[-1].closed is True
+
+
+def test_classified_failure_prints_nothing(fake_urequests, capsys):
+    fake_urequests.status_code = 500
+
+    with pytest.raises(HttpStatusError):
+        get_json(_URL)
+
+    assert capsys.readouterr().out == ""

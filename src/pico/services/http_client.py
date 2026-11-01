@@ -1,5 +1,7 @@
 import gc
 
+from utilities.log import log_exception
+
 try:
     import urequests as _requests
 except ImportError:
@@ -54,10 +56,20 @@ def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
     """GET ``url`` and return the parsed JSON body as a dict.
 
     Raises an ``HttpError`` subclass for transport, status, protocol and JSON
-    failures; anything else (e.g. ``MemoryError``) propagates.  Collects
-    garbage first to reduce fragmented-heap allocation failures, and always
-    closes the response.
+    failures; anything else (e.g. ``MemoryError``) is printed with
+    ``log_exception`` and re-raised.  Collects garbage first to reduce
+    fragmented-heap allocation failures, and always closes the response.
     """
+    try:
+        return _get_json(url, headers, timeout_s)
+    except HttpError:
+        raise
+    except Exception as exc:
+        log_exception("[http] unclassified failure:", exc)
+        raise
+
+
+def _get_json(url: str, headers: dict | None, timeout_s: int) -> dict:
     gc.collect()
     response = None
     try:
