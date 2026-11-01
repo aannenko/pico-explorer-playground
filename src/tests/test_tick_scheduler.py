@@ -37,7 +37,7 @@ def test_ms_per_tick_exposes_period() -> None:
 
 def test_period_below_floor_is_clamped() -> None:
     sched, _, _ = _mk_scheduler(period_ms=1)
-    # Clamp protects against IRQ/schedule queue pressure from absurdly
+    # Clamp protects against schedule-queue pressure from absurdly
     # short periods; see _MIN_PERIOD_MS in tick_scheduler.
     assert sched.ms_per_tick >= 100
     sched.start()
@@ -111,9 +111,7 @@ def test_schedule_tick_clears_pending_if_schedule_raises() -> None:
 
     sched, _, _ = _mk_scheduler(schedule=raising_schedule)
     sched._schedule_tick(None)
-    # _pending must roll back so the next IRQ can retry.
     assert sched._pending is False
-    # And a follow-up IRQ must be able to try scheduling again.
     calls = {"n": 0}
 
     def counting_schedule(_fn, _arg):

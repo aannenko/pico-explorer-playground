@@ -154,8 +154,6 @@ def test_capacity_property() -> None:
 
 
 def test_tick_ref_is_cached_bound_method() -> None:
-    """The cached ``_tick_ref`` must be the SAME object across reads — required
-    for MicroPython identity-based dedup in ``TickScheduler.register``."""
     h = _make(ticks_per_commit=1)
     ref_a = h._tick_ref
     ref_b = h._tick_ref

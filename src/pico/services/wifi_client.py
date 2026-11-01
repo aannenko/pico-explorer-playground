@@ -45,8 +45,6 @@ class WifiClient:
         self._retry_after_ms: int = 0
         self._pending: bool = False
         self._generation: int = 0
-        # Cache bound methods used from IRQ context to avoid heap
-        # allocation (and possible MemoryError) inside the timer callback.
         self._tick_ref = self._tick
         self._timer_callback_ref = self._timer_callback
 
@@ -194,14 +192,10 @@ class WifiClient:
             self._timer = None
 
     def _timer_callback(self, _t) -> None:
-        """Timer IRQ handler. Defers _tick to main thread."""
         if self._pending:
             return
         self._pending = True
         try:
             micropython.schedule(self._tick_ref, self._generation)
         except Exception:
-            # RuntimeError if schedule queue is full; MemoryError if the
-            # heap is locked.  Either way, clear _pending so the next
-            # timer tick can retry instead of wedging the state machine.
             self._pending = False

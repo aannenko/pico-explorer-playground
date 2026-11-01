@@ -31,7 +31,7 @@ DST_START = (3, -1, 6, 2)   # Last Sunday of March at 02:00 (standard time)
 DST_END = (10, -1, 6, 3)    # Last Sunday of October at 03:00 (DST time)
 DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
 
-# Socket timeout (s) for HTTP fetches; caps the UI freeze on an unreachable host.
+# Socket timeout (s) per HTTP connect/read, not a whole-fetch deadline; DNS lookups aren't covered.
 HTTP_TIMEOUT_S = const(3)
 
 SENSOR_READ_DELAY_MS = const(5_000)

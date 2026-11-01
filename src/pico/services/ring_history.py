@@ -14,10 +14,7 @@ populated from boot; callers must ensure ``sampler()`` returns valid data
 at construction time.
 
 This module owns no timers; the application is responsible for registering
-``self._tick_ref`` on the long-lived ``TickScheduler``.  Single-site
-registration keeps ownership clear and (on MicroPython, where bound
-methods compare by identity) makes ``TickScheduler.register``'s ``not in``
-dedup work reliably with the cached ref.
+``self._tick_ref`` on the long-lived ``TickScheduler``.
 """
 
 from array import array
@@ -55,12 +52,7 @@ class RingHistory:
         self._tick_counter = 0
         self.commit_count = 0
 
-        # MicroPython bound methods compare by identity — caching once
-        # is what makes TickScheduler.register's dedup work reliably.
         self._tick_ref = self._tick
-
-        # Reused per commit to avoid a fresh range() allocation each time.
-        self._metric_range = range(num_metrics)
 
         self._commit_now()
 
@@ -116,7 +108,7 @@ class RingHistory:
         reading = self._sampler()
         head = self._head
         buffers = self._buffers
-        for i in self._metric_range:
+        for i in range(len(buffers)):
             buffers[i][head] = reading[i]
 
         head += 1

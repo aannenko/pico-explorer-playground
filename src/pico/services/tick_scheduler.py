@@ -8,18 +8,12 @@ _MIN_PERIOD_MS = const(100)
 
 
 class TickScheduler:
-    """Single hardware timer that drives all periodic work via subscribers."""
-
     def __init__(
         self,
         period_ms: int = 500,
         schedule=micropython.schedule,
         timer_factory=Timer,
     ) -> None:
-        # Using a list for O(n) register/unregister. A dict keyed by stable
-        # token would give O(1), but bound methods on MicroPython have unstable
-        # hashes (based on id()), so a set/dict with raw callbacks won't work.
-        # Fine for the current subscriber count (~7); revisit if it grows.
         self._subscribers: list = []  # list[Callable[[], None]]
         self._schedule = schedule
         self._tick_ref = self._tick
@@ -68,7 +62,4 @@ class TickScheduler:
         try:
             self._schedule(self._tick_ref, 0)
         except Exception:
-            # If the schedule queue is full (or any other failure),
-            # roll back _pending so the next timer IRQ can try again.
-            # Runs in IRQ context; swallowing is intentional.
             self._pending = False

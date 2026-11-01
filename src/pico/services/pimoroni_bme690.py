@@ -19,9 +19,7 @@ class PimoroniBME690:
 
     Gas-resistance accuracy depends on constant inter-read spacing
     (the hot plate must cool between measurements), so this service
-    can't share the ``TickScheduler``. The Timer IRQ schedules
-    ``_do_read`` via ``micropython.schedule``; the blocking I2C read
-    runs in normal context.
+    can't share the ``TickScheduler``.
     """
 
     def __init__(
@@ -51,8 +49,6 @@ class PimoroniBME690:
         self._last_reading: tuple[float, float, float, float, str] = (0.0, 0.0, 0.0, 0.0, "Unstable")
         self._pending: bool = False
 
-        # Cache bound methods used from IRQ context to avoid heap
-        # allocation (and possible MemoryError) inside the timer callback.
         self._timer_callback_ref = self._timer_callback
         self._do_read_scheduled_ref = self._do_read_scheduled
 
@@ -92,14 +88,10 @@ class PimoroniBME690:
             self._pending = False
 
     def _timer_callback(self, _: Timer) -> None:
-        """Timer IRQ handler. Defers the blocking I2C read to main thread."""
         if self._pending:
             return
         self._pending = True
         try:
             self._schedule(self._do_read_scheduled_ref, 0)
         except Exception:
-            # RuntimeError if schedule queue is full; MemoryError if the
-            # heap is locked.  Either way, clear _pending so the next
-            # timer tick can retry instead of wedging the reader.
             self._pending = False

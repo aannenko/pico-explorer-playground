@@ -145,8 +145,6 @@ def test_timer_callback_schedules_read_and_guards_reentry() -> None:
 
     initial_reads = reader._bme.read_count
 
-    # Two IRQ fires back-to-back before the scheduled callback runs →
-    # second one must be a no-op to avoid double-scheduling the read.
     reader._timer_callback(None)
     reader._timer_callback(None)
     assert len(scheduled) == 1
@@ -157,7 +155,6 @@ def test_timer_callback_schedules_read_and_guards_reentry() -> None:
     assert reader._bme.read_count == initial_reads + 1
     assert reader._pending is False
 
-    # Next IRQ now schedules again.
     reader._timer_callback(None)
     assert len(scheduled) == 2
 
@@ -177,5 +174,4 @@ def test_timer_callback_clears_pending_if_schedule_raises() -> None:
     )
 
     reader._timer_callback(None)
-    # _pending must roll back so the next timer IRQ can retry.
     assert reader._pending is False
