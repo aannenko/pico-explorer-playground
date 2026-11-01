@@ -24,6 +24,7 @@ def _random_event_loop(
     start_timestamp: int,
     time_service: TimeService,
     color_index: int,
+    window_past_sec: int,
 ):  # Iterator[Event]
     """Yield random events from *names* with durations from *durations* and occasional gaps.
 
@@ -33,6 +34,10 @@ def _random_event_loop(
     cursor = start_timestamp
 
     while True:
+        # Unseen placeholder history need not be replayed after a long absence.
+        window_start = time_service.now() - window_past_sec
+        if cursor < window_start:
+            cursor = window_start
         dur = random.choice(durations)
 
         if random.randint(1, 100) <= gap_chance:
@@ -45,9 +50,11 @@ def _random_event_loop(
         cursor += dur
 
 
-def build_demo_streams(time_service: TimeService) -> list[Stream]:
+def build_demo_streams(
+    time_service: TimeService, window_past_sec: int
+) -> list[Stream]:
     """Return the placeholder demo streams (weather + random events)."""
-    start = time_service.now() - 30 * 60
+    start = time_service.now() - window_past_sec
 
     # One color_index per row (work_week is row 0).
     iterators = [
@@ -58,6 +65,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_SKY,
+            window_past_sec=window_past_sec,
         ),
         _random_event_loop(
             names=("code", "review", "deploy", "test", "debug"),
@@ -66,6 +74,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_YELLOW,
+            window_past_sec=window_past_sec,
         ),
         _random_event_loop(
             names=("call", "standup", "retro", "chat"),
@@ -74,6 +83,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_PINK,
+            window_past_sec=window_past_sec,
         ),
         _random_event_loop(
             names=("run", "walk", "gym", "yoga", "rest"),
@@ -82,6 +92,7 @@ def build_demo_streams(time_service: TimeService) -> list[Stream]:
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_TEAL,
+            window_past_sec=window_past_sec,
         ),
     ]
 

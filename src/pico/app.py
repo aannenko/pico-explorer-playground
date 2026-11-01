@@ -183,7 +183,9 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
         waste.build_stream(time_service, config.WASTE_SCHEDULE),
     ]
     streams.extend(network_streams)
-    streams.extend(demo_streams.build_demo_streams(time_service)[: 5 - len(streams)])
+    streams.extend(
+        demo_streams.build_demo_streams(time_service, calendar.WINDOW_PAST_SEC)[: 5 - len(streams)]
+    )
 
     windows: list[EventWindow] = build_event_windows(STREAM_COLORS, streams)
 
