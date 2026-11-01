@@ -1,5 +1,7 @@
 import time
 
+from picographics import PicoGraphics  # type: ignore
+
 
 # Widest string ``format_header_time`` can emit: bitmap8 draws '1' narrower than
 # every other digit, so a date free of '1's is the worst case (219 px at
@@ -14,8 +16,7 @@ def format_header_time(local_epoch: int) -> str:
     return f"{year:04}-{month:02}-{mday:02} {hour:02}:{minute:02}"
 
 
-def header_fits(pico_graphics, font: str, text_scale: int, width: int) -> bool:
-    # pico_graphics: PicoGraphics
+def header_fits(pico_graphics: PicoGraphics, font: str, text_scale: int, width: int) -> bool:
     """Whether the widest ``format_header_time`` output fits ``width`` px.
 
     Headers are drawn at x=0 against a full-width clear and are never measured

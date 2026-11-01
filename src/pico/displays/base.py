@@ -9,7 +9,7 @@ class Display:
     active.
     """
 
-    refresh_period_ms: int = 1000
+    refresh_period_ms = 1000
 
     def initialize(self) -> None:
         pass

@@ -46,8 +46,8 @@ class PimoroniBME690:
             OVERSAMPLING_1X,
         )
 
-        self._last_reading: tuple[float, float, float, float, str] = (0.0, 0.0, 0.0, 0.0, "Unstable")
-        self._pending: bool = False
+        self._last_reading = (0.0, 0.0, 0.0, 0.0, "Unstable")
+        self._pending = False
 
         self._timer_callback_ref = self._timer_callback
         self._do_read_scheduled_ref = self._do_read_scheduled

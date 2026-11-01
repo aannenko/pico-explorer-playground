@@ -189,7 +189,7 @@ class FakeGfx:
         self._bounds = (width, height)
         self.text_calls: list[tuple[str, int, int, int]] = []
         self.line_calls: list[tuple[int, int, int, int]] = []
-        self.rect_calls: list[tuple[int, int, int, int, int]] = []  # (pen, x, y, w, h)
+        self.rect_calls: list[tuple[int | None, int, int, int, int]] = []
         self.current_pen: int | None = None
 
     def get_bounds(self) -> tuple[int, int]:

@@ -1,7 +1,10 @@
 from scheduling.event import Event
 
 
-def build_event_windows(palette, streams):  # palette: list[int]; streams: Iterable[Stream]
+def build_event_windows(
+    palette: list[int],
+    streams,  # Iterable[Stream]
+) -> list[EventWindow]:
     """Build one ``EventWindow`` per stream, all sharing ``palette``.
 
     Kept import-free of config/hardware so it is unit-testable with a
@@ -38,14 +41,14 @@ class EventWindow:
         status_fn=None,  # () -> int; freshness, or None for static streams
     ) -> None:
         self._events = events_iter
-        self._palette: list[int] = palette
+        self._palette = palette
         self._buffer: list[tuple[Event, int]] = []
         self._next: tuple[Event, int] | None = None
-        self._exhausted: bool = False
+        self._exhausted = False
         self._events_fn = events_fn
         self._generation_fn = generation_fn
         self._status_fn = status_fn
-        self._generation: int = -1
+        self._generation = -1
 
     @property
     def palette(self) -> list[int]:

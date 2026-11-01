@@ -21,8 +21,8 @@ class ExplorerBuzzer:
         self._pwm = pwm_factory(pin_factory(pin_id))
         self._pwm.duty_u16(0)
 
-        self._alert_remaining: int = 0
-        self._alert_freq: int = 0
+        self._alert_remaining = 0
+        self._alert_freq = 0
 
         self._toggle_alert_ref = self._toggle_alert
 

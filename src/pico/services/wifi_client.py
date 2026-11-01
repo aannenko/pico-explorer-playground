@@ -38,15 +38,15 @@ class WifiClient:
     """
 
     def __init__(self) -> None:
-        self._state: int = IDLE
-        self._wlan = None  # WLAN | None
-        self._timer = None  # Timer | None
-        self._ssid: str = ""
-        self._password: str = ""
-        self._attempt_start_ms: int = 0
-        self._retry_after_ms: int = 0
-        self._pending: bool = False
-        self._generation: int = 0
+        self._state = IDLE
+        self._wlan: WLAN | None = None
+        self._timer: Timer | None = None
+        self._ssid = ""
+        self._password = ""
+        self._attempt_start_ms = 0
+        self._retry_after_ms = 0
+        self._pending = False
+        self._generation = 0
         self._tick_ref = self._tick
         self._timer_callback_ref = self._timer_callback
 

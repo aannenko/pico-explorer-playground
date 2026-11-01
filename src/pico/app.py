@@ -178,7 +178,7 @@ def _build_sensors_display(
 def _build_calendar_display(pico_graphics, time_service: TimeService, network_streams):
     # Calendar lays out 5 rows: local generators, then network streams,
     # then demos fill any remaining slots.
-    streams: list[Stream] = [
+    streams = [
         work_week.build_stream(time_service),
         waste.build_stream(time_service, config.WASTE_SCHEDULE),
     ]
@@ -187,7 +187,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
         demo_streams.build_demo_streams(time_service, calendar.WINDOW_PAST_SEC)[: 5 - len(streams)]
     )
 
-    windows: list[EventWindow] = build_event_windows(STREAM_COLORS, streams)
+    windows = build_event_windows(STREAM_COLORS, streams)
 
     return calendar.Display(
         renderer=calendar.Renderer(

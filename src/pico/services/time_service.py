@@ -119,11 +119,11 @@ class TimeService:
         self._dst_offset = dst_offset
         self._get_time = get_time
 
-        self._offset_sec: int = tz_offset * _SEC_PER_HOUR
-        self._dst_active: bool = False
-        self._next_transition: int = 0
+        self._offset_sec = tz_offset * _SEC_PER_HOUR
+        self._dst_active = False
+        self._next_transition = 0
         # Monotonic-clock gate for the wall-clock DST check (see _tick).
-        self._next_dst_check_ms: int = time.ticks_ms()
+        self._next_dst_check_ms = time.ticks_ms()
 
         self._update_dst()
 

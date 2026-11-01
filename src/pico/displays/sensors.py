@@ -240,8 +240,8 @@ class Renderer:
         line_idx: int,
         col: int,
         fill_pen: int,
-        marker_pen,  # int | None
-        value_y,     # int | None
+        marker_pen: int | None,
+        value_y: int | None,
     ) -> None:
         """Paint one 1×graph_height column: full-height band fill, plus an
         optional single auto-contrast marker pixel at ``value_y``.
@@ -352,15 +352,15 @@ class Display(_Display):
         # Graph redraw triggers: track the last commit_count we drew for, and
         # the last gas heater stable-state we rendered.  ``-1`` / ``None``
         # values force a redraw on first ``_update_display`` after init.
-        self._last_commit: int = -1
-        self._gas_was_stable = None  # bool | None — None means "force redraw"
+        self._last_commit = -1
+        self._gas_was_stable: bool | None = None
         # The header clock changes once a minute.  ``-1`` forces a redraw on the
         # first ``_update_display``; ``_next_header_check_ms`` gates the
         # (big-int-allocating, 1970-epoch) wall-clock read to once per minute
         # boundary (see ``_update_display``) so the 1 s render doesn't read the
         # clock every tick.
-        self._last_header_minute: int = -1
-        self._next_header_check_ms: int = 0
+        self._last_header_minute = -1
+        self._next_header_check_ms = 0
 
         # Validate at startup so a bad config raises here, not on the first
         # sensor read.
@@ -411,7 +411,7 @@ class Display(_Display):
 
     @staticmethod
     @micropython.native
-    def _y_for(value: float, edges: tuple, graph_height: int):  # -> int | None
+    def _y_for(value: float, edges: tuple, graph_height: int) -> int | None:
         """Map ``value`` to a row-local y in 0..graph_height-1.
 
         ``cap_max`` (edges[-1]) → ``y=0`` (top), ``cap_min`` (edges[0]) →

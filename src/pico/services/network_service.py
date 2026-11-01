@@ -24,8 +24,8 @@ class NetworkService:
         self._password = password
         self._wifi = wifi
         self._sync_interval_ms = sync_interval_ms
-        self._last_sync_ticks: int = 0
-        self._phase: int = _IDLE
+        self._last_sync_ticks = 0
+        self._phase = _IDLE
 
         if tick_scheduler is not None:
             tick_scheduler.register(self._tick)

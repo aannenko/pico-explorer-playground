@@ -20,12 +20,12 @@ class CountdownTimer:
         self._on_configure_action = on_configure
         self._get_time = get_time
 
-        self._state: int = INITIAL
-        self._name: str = ""
-        self._total_sec: int = 0
-        self._start_timestamp: int = 0
-        self._end_timestamp: int = 0
-        self._remaining_sec: int = 0
+        self._state = INITIAL
+        self._name = ""
+        self._total_sec = 0
+        self._start_timestamp = 0
+        self._end_timestamp = 0
+        self._remaining_sec = 0
 
         if tick_scheduler is not None:
             tick_scheduler.register(self._tick)

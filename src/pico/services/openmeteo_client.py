@@ -59,7 +59,7 @@ def parse_iso_local(text: str) -> int:
     return time.mktime((year, month, day, hour, minute, 0, 0, 0))
 
 
-def extract_hourly(payload: dict, keys) -> list:  # keys: Iterable[str]; -> list[list]
+def extract_hourly(payload: dict, keys) -> list[list]:  # keys: Iterable[str]
     """Return the requested ``hourly`` arrays, validating equal lengths.
 
     Raises ``KeyError`` for a missing key and ``ValueError`` when the arrays

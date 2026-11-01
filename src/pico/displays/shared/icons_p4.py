@@ -10,9 +10,17 @@ index and is skipped.  Icons are always drawn on the black view background, so
 black interior pixels render correctly even though they are skipped.
 """
 
+from picographics import PicoGraphics  # type: ignore
 
-def draw_icon(gfx, icon, x: int, y: int, scale: int = 1, transparent: int = 0) -> None:
-    # gfx: PicoGraphics; icon: tuple[int, int, bytes] == (width, height, blob)
+
+def draw_icon(
+    gfx: PicoGraphics,
+    icon: tuple[int, int, bytes],
+    x: int,
+    y: int,
+    scale: int = 1,
+    transparent: int = 0,
+) -> None:
     """Blit ``icon`` at ``(x, y)``, each pixel scaled to a ``scale x scale`` rect.
 
     Pixels whose slot index equals ``transparent`` are skipped.

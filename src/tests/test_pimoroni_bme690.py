@@ -13,12 +13,12 @@ class FakeI2C:
 
 
 class FakeBreakoutBME69X:
-    next_reading: tuple[float, float, float, float, int] = (0.0, 0.0, 0.0, 0.0, 0)
+    next_reading = (0.0, 0.0, 0.0, 0.0, 0)
 
     def __init__(self, i2c: FakeI2C) -> None:
         self.i2c = i2c
         self.configure_calls: list[tuple[object, ...]] = []
-        self.read_count: int = 0
+        self.read_count = 0
 
     def configure(self, *args) -> None:
         self.configure_calls.append(tuple(args))

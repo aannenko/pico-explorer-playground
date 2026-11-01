@@ -108,7 +108,7 @@ graph TD
 - **Mandated comments**, the only ones written by default: the intended signature of an annotation MicroPython can't express (`# () -> int`); anything it can express is a real annotation (type hints below). Suppressions name their specific code (`# type: ignore[attr-defined]`, `# noqa: E402`); a bare `# type: ignore` is only for imports of MicroPython-only modules. Shebangs and generated-file headers are exempt.
 - **State a shared convention once** — on the class or module, or in this file when it spans modules — not on every member.
 - **Before reporting a `.py` change done**, review every comment and docstring you added or changed — read all of `git diff -U0 <start> -- '*.py'` and of each new untracked `.py` file (`git ls-files -o --exclude-standard -- '*.py'`), and each touched docstring in full — and delete what the comment rules above don't allow.
-- Type hints — apply this decision table in order:
+- Type hints — annotate function and method signatures; annotate a variable only when its initializer doesn't reveal its type (`self._wlan: WLAN | None = None`, `events: list[Event] = []`, but `self._gate = self._build_gate(display)`). Apply this decision table in order:
   1. If the type is fully expressible in MicroPython (`int`, `str`, `list[X]`, `tuple[X,…]`, `X | None`): annotate normally — use full generics (`list[Event]`, `tuple[int, int, int, int]`), never bare `list` / `tuple`.
   2. If the type is not expressible in MicroPython (`Callable`, `Iterator`, `Generator`): omit the annotation; add an inline comment with the intended signature (e.g. `# () -> int`, `# Iterator[Event]`).
   3. If only the element type is unhintable or duck-typed: use bare `list` or `list[tuple]`; never use `object`.

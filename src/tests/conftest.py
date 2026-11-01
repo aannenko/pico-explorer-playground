@@ -224,7 +224,7 @@ class FakeTimer:
     def __init__(self, timer_id: int = -1) -> None:
         self.timer_id = timer_id
         self.init_calls: list[dict] = []
-        self.deinit_calls: int = 0
+        self.deinit_calls = 0
 
     def init(self, **kwargs) -> None:
         self.init_calls.append(dict(kwargs))
@@ -279,7 +279,7 @@ class RecordingRenderer:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
-        self.update_calls: int = 0
+        self.update_calls = 0
 
     def update(self) -> None:
         self.update_calls += 1
@@ -334,7 +334,7 @@ class FakeUrequests:
     """
 
     def __init__(self) -> None:
-        self.status_code: int = 200
+        self.status_code = 200
         self.json_data = {}
         self.raise_on_get: Exception | None = None
         self.raise_on_json: Exception | None = None

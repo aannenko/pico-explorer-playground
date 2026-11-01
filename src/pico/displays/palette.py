@@ -35,7 +35,7 @@ BROWN = const(11)
 # The locked 16-colour language.  Panel-calibrated (brighter than sRGB, esp.
 # blues/reds, since the ST7789 renders darker than sRGB).  Host tools import
 # this tuple rather than copying it, so the colours can't drift.
-PALETTE_RGB: tuple = (
+PALETTE_RGB = (
     (0, 0, 0),         # 0  BLACK   — background; icon transparent index
     (255, 255, 255),   # 1  WHITE   — text; sensor value marker; now-line
     (185, 185, 185),   # 2  GRAY    — secondary text; waste MIXED
@@ -57,7 +57,7 @@ PALETTE_RGB: tuple = (
 # Slots icons are allowed to use (the 12 authored colours, not the 4 spares).
 # The icon converter matches authored pixels against only these so a stray
 # spare-slot/off-palette colour still errors out instead of snapping to a spare.
-ICON_SLOTS: tuple = tuple(range(12))
+ICON_SLOTS = tuple(range(12))
 
 
 def _auto_contrast(slot: int) -> int:
@@ -74,13 +74,13 @@ def _auto_contrast(slot: int) -> int:
 # Per-slot auto-contrast lookup (pen == slot under PEN_P4), computed once at
 # import.  Consumers index it directly: ``LABEL_FOR_SLOT[bar_pen]`` /
 # ``LABEL_FOR_SLOT[fill_slot]`` — no per-render luminance work.
-LABEL_FOR_SLOT: tuple = tuple(_auto_contrast(i) for i in range(16))
+LABEL_FOR_SLOT = tuple(_auto_contrast(i) for i in range(16))
 
 
 # Curated stream-colour palette: each Event's ``color_index`` is a 0-based index
 # into this list (use the STREAM_* constants below).  Each entry is a single
 # palette slot; rows are distinguished by fixed position + label + colour.
-STREAM_COLORS: list[int] = [
+STREAM_COLORS = [
     ORANGE,   # 0 work-week
     SKY,      # 1 demo weather / waste PAPER
     YELLOW,   # 2 demo / waste PLAST / severity warn

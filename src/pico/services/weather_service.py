@@ -16,6 +16,7 @@ from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
+from services._fetch_machine import FetchCoordinator
 
 _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
@@ -91,7 +92,7 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
     uv = _uv_column(payload, len(times))
     uv_warn, uv_severe = uv_thresholds
 
-    emitted = []  # (epoch, label, color_index) per winning hour
+    emitted: list[tuple[int, str, int]] = []
     for i in range(len(times)):
         candidates = []
         prob = probs[i]
@@ -121,7 +122,7 @@ class WeatherService(EventStreamService):
         prob_threshold: int,
         uv_thresholds: tuple[int, int],
         wifi,  # has is_connected() -> bool
-        coordinator,  # FetchCoordinator
+        coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
         forecast_hours: int,

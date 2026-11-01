@@ -49,10 +49,10 @@ class Display(_Display):
         self._renderer = renderer
         self._timer = countdown_timer
 
-        self._duration_index: int = _DEFAULT_INDEX
+        self._duration_index = _DEFAULT_INDEX
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
-        self._active: bool = False
+        self._active = False
 
     def on_button_a(self) -> None:
         state = self._timer.state

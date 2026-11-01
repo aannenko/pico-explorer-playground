@@ -52,14 +52,14 @@ class FetchCoordinator:
 class FetchState:
     """Data for one in-flight fetch; advanced by ``FetchMachine``."""
 
-    def __init__(self, fetcher, wifi, schedule, coordinator) -> None:
-        self.stage: int = INITIAL
+    def __init__(self, fetcher, wifi, schedule, coordinator: FetchCoordinator) -> None:
+        self.stage = INITIAL
         self.result = None
         self.error = None
         self.fetcher = fetcher          # () -> result; may raise
         self.wifi = wifi                # has is_connected() -> bool
         self.schedule = schedule        # (callback, arg) -> None
-        self.coordinator = coordinator  # FetchCoordinator
+        self.coordinator = coordinator
 
 
 class FetchMachine:

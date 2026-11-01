@@ -113,10 +113,10 @@ class Renderer:
         self._seg_buf = [(0, 0), (0, 0), (0, 0), (0, 0)]
 
     def reset(self) -> None:
-        self._segments_cleared: int = 0
-        self._last_text_center: str = ""
-        self._last_text_above_center: str = ""
-        self._last_text_below_center: str = ""
+        self._segments_cleared = 0
+        self._last_text_center = ""
+        self._last_text_above_center = ""
+        self._last_text_below_center = ""
 
         self._gfx.set_font(self._geom.font)
         self._gfx.set_pen(self._colors.background)

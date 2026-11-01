@@ -13,12 +13,13 @@ from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
+from services._fetch_machine import FetchCoordinator
 
 # Severity level (1 warning / 2 severe) -> global palette index.
 _LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
-def _pollen_winner(labels, values, warn, severe):  # -> (level, label)
+def _pollen_winner(labels, values, warn, severe) -> tuple[int, str | None]:
     """Pick the dominant pollen for one hour.
 
     Highest severity wins; ties broken by the highest raw count (not list
@@ -57,7 +58,7 @@ def _build_events(aq_payload, species, aqi_thr, pollen_thr) -> list[Event]:
     pollen_labels = tuple(s.upper() for s in species)
     aqi_warn, aqi_severe = aqi_thr
 
-    emitted = []  # (epoch, label, color_index) per winning hour
+    emitted: list[tuple[int, str, int]] = []
     for i in range(len(times)):
         candidates = []
         aqi_lvl = event_runs._level(aqi_arr[i], aqi_warn, aqi_severe)
@@ -83,11 +84,11 @@ class AirService(EventStreamService):
         self,
         latitude: float,
         longitude: float,
-        species,  # list[str] of pollen names
+        species: list[str],
         aqi_thresholds: tuple[int, int],
         pollen_thresholds: tuple[int, int],
         wifi,  # has is_connected() -> bool
-        coordinator,  # FetchCoordinator
+        coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
         forecast_hours: int,

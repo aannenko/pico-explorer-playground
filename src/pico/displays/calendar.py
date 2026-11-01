@@ -93,9 +93,9 @@ class Geometry:
 
         self.num_rows = _MAX_STREAMS
         self.row_y: list[int] = []
-        self.row_height: int = bar_height
+        self.row_height = bar_height
         self.gap_y: list[int] = []
-        self.gap_height: int = gap
+        self.gap_height = gap
 
         for i in range(_MAX_STREAMS):
             row_top = body_top + i * cell_height
@@ -312,7 +312,7 @@ class Display(_Display):
         self._renderer = renderer
         self._streams = streams
         self._get_time = get_time
-        self._active: bool = False
+        self._active = False
 
     def _redraw(self) -> None:
         now = self._get_time()

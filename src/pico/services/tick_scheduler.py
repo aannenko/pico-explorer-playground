@@ -19,7 +19,7 @@ class TickScheduler:
         self._tick_ref = self._tick
         self._schedule_tick_ref = self._schedule_tick
         self._timer = timer_factory(-1)
-        self._period_ms: int = period_ms if period_ms > _MIN_PERIOD_MS else _MIN_PERIOD_MS
+        self._period_ms = period_ms if period_ms > _MIN_PERIOD_MS else _MIN_PERIOD_MS
         self._pending = False
 
     @property

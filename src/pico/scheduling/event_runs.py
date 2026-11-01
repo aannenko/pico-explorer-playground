@@ -29,7 +29,7 @@ def _level(value, warn: int, severe: int) -> int:
     return 0
 
 
-def best_by_priority(candidates):  # candidates: list[tuple[int, str, int]] -> tuple[str, int] | None
+def best_by_priority(candidates: list[tuple[int, str, int]]) -> tuple[str, int] | None:
     """Pick the highest-``priority`` candidate; ties keep the earliest listed.
 
     Each candidate is ``(priority, label, color_index)``.  Returns the
@@ -44,7 +44,7 @@ def best_by_priority(candidates):  # candidates: list[tuple[int, str, int]] -> t
     return best
 
 
-def merge_runs(emitted):  # emitted: list[tuple[int, str, int]] -> list[Event]
+def merge_runs(emitted: list[tuple[int, str, int]]) -> list[Event]:
     """Stitch winning hours into bars.
 
     ``emitted`` is the winning hours only, in order, as ``(epoch, label,

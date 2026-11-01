@@ -20,7 +20,7 @@ from micropython import const
 
 from scheduling.event import Event
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE
-from services._fetch_machine import FetchMachine
+from services._fetch_machine import FetchCoordinator, FetchMachine, FetchState
 from utilities.log import log_exception
 
 _DEFAULT_BACKOFF_BASE_MS = const(5_000)
@@ -35,7 +35,7 @@ class EventStreamService:
     def __init__(
         self,
         wifi,  # has is_connected() -> bool
-        coordinator,  # FetchCoordinator
+        coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
         name: str,  # log tag, e.g. "weather" / "air"
@@ -62,15 +62,15 @@ class EventStreamService:
         self._error_after_failures = error_after_failures
 
         self._events: list[Event] = []
-        self._generation: int = 0
+        self._generation = 0
 
         # Persistent health, consulted by ``status`` between fetches.
-        self._next_due: int = clock()  # due immediately at boot
-        self._failures: int = 0
+        self._next_due = clock()  # due immediately at boot
+        self._failures = 0
         self._last_success: int | None = None
 
         # Transient: a ``FetchState`` only while a fetch is in flight, else None.
-        self._fetch = None  # FetchState | None
+        self._fetch: FetchState | None = None
         self._fetcher_ref = self._fetch_and_parse  # cache the subclass bound method
 
         self._tick_ref = self.tick

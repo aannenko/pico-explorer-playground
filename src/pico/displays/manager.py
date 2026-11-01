@@ -3,12 +3,12 @@ from displays.base import Display, RefreshGate
 
 class DisplayManager:
     def __init__(self, displays: list[Display], scheduler_period_ms: int) -> None:
-        self._displays: list[Display] = displays
-        self._scheduler_period_ms: int = scheduler_period_ms
-        self._current: int = 0
+        self._displays = displays
+        self._scheduler_period_ms = scheduler_period_ms
+        self._current = 0
         # Rebuilt on every view switch from the active display's
         # ``refresh_period_ms``.  ``None`` = render every tick.
-        self._gate = self._build_gate(displays[0])  # RefreshGate | None
+        self._gate = self._build_gate(displays[0])
 
         # Refs compatible with micropython.schedule(callback, arg)
         self.next_ref = self._do_next
@@ -16,7 +16,7 @@ class DisplayManager:
         self.on_button_a_ref = self._do_on_button_a
         self.on_button_b_ref = self._do_on_button_b
 
-    def _build_gate(self, display: Display):  # RefreshGate | None
+    def _build_gate(self, display: Display) -> RefreshGate | None:
         period_ms = display.refresh_period_ms
         if period_ms <= 0:
             return None

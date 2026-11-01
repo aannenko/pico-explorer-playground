@@ -1,5 +1,6 @@
 from scheduling.event import Event
 from services._event_stream_service import EventStreamService
+from services._fetch_machine import FetchCoordinator
 
 
 class StubService(EventStreamService):
@@ -7,7 +8,7 @@ class StubService(EventStreamService):
         self,
         fetcher,  # () -> dict; the "HTTP get_json" layer (may raise)
         wifi,  # has is_connected() -> bool
-        coordinator,  # FetchCoordinator
+        coordinator: FetchCoordinator,
         interval_ms: int,
         schedule,  # (callback, arg) -> None
         clock,  # () -> int
