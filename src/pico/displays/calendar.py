@@ -18,6 +18,7 @@ _MAX_STREAMS = const(5)
 _HEADER_MARGIN = const(6)
 _AXIS_MARGIN = const(3)
 _BAR_TEXT_MARGIN = const(2)
+_BAR_SEAM_PX = const(1)
 _MIN_LABEL_PX = const(14)
 
 _SEC_PER_HOUR = const(3600)
@@ -188,14 +189,12 @@ class Renderer:
                 gfx.set_pen(pen)
                 gfx.rectangle(x0, row_top, x1 - x0, bar_h)
 
-                # Bracket every bar with 1px empty-row seams — at the column just
-                # before it (x0-1) and at its own last column (x1-1) — so
-                # adjacent or overlapping bars, same colour or not, always show a
-                # clean boundary.
+                # Seams keep adjacent or overlapping bars distinct, same colour
+                # or not.
                 gfx.set_pen(self._colors.empty_row)
-                if x0 - 1 >= 0:
-                    gfx.rectangle(x0 - 1, row_top, 1, bar_h)
-                gfx.rectangle(x1 - 1, row_top, 1, bar_h)
+                if x0 - _BAR_SEAM_PX >= 0:
+                    gfx.rectangle(x0 - _BAR_SEAM_PX, row_top, _BAR_SEAM_PX, bar_h)
+                gfx.rectangle(x1 - _BAR_SEAM_PX, row_top, _BAR_SEAM_PX, bar_h)
 
                 bar_px = x1 - x0
                 text_y = row_top + (bar_h - geom.bar_text_height) // 2 + 2

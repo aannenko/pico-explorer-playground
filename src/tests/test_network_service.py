@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from services import wifi_client
+from services import network_service, wifi_client
 from services.network_service import NetworkService
 from utilities import ntp
 
@@ -108,7 +108,7 @@ def test_tick_starts_wifi_when_not_connected(fake_ticks):
     svc._tick()
 
     assert len(wifi.start_connect_calls) == 1
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
 
 def test_tick_skips_wifi_when_connected(fake_ticks, monkeypatch):
@@ -120,7 +120,7 @@ def test_tick_skips_wifi_when_connected(fake_ticks, monkeypatch):
     svc._tick()
 
     assert wifi.start_connect_calls == []
-    assert svc._phase == 0  # _IDLE (NTP completed in same tick)
+    assert svc._phase == network_service._IDLE
 
 
 def test_tick_wifi_connecting_stays_in_wifi_phase(fake_ticks, monkeypatch):
@@ -134,7 +134,7 @@ def test_tick_wifi_connecting_stays_in_wifi_phase(fake_ticks, monkeypatch):
     svc._tick()
 
     assert ntp_calls[0] == 0
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
 
 def test_tick_wifi_connected_transitions_to_ntp(fake_ticks, monkeypatch):
@@ -142,13 +142,13 @@ def test_tick_wifi_connected_transitions_to_ntp(fake_ticks, monkeypatch):
     wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
     svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
     wifi.state = wifi_client.CONNECTED
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
     svc._tick()
 
-    assert svc._phase == 0  # _IDLE
+    assert svc._phase == network_service._IDLE
 
 
 def test_tick_wifi_failed_resets_to_idle(fake_ticks):
@@ -156,12 +156,12 @@ def test_tick_wifi_failed_resets_to_idle(fake_ticks):
     wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
     svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
     wifi.state = wifi_client.FAILED
     svc._tick()
 
-    assert svc._phase == 0  # _IDLE
+    assert svc._phase == network_service._IDLE
 
 
 def test_tick_ntp_sync_resets_to_idle(fake_ticks, monkeypatch):
@@ -172,7 +172,7 @@ def test_tick_ntp_sync_resets_to_idle(fake_ticks, monkeypatch):
     svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
-    assert svc._phase == 0  # _IDLE
+    assert svc._phase == network_service._IDLE
     assert svc._last_sync_ticks == 200
 
 
@@ -211,14 +211,14 @@ def test_tick_full_cycle(fake_ticks, monkeypatch):
 
     fake_ticks[0] = 200
     svc._tick()  # IDLE → WIFI, wifi CONNECTING
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
     svc._tick()  # wifi still CONNECTING
-    assert svc._phase == 1  # _WIFI
+    assert svc._phase == network_service._WIFI
 
     wifi.state = wifi_client.CONNECTED
     svc._tick()  # CONNECTED → NTP → sync → IDLE
-    assert svc._phase == 0  # _IDLE
+    assert svc._phase == network_service._IDLE
     assert svc._last_sync_ticks == 200
     assert ntp_calls[0] == 1
 

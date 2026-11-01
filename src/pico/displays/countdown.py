@@ -31,7 +31,7 @@ DURATIONS = (
 )
 LABELS = ("5 min", "10 min", "15 min", "30 min", "1 hour", "2 hours", "4 hours", "8 hours")
 
-_DEFAULT_INDEX = const(5)  # "2 hours"
+_DEFAULT_DURATION_SEC = const(2 * 60 * 60)
 
 
 @micropython.native
@@ -49,7 +49,7 @@ class Display(_Display):
         self._renderer = renderer
         self._timer = countdown_timer
 
-        self._duration_index = _DEFAULT_INDEX
+        self._duration_index = DURATIONS.index(_DEFAULT_DURATION_SEC)
         self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
 
         self._active = False

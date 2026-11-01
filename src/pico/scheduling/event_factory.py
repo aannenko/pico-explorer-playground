@@ -12,6 +12,7 @@ _SEC_IN_WEEK = const(_SEC_IN_DAY * 7)
 _WORK = const(0)
 _REST = const(1)
 _WEEKEND = const(2)
+_EVENTS_PER_WORK_DAY = const(2)
 
 _STRUCT_FORMAT = "IB"  # event_duration_sec, event_type
 _STRUCT_SIZE = struct.calcsize(_STRUCT_FORMAT)
@@ -49,7 +50,7 @@ def work_week_loop(
     is_work_midnight = work_start > work_end
 
     # Calculate the number of events
-    num_events = len(work_days) * 2  # work + rest/weekend per work day
+    num_events = len(work_days) * _EVENTS_PER_WORK_DAY
 
     # Pre-calculate event durations (wall-clock — constant regardless of DST)
     work_start_second_of_day = work_start_hour * 3600 + work_start_minute * 60

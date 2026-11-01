@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from network import STAT_GOT_IP, STAT_WRONG_PASSWORD, STAT_CONNECTING, STAT_NO_AP_FOUND, STAT_CONNECT_FAIL
+from network import STAT_GOT_IP, STAT_WRONG_PASSWORD, STAT_CONNECTING, STAT_NO_AP_FOUND, STAT_CONNECT_FAIL, STAT_IDLE
 from services import wifi_client
 from services.wifi_client import WifiClient
 
@@ -213,7 +213,7 @@ def test_tick_retry_on_unknown_status(started_wifi):
     wifi, fake_wlan, _, ticks = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
-    fake_wlan._status_value = 0  # STAT_IDLE / CYW43_LINK_DOWN
+    fake_wlan._status_value = STAT_IDLE
     wifi._tick(wifi._generation)
     assert len(fake_wlan._connect_calls) == connect_count
 

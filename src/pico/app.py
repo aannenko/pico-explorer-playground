@@ -44,23 +44,30 @@ from services.weather_service import WeatherService
 from services.wifi_client import WifiClient
 
 
+_SEC_PER_HOUR = const(3600)
+
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
 
 # Single source of truth for the weather/air fetch cadence.
 _STREAM_REFRESH_MS = const(30 * 60 * 1000)
+# Forecast slack beyond the calendar window: covers scroll plus a couple of
+# failed retries.
+_STREAM_SLACK_REFRESHES = const(2)
 
-# How many hours of forecast to request — derived here because app.py is the one
-# place that sees both the calendar's future window (owned by displays.calendar)
-# and the fetch cadence above.  Smallest horizon that keeps the window populated:
-# ceil((future_window + 2*refresh + 1 h) / 1 h) — 2x refresh covers scroll + a
-# couple of failed retries, +1 h absorbs the snap to the current hour boundary.
-_STREAM_HORIZON_SEC = calendar.WINDOW_FUTURE_SEC + 2 * (_STREAM_REFRESH_MS // 1000) + 3600
-_STREAM_FORECAST_HOURS = (_STREAM_HORIZON_SEC + 3599) // 3600
+# Derived here because app.py is the one place that sees both the calendar's
+# future window (owned by displays.calendar) and the fetch cadence above.  The
+# extra hour absorbs the snap to the current hour boundary.
+_STREAM_HORIZON_SEC = (
+    calendar.WINDOW_FUTURE_SEC
+    + _STREAM_SLACK_REFRESHES * (_STREAM_REFRESH_MS // 1000)
+    + _SEC_PER_HOUR
+)
+_STREAM_FORECAST_HOURS = (_STREAM_HORIZON_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
 
 # How many past hours to request so the calendar's past window (left of the
 # now-line) stays populated: the API's forecast_hours starts at the current
 # hour, so without this the past strip would render blank.  ceil(past / 1 h).
-_STREAM_PAST_HOURS = (calendar.WINDOW_PAST_SEC + 3599) // 3600
+_STREAM_PAST_HOURS = (calendar.WINDOW_PAST_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
 
 
 _SENSOR_BANDS_KEYS = (

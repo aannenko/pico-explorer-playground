@@ -24,6 +24,9 @@ _HISTORY_MS = const(24 * 3600 * 1000)  # 24 h of history per metric
 _L_GAP = const(3)  # px between value text and graph
 _R_MARGIN = const(0)  # px between graph right edge and screen edge
 _ICON_SCALE = const(2)  # band icons blit at 2x their native px
+# bitmap8 glyph ink sits high in its cell, so a box-centred icon reads low
+# against digits.
+_ICON_INK_LIFT_PX = const(2)
 # 63 px at bitmap8 scale 3 — the budget every value string must fit.  "-99.9"
 # is the widest _fit_chars can actually emit and also measures 63; integer
 # forms clamp to "9999" (57) / "-999" (54).
@@ -112,9 +115,7 @@ class Geometry:
 
         self.icon_scale = _ICON_SCALE
         self.icon_size_px = icon_px * _ICON_SCALE
-        # Centre the icon on the text row, then lift it 2 px: bitmap8 glyph ink
-        # sits high in its cell, so a box-centred icon reads low against digits.
-        self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + 2
+        self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + _ICON_INK_LIFT_PX
 
         self.unit_scale = text_scale
         self.unit_size_px = unit_px * self.unit_scale

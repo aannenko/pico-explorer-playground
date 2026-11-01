@@ -5,7 +5,7 @@ from hardware.explorer import BUZZER_PIN
 # Note: You must bridge the pin you use over to the AUDIO pin
 # on the Pico Explorer header in order to drive the onboard Piezo.
 
-_DEFAULT_ALERT_TOGGLES = const(10)  # 5 beeps = 10 toggles (on/off)
+_DEFAULT_ALERT_BEEPS = const(5)
 _DEFAULT_ALERT_INTERVAL_MS = const(150)
 _DEFAULT_ALERT_FREQ = const(1000)
 
@@ -30,7 +30,7 @@ class ExplorerBuzzer:
 
     def play_alert(
         self,
-        count: int = _DEFAULT_ALERT_TOGGLES // 2,
+        count: int = _DEFAULT_ALERT_BEEPS,
         freq: int = _DEFAULT_ALERT_FREQ,
         interval_ms: int = _DEFAULT_ALERT_INTERVAL_MS,
     ) -> None:

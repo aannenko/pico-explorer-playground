@@ -6,6 +6,11 @@ import services.pimoroni_bme690 as pimoroni_bme690
 
 from conftest import FakeTimer, make_timer_factory
 
+_RAW_TEMP_C = 20.0
+_RAW_PRESSURE_PA = 100_000.0
+_RAW_HUMIDITY_PERCENT = 50.0
+_RAW_GAS_OHM = 2_500.0
+
 
 class FakeI2C:
     def __init__(self, **kwargs) -> None:
@@ -43,11 +48,11 @@ def _patch_driver(monkeypatch) -> None:
 
 def test_read_applies_offsets_converts_units_and_stable_status() -> None:
     FakeBreakoutBME69X.next_reading = (
-        20.0,  # C
-        100_000.0,  # Pa
-        50.0,  # %
-        2_500.0,  # Ohm
-        0b10,  # heater stable
+        _RAW_TEMP_C,
+        _RAW_PRESSURE_PA,
+        _RAW_HUMIDITY_PERCENT,
+        _RAW_GAS_OHM,
+        pimoroni_bme690.STATUS_HEATER_STABLE,
     )
 
     reader = pimoroni_bme690.PimoroniBME690(

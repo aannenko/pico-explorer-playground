@@ -139,7 +139,7 @@ names = [p[0] for p in PALETTE]
 rgbs = [(p[1], p[2], p[3]) for p in PALETTE]
 _BY_NAME = {p[0]: (p[1], p[2], p[3]) for p in PALETTE}
 
-THRESH = 12.0  # below ~12 dE2000 = hard to tell apart
+MIN_DISTINGUISHABLE_DE = 12.0
 for kind in ("normal", "protan", "deutan", "tritan"):
     labs = [rgb_to_lab(simulate(c, kind)) for c in rgbs]
     pairs = []
@@ -151,13 +151,13 @@ for kind in ("normal", "protan", "deutan", "tritan"):
             pairs.append((de, names[i], names[j]))
     pairs.sort()
     print("=== %s ===" % kind.upper())
-    clonce = [p for p in pairs if p[0] < THRESH]
+    clonce = [p for p in pairs if p[0] < MIN_DISTINGUISHABLE_DE]
     if not clonce:
-        print("  no pairs below dE %.0f" % THRESH)
+        print("  no pairs below dE %.0f" % MIN_DISTINGUISHABLE_DE)
     for de, n1, n2 in clonce:
         print("  dE %5.1f  %-8s <-> %-8s   *** CLASH" % (de, n1, n2))
     # also show the 3 closest above-threshold for context
-    above = [p for p in pairs if p[0] >= THRESH][:3]
+    above = [p for p in pairs if p[0] >= MIN_DISTINGUISHABLE_DE][:3]
     for de, n1, n2 in above:
         print("  dE %5.1f  %-8s <-> %-8s" % (de, n1, n2))
     print()
@@ -184,6 +184,6 @@ for label, members in METRIC_SETS:
                 de = ciede2000(labs[members[a]], labs[members[b]])
                 if worst is None or de < worst[0]:
                     worst = (de, members[a], members[b])
-        flag = "  *** below %.0f" % THRESH if worst[0] < THRESH else ""
+        flag = "  *** below %.0f" % MIN_DISTINGUISHABLE_DE if worst[0] < MIN_DISTINGUISHABLE_DE else ""
         print("    %-7s worst dE %5.1f  %s<->%s%s" % (kind, worst[0], worst[1], worst[2], flag))
     print()

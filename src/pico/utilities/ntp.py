@@ -9,15 +9,13 @@ IDLE = const(0)
 SYNCED = const(1)
 FAILED = const(2)
 
+_RETRY_DELAY_S = const(10)
+
 state = IDLE
 
 
 def sync_time(attempts=1):
-    """Blocking NTP sync. Returns final state (SYNCED or FAILED).
-
-    Each attempt calls ntptime.settime() which blocks ~1-3s for the
-    UDP roundtrip. Failed attempts are separated by a 10s sleep.
-    """
+    """Blocking NTP sync; returns ``SYNCED`` or ``FAILED``."""
     global state
     state = IDLE
 
@@ -30,6 +28,6 @@ def sync_time(attempts=1):
             log_exception("[ntp] exception:", e)
             state = FAILED
             if i < attempts - 1:
-                time.sleep(10)
+                time.sleep(_RETRY_DELAY_S)
 
     return FAILED

@@ -59,6 +59,8 @@ PALETTE_RGB = (
 # spare-slot/off-palette colour still errors out instead of snapping to a spare.
 ICON_SLOTS = tuple(range(12))
 
+_WHITE_LABEL_MAX_LUMA = const(140)
+
 
 def _auto_contrast(slot: int) -> int:
     """Return BLACK or WHITE, whichever reads better on ``slot``'s colour.
@@ -68,7 +70,7 @@ def _auto_contrast(slot: int) -> int:
     """
     r, g, b = PALETTE_RGB[slot]
     lum = (r * 299 + g * 587 + b * 114) // 1000
-    return BLACK if lum > 140 else WHITE
+    return BLACK if lum > _WHITE_LABEL_MAX_LUMA else WHITE
 
 
 # Per-slot auto-contrast lookup (pen == slot under PEN_P4), computed once at

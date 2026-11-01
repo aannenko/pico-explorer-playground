@@ -191,6 +191,7 @@ if "network" not in sys.modules:
 
     network_stub.WLAN = _WLAN
     network_stub.STA_IF = 0
+    network_stub.STAT_IDLE = 0
     network_stub.STAT_GOT_IP = 3
     network_stub.STAT_WRONG_PASSWORD = 4
     network_stub.STAT_CONNECTING = 1
