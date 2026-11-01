@@ -224,7 +224,7 @@ def test_status_goes_stale_after_cutoff():
     assert h.service.status == STALE
 
 
-def test_store_exception_is_swallowed_but_success_recorded():
+def test_store_exception_is_swallowed_but_success_recorded(capsys):
     h = _Harness()
 
     def boom(_events):
@@ -238,6 +238,23 @@ def test_store_exception_is_swallowed_but_success_recorded():
     assert h.service.status == FRESH
     assert h.service._failures == 0
     assert h.service.generation == 0  # store never completed its bump
+    out = capsys.readouterr().out
+    assert "[stub] store err:" in out
+    assert "RuntimeError: store blew up" in out
+
+
+def test_tick_exception_is_swallowed_and_printed(capsys):
+    h = _Harness()
+
+    def boom():
+        raise RuntimeError("advance blew up")
+
+    h.service._advance = boom
+    h.service.tick()
+
+    out = capsys.readouterr().out
+    assert out.startswith("[stub] tick err:")
+    assert "RuntimeError: advance blew up" in out
 
 
 def test_success_after_failure_resets_failures():

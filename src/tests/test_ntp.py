@@ -23,13 +23,16 @@ def test_sync_time_success(monkeypatch):
     assert result == ntp.SYNCED
 
 
-def test_sync_time_failure(monkeypatch):
+def test_sync_time_failure(monkeypatch, capsys):
     def raise_error():
         raise OSError("NTP timeout")
 
     monkeypatch.setattr("utilities.ntp.ntptime.settime", raise_error)
     result = ntp.sync_time()
     assert result == ntp.FAILED
+    out = capsys.readouterr().out
+    assert out.startswith("[ntp] exception:")
+    assert "OSError: NTP timeout" in out
 
 
 def test_sync_time_succeeds_on_retry(monkeypatch):

@@ -60,7 +60,16 @@ if "micropython" not in sys.modules:
     micropython_stub.const = lambda x: x
     micropython_stub.native = _native
     micropython_stub.schedule = _schedule
+    micropython_stub.mem_info = lambda *_args: None
     sys.modules["micropython"] = micropython_stub
+
+# MicroPython's sys.print_exception() prints a traceback to stdout.
+if not hasattr(sys, "print_exception"):
+    import traceback as _traceback
+
+    sys.print_exception = lambda exc, file=None: _traceback.print_exception(  # type: ignore[attr-defined]
+        exc, file=sys.stdout if file is None else file
+    )
 
 if "machine" not in sys.modules:
     machine_stub = types.ModuleType("machine")

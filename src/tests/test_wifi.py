@@ -124,6 +124,35 @@ def test_start_connect_empty_ssid_fails(wifi, fake_wlan, fake_timer, fake_ticks)
     assert not fake_timer.init_called
 
 
+def _refuse_connect(_ssid, _password):
+    raise OSError("radio busy")
+
+
+def test_connect_exception_on_start_is_printed_and_still_connecting(
+    wifi, fake_wlan, fake_timer, fake_ticks, capsys
+):
+    fake_wlan.connect = _refuse_connect
+
+    wifi.start_connect("MySSID", "pass")
+
+    assert wifi.state == wifi_client.CONNECTING
+    out = capsys.readouterr().out
+    assert out.startswith("[wifi] connect exception:")
+    assert "OSError: radio busy" in out
+
+
+def test_connect_exception_on_retry_is_printed(started_wifi, capsys):
+    wifi, fake_wlan, *_ = started_wifi
+    fake_wlan.connect = _refuse_connect
+    fake_wlan._status_value = STAT_CONNECT_FAIL
+
+    wifi._tick(wifi._generation)
+
+    out = capsys.readouterr().out
+    assert out.startswith("[wifi] connect exception:")
+    assert "OSError: radio busy" in out
+
+
 # --- _tick() transitions ---
 
 def test_tick_connecting_to_connected(started_wifi):

@@ -3,6 +3,8 @@ import ntptime
 
 from micropython import const
 
+from utilities.log import log_exception
+
 IDLE = const(0)
 SYNCED = const(1)
 FAILED = const(2)
@@ -25,7 +27,7 @@ def sync_time(attempts=1):
             state = SYNCED
             return SYNCED
         except Exception as e:
-            print("[ntp] exception:", e)
+            log_exception("[ntp] exception:", e)
             state = FAILED
             if i < attempts - 1:
                 time.sleep(10)

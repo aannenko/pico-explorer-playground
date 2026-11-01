@@ -4,6 +4,7 @@ from micropython import const
 from services import wifi_client
 from services.wifi_client import WifiClient
 from utilities import ntp
+from utilities.log import log_exception
 
 _IDLE = const(0)
 _WIFI = const(1)
@@ -55,7 +56,7 @@ class NetworkService:
         try:
             self._tick_inner()
         except Exception as e:
-            print("[net] tick err:", e)
+            log_exception("[net] tick err:", e)
 
     def _tick_inner(self) -> None:
         if self._phase == _IDLE:

@@ -21,6 +21,7 @@ from micropython import const
 from scheduling.event import Event
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE
 from services._fetch_machine import FetchMachine
+from utilities.log import log_exception
 
 _DEFAULT_BACKOFF_BASE_MS = const(5_000)
 _DEFAULT_BACKOFF_MAX_MS = const(600_000)
@@ -51,6 +52,8 @@ class EventStreamService:
         self._schedule = schedule
         self._interval_ms = interval_ms
         self._name = name
+        self._tick_err_tag = "[%s] tick err:" % name
+        self._store_err_tag = "[%s] store err:" % name
         self._enabled = enabled
         self._clock = clock
         self._backoff_base_ms = backoff_base_ms
@@ -80,7 +83,7 @@ class EventStreamService:
         try:
             self._advance()
         except Exception as exc:
-            print("[%s] tick err:" % self._name, exc)
+            log_exception(self._tick_err_tag, exc)
 
     def _advance(self) -> None:
         if self._fetch is None:
@@ -104,7 +107,7 @@ class EventStreamService:
             try:
                 self._store(state.result)
             except Exception as exc:
-                print("[%s] store err:" % self._name, exc)
+                log_exception(self._store_err_tag, exc)
         else:
             self._failures += 1
             delay = self._backoff_delay()

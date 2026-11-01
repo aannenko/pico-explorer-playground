@@ -197,7 +197,7 @@ def test_tick_exception_safety(fake_ticks, capsys):
 
     captured = capsys.readouterr()
     assert "[net] tick err:" in captured.out
-    assert "boom" in captured.out
+    assert "RuntimeError: boom" in captured.out
 
 
 def test_tick_full_cycle(fake_ticks, monkeypatch):

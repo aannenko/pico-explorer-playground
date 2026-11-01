@@ -12,6 +12,8 @@ from network import (
     STAT_CONNECT_FAIL,
 )
 
+from utilities.log import log_exception
+
 IDLE = const(0)
 CONNECTING = const(1)
 CONNECTED = const(2)
@@ -137,7 +139,7 @@ class WifiClient:
         try:
             self._wlan.connect(ssid, password)
         except Exception as e:
-            print("[wifi] connect exception:", e)
+            log_exception("[wifi] connect exception:", e)
 
         self._state = CONNECTING
 
@@ -184,7 +186,7 @@ class WifiClient:
             try:
                 self._wlan.connect(self._ssid, self._password)
             except Exception as e:
-                print("[wifi] connect exception:", e)
+                log_exception("[wifi] connect exception:", e)
 
     def _stop_timer(self) -> None:
         if self._timer is not None:
