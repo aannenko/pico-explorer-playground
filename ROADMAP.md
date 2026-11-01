@@ -56,6 +56,11 @@ leaves them ambiguous.
   (similar to the current ring timer behavior). Will replace
   `demo_streams.py` as the source of stream definitions (up to 5).
 
+- **Integer UI scaling** — one integer scale factor so the same views can
+  drive a larger panel (e.g. a planned e-ink screen) with crisp bitmap text
+  and pixel-art icons, each view asserting its fit at boot. Plan, inventory
+  and open questions in `src/docs/ui-scaling-plan.md`.
+
 - **Electricity tariff windows** (deferred) — static weekly tariff
   schedule (peak / mid / low).  Structurally distinct from waste
   (dense partition vs. sparse events) so likely a separate
