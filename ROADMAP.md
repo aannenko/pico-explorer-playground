@@ -61,6 +61,16 @@ leaves them ambiguous.
   and pixel-art icons, each view asserting its fit at boot. Plan, inventory
   and open questions in `src/docs/ui-scaling-plan.md`.
 
+- **Log screen** (debugging aid) — a view listing the latest log entries in
+  native-scale (scale-1) text, so recent errors can be read on the device
+  without a serial console. A `LogService` keeps the last few entries in
+  fixed memory, fed by `utilities.log.log_exception`. `micropython.RingIO` is
+  the candidate store, but its `write()` drops bytes once full and reads
+  consume them, so the service must evict the oldest line before writing and
+  the view needs a non-draining copy. Capturing every `print()` would need
+  `os.dupterm` with a write-only stream: dupterm also feeds the stream's
+  contents back to the REPL as input.
+
 - **Electricity tariff windows** (deferred) — static weekly tariff
   schedule (peak / mid / low).  Structurally distinct from waste
   (dense partition vs. sparse events) so likely a separate
