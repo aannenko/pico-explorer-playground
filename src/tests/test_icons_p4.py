@@ -41,7 +41,7 @@ def test_scale_expands_each_pixel_to_a_square() -> None:
 
 def test_transparent_override_skips_that_slot_not_zero() -> None:
     gfx = FakeGfx()
-    # 1x2 icon: (0,0)=4, (1,0)=5  -> byte 0x45
+    # 2x1 icon: (0,0)=4, (1,0)=5  -> byte 0x45
     icon = (2, 1, bytes([0x45]))
     icons_p4.draw_icon(gfx, icon, x=0, y=0, scale=1, transparent=4)
     # slot 4 skipped, slot 5 drawn (and slot 0 would have been drawn if present).

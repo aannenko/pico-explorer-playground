@@ -48,7 +48,7 @@ def _intensity(mm: float) -> tuple[int, int]:
     """Map an hourly precipitation amount to ``(priority_rank, color_index)``.
 
     Rank 1/2/3 (light/moderate/heavy) ranks precip against UV on the rare
-    same-hour overlap; the color is the global palette index.
+    same-hour overlap; the color is a ``STREAM_COLORS`` index.
     """
     if mm < _MODERATE_MM:
         return (1, STREAM_GREEN)

@@ -15,7 +15,7 @@ except ImportError:
 
 
 class HttpError(Exception):
-    """Base for every http_client failure; callers catch this to classify retry."""
+    """Base for the transport, status, protocol and JSON failures ``get_json`` classifies."""
 
 
 class HttpTimeout(HttpError):
@@ -23,7 +23,7 @@ class HttpTimeout(HttpError):
 
 
 class HttpConnectError(HttpError):
-    """DNS, connection-refused, or other socket setup failure."""
+    """Non-timeout socket failure: DNS, connection refused, or a failed read."""
 
 
 class HttpStatusError(HttpError):
@@ -53,9 +53,10 @@ def _classify_oserror(exc: OSError) -> HttpError:
 def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
     """GET ``url`` and return the parsed JSON body as a dict.
 
-    Raises an ``HttpError`` subclass on any failure; never returns None.
-    Collects garbage first to reduce fragmented-heap allocation failures,
-    and always closes the response.
+    Raises an ``HttpError`` subclass for transport, status, protocol and JSON
+    failures; anything else (e.g. ``MemoryError``) propagates.  Collects
+    garbage first to reduce fragmented-heap allocation failures, and always
+    closes the response.
     """
     gc.collect()
     response = None

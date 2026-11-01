@@ -143,7 +143,7 @@ if "breakout_bme69x" not in sys.modules:
     breakout_stub.OVERSAMPLING_2X = 2
     breakout_stub.STANDBY_TIME_1000_MS = 1000
 
-    class _BreakoutBME69X:  # minimal API shim used by `BME690Reader`
+    class _BreakoutBME69X:
         def __init__(self, _i2c):
             pass
 
@@ -151,7 +151,6 @@ if "breakout_bme69x" not in sys.modules:
             return None
 
         def read(self):
-            # Return a tuple long enough for [0:5] slicing.
             return (0.0, 0.0, 0.0, 0.0, 0)
 
     breakout_stub.BreakoutBME69X = _BreakoutBME69X

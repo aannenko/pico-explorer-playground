@@ -143,8 +143,6 @@ class EventStreamService:
         return STALE
 
     def _store(self, events: list[Event]) -> None:
-        # Infallible: publish the parsed snapshot and bump the generation the
-        # calendar polls to refresh its window.
         self._events = events
         self._generation += 1
         print("[%s] published %d events (gen %d)" % (self._name, len(self._events), self._generation))

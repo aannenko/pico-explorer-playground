@@ -123,9 +123,6 @@ class Geometry:
         self.unit_x = self.icon_x + self.icon_size_px + 4
         self.value_x = self.unit_x + self.unit_size_px + 6
 
-        # Graph layout — fully derived from the actual rendered width of a
-        # 4-character value at the current font/scale.  No hardcoded value
-        # column width.
         value_max_text_width = pico_graphics.measure_text(
             _WIDEST_GRAPH_VALUE, scale=text_scale
         )
@@ -141,9 +138,7 @@ class Geometry:
         self.ticks_per_commit = total_ticks // self.graph_width
         self.graph_height = self.text_height  # 24 px, matches row height
 
-        # Value-cell clear width: covers the value text + the L-gap so
-        # ``line_write`` never touches the graph rect.  Also stops just
-        # before the graph rect on the right.
+        # Stops at graph_x so clearing a value never erases the graph.
         self.value_clear_width = self.graph_x - self.value_x
 
 
@@ -172,11 +167,6 @@ class Renderer:
         icon: tuple,
         unit: tuple,
     ) -> None:
-        """Paint the row's icon + unit glyph in the left column (static after
-        view entry).  The ``icons_p4`` blitter skips slot-0 (BLACK) pixels so
-        the icon never leaves a halo on the black view.  ``icon`` / ``unit``
-        are ``(w, h, blob)`` tuples from ``_icons_data``.
-        """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
@@ -209,9 +199,6 @@ class Renderer:
 
         self._update_needed = True
         g = self._geom
-        # Clear value-column rect only; left-column icon + unit are static,
-        # and the graph rect (graph_x .. graph_x+graph_width) is never
-        # touched by line_write — it has its own redraw path.
         self._gfx.set_pen(self._colors.background)
         self._gfx.rectangle(g.value_x, g.line_y[line_idx], g.value_clear_width, g.value_rect_height)
 
@@ -449,7 +436,7 @@ class Display(_Display):
         outputs are clamped to ``"9999"`` / ``"-999"`` to guarantee the
         rendered width never exceeds the 63 px budget set by
         ``_WIDEST_GRAPH_VALUE = "-88.8"`` (``PicoGraphics.text()`` doesn't
-        clip, so an overflow would overdraw the history graph).
+        clip to the value cell, so an overflow would overdraw the history graph).
 
         Realistic readings (BME690 in the project's typical setup) all fit:
           - temp:     ``"22.4"``, ``"-9.9"``, ``"-12.3"``, ``"-99.9"``, ``"100"``

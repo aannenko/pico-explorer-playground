@@ -155,7 +155,7 @@ class Renderer:
 
         # Fast path: single segment (common per-tick case). _seg_buf is
         # reused but the four (x, y) tuples are freshly allocated each call
-        # — a pre-allocated array would save ~4 small tuples/sec but isn't
+        # — a pre-allocated array would save 4 small tuples per segment but isn't
         # worth the API change for polygon().
         if count == 1:
             idx = self._segments_cleared

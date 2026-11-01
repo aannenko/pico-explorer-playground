@@ -8,4 +8,4 @@ BUTTON_B_PIN = const(13)
 BUTTON_X_PIN = const(14)
 BUTTON_Y_PIN = const(15)
 
-BUZZER_PIN = const(0)  # Pico Explorer piezo is on GP0
+BUZZER_PIN = const(0)

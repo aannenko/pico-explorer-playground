@@ -4,9 +4,8 @@ from machine import Pin
 class ButtonPoller:
     """Edge-detecting button poller using raw Pin levels (active-low).
 
-    Uses machine.Pin instead of pimoroni.Button to avoid the
-    latch-and-clear + auto-repeat behavior of Button.read() which
-    defeats edge detection.
+    Uses machine.Pin instead of pimoroni.Button, whose read() auto-repeats
+    while a button is held.
     """
 
     def __init__(self, schedule) -> None:

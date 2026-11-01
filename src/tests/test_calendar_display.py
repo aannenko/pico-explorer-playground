@@ -323,8 +323,6 @@ class TestRemainingTime:
         window_start = now - 1800
         window_end = now + 5400
 
-        # Event with a very long name starting near the right edge of the window,
-        # extending beyond — bar is wide but label fills it
         stream = _make_stream(
             ("AVERYLONGEVENTNAME", now + 4800, 7200),
             palette=[10],
@@ -333,13 +331,7 @@ class TestRemainingTime:
 
         renderer.draw_rows([stream], window_start, window_end)
 
-        # The bar for this event starts at ~92% of the width (4800/7200 offset)
-        # and extends to the right edge — very narrow visible portion.
-        # Remaining text should NOT appear if it would overlap the label.
         rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
-        # Either no remaining text, or if bar is wide enough, it appears.
-        # With bar starting at ~92% of 240px = ~220px, only ~20px visible.
-        # "-02:50" at scale 2 = 6*6*2 = 72px — won't fit.
         assert len(rem_texts) == 0
 
 

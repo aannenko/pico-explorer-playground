@@ -3,7 +3,7 @@
 Builds the two endpoint URLs (forecast + air-quality), runs the fetch via an
 injected getter, and exposes the hourly-array helpers both consumers share.
 
-HTTP (not HTTPS) on purpose: no TLS handshake, no contiguous-heap allocation.
+HTTP (not HTTPS) on purpose: no TLS handshake and its large contiguous-heap block.
 """
 
 import time

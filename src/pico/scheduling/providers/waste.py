@@ -1,8 +1,8 @@
 """Waste-collection calendar stream from a recurring schedule.
 
 Pure on-device generator: no network, no service lifecycle.  Each schedule
-entry recurs every ``period_weeks``; events are emitted in start-time order
-across all entries.
+entry recurs every ``period_weeks`` (a non-positive period emits it once);
+events are emitted in start-time order across all entries.
 """
 
 import time

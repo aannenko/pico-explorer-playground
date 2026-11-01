@@ -35,9 +35,7 @@ _NAMES = ("BLACK", "WHITE", "GRAY", "DKGRAY", "BLUE", "GREEN", "YELLOW",
           "RED", "SKY", "ORANGE", "RPURPLE", "BROWN")
 PALETTE = tuple((_NAMES[i], *PALETTE_RGB[i]) for i in range(len(_NAMES)))
 
-# Slots where colour is NOT the sole signal (achromatic + ordered ramp uses
-# luminance + value-pixel position).  We focus clash-reporting on the
-# qualitative chromatic slots, but compute everything.
+# Pairs within these slots are skipped: luminance alone tells them apart.
 ACHROMATIC = {0, 1, 2, 3}
 
 # Machado 2009 severity-1.0 matrices (apply to LINEAR rgb).

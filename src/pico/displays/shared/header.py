@@ -4,8 +4,7 @@ import time
 # Widest string ``format_header_time`` can emit: bitmap8 draws '1' narrower than
 # every other digit, so a date free of '1's is the worst case (219 px at
 # bitmap8/scale 3 on the 240 px Explorer, device-measured; "2111-11-11 11:11" is
-# only 186).  Public because MicroPython drops ``_``-prefixed names from the
-# module namespace, which would make it unimportable.
+# only 186).
 WIDEST_HEADER = "2044-08-08 04:44"
 
 

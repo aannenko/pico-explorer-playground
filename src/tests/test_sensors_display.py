@@ -524,8 +524,8 @@ def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch)
     d._update_display()
 
     # Real PimoroniBME690._do_read swaps _last_reading for a fresh tuple;
-    # mimic that with tuple([...]) to defeat CPython's constant-tuple folding
-    # (on MicroPython each expression evaluates to a fresh tuple anyway).
+    # mimic that with tuple([...]), since equal constant tuple literals may be
+    # folded into one object.
     reader._reading = tuple([22.4, 963.11, 25.7, 65.674, "Stable"])
     renderer.calls.clear()
     d._update_display()
@@ -638,7 +638,7 @@ def test_first_render_after_commit_triggers_graph_redraw_for_all_metrics(monkeyp
 
     history = _FakeRingHistory(capacity=10)
     for m in range(4):
-        history.set_samples(m, [25.0])  # one in-range sample for every metric
+        history.set_samples(m, [25.0])
     history.bump_commit()  # commit_count: 0 → 1 (force first redraw)
 
     d = _make_display(renderer=renderer, history=history)
@@ -701,8 +701,8 @@ def test_gas_row_graph_not_touched_during_steady_warming(monkeypatch) -> None:
     reader = FakeBME690Reader((22.0, 1010.0, 50.0, 75.0, "Warming"))
     d = _make_display(renderer=renderer, reader=reader, history=history)
 
-    # First tick: _gas_was_stable is None → counts as a transition → would
-    # clear the gas row once.  Drive to steady-state first.
+    # First tick: _gas_was_stable is None, so the graphs redraw once.
+    # Drive to steady-state first.
     d._update_display()
     renderer.calls.clear()
 

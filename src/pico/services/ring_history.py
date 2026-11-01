@@ -61,7 +61,7 @@ class RingHistory:
         return self._capacity
 
     def filled(self, metric_idx: int) -> int:
-        """Number of valid samples available for ``metric_idx`` (0..capacity)."""
+        """Number of stored samples (0..capacity), NaN placeholders included."""
         return self._filled
 
     @micropython.native

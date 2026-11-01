@@ -18,7 +18,7 @@ _MAX_STREAMS = const(5)
 _HEADER_MARGIN = const(6)
 _AXIS_MARGIN = const(3)
 _BAR_TEXT_MARGIN = const(2)
-_MIN_LABEL_PX = const(14)  # don't render label if bar is narrower
+_MIN_LABEL_PX = const(14)
 
 _SEC_PER_HOUR = const(3600)
 _SEC_PER_QUARTER = const(900)

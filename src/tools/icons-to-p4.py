@@ -50,7 +50,7 @@ def _index_of(rgb, name, x, y):
 
 
 def _pack(img, name):
-    """img: an RGB(A) PIL image already cropped to one icon.  Returns packed bytes."""
+    """img: an RGB(A) PIL image already cropped to one icon.  Returns ``(packed_bytes, w, h)``."""
     w, h = img.size
     px = img.convert("RGB").load()
     out = bytearray((w * h + 1) // 2)

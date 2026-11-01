@@ -1,7 +1,7 @@
 """End-to-end test of the network substrate via the stub service.
 
 Drives the full path a real network row uses: tick -> FetchMachine -> schedule
-(fetch) -> harvest (parse+store) -> generation bump -> EventWindow refresh ->
+(fetch+parse) -> harvest (store) -> generation bump -> EventWindow refresh ->
 what the renderer reads (get_visible / status).
 
 Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but

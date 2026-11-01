@@ -40,10 +40,10 @@ PALETTE_RGB: tuple = (
     (255, 255, 255),   # 1  WHITE   — text; sensor value marker; now-line
     (185, 185, 185),   # 2  GRAY    — secondary text; waste MIXED
     (70, 70, 70),      # 3  DKGRAY  — calendar empty rows; dark icon detail
-    (40, 150, 215),    # 4  BLUE    — sensor band low
+    (40, 150, 215),    # 4  BLUE    — sensor band; severity low
     (55, 200, 120),    # 5  GREEN   — sensor band; severity ok; precip light
     (240, 228, 66),    # 6  YELLOW  — sensor band; severity warn; waste PLAST
-    (238, 100, 45),    # 7  RED     — sensor band high; severity high; precip heavy
+    (238, 100, 45),    # 7  RED     — sensor band; severity high; precip heavy
     (120, 200, 250),   # 8  SKY     — waste PAPER
     (246, 176, 22),    # 9  ORANGE  — countdown ring; work-week
     (225, 150, 195),   # 10 RPURPLE — bus / spare qualitative
@@ -64,7 +64,7 @@ def _auto_contrast(slot: int) -> int:
     """Return BLACK or WHITE, whichever reads better on ``slot``'s colour.
 
     Rec.601 luma in integer math; threshold tuned so the dark ramp/qualitative
-    colours (RED, BLUE, BROWN, DKGRAY) take white text and the rest black.
+    colours (RED, BLUE, BROWN, DKGRAY) take white text and the lighter ones black.
     """
     r, g, b = PALETTE_RGB[slot]
     lum = (r * 299 + g * 587 + b * 114) // 1000

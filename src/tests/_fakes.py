@@ -1,14 +1,3 @@
-"""Shared test helpers (fakes / stubs) for the host-side pytest suite.
-
-Lives outside any ``test_*.py`` file so pytest doesn't collect it.  The
-leading underscore also keeps it from clashing with the production
-namespace if anyone ever puts ``src/tests/`` on the runtime path.
-
-``src/tests/`` is on ``sys.path`` whenever pytest is collecting tests
-from this directory (rootpath insertion), so ``from _fakes import ...``
-works from any test file regardless of how pytest was invoked.
-"""
-
 from __future__ import annotations
 
 

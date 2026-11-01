@@ -5,7 +5,7 @@ and defaults) and ``config.py`` (git-ignored, sparse overrides), then
 mutates the user module in place: each declared default the user
 doesn't override is copied onto ``config``; each user override is
 structurally validated against the default's type/shape and rejected
-with ``InvalidConfigError`` on mismatch.  No file I/O.
+with ``InvalidConfigError`` on mismatch.
 
 The merge mutates the user module in place rather than synthesising a
 new namespace, so pre-existing ``import config`` references see the
@@ -116,7 +116,6 @@ def _describe(value):
 
 
 def _collect_settings(module):
-    """Return ``{name: value}`` for every public UPPER_SNAKE_CASE attribute."""
     settings = {}
     for name in dir(module):
         if name == _SENTINEL_ATTR:

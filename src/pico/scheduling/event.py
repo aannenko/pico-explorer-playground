@@ -7,7 +7,7 @@ class Event:
         start_timestamp: int,
         wall_clock_duration_sec: int,
         real_duration_sec: int = -1,  # DST-corrected
-        color_index: int = 0,  # palette index for the bar color
+        color_index: int = 0,  # index into displays.palette.STREAM_COLORS
     ) -> None:
         if not name:
             raise ValueError("Event name cannot be empty")

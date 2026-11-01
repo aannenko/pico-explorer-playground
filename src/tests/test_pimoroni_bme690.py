@@ -25,7 +25,6 @@ class FakeBreakoutBME69X:
 
     def read(self):
         self.read_count += 1
-        # Return a tuple long enough for slicing [0:5]
         temp, press, hum, gas_r, status = self.next_reading
         return (temp, press, hum, gas_r, status, 123, 456)
 

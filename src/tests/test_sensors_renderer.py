@@ -355,7 +355,7 @@ def test_real_geometry_raises_when_font_too_large() -> None:
             return (100, 100)
 
         def measure_text(self, text, scale):
-            return 90  # eats more than the 100-wide screen
+            return 90
 
     gfx = _TinyScreen()
     import pytest

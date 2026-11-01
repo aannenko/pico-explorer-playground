@@ -41,11 +41,11 @@ BME690_PRSR_OFFSET = 45.0
 
 # Sensors.  Each tuple holds 5 strictly ascending edges:
 # ``(cap_min, t1, t2, t3, cap_max)``.  The inner three edges drive
-# the icon-swap band classification (4 bands per row: blue/green/yellow/red
-# style).  The outer two edges (``cap_min`` / ``cap_max``) bound the
-# 24-hour history graph: a value at ``cap_max`` plots at the top of the row,
-# ``cap_min`` at the bottom; values outside the range render as a fill
-# column only (no marker value pixel).
+# the icon-swap band classification (4 bands per row).  The outer two
+# edges (``cap_min`` / ``cap_max``) bound the 24-hour history graph: a value
+# at ``cap_max`` plots at the top of the row, ``cap_min`` at the bottom;
+# values outside the range render as a fill column only (no marker value
+# pixel).
 SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm / hot
 SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: low -> high
 SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid
@@ -64,8 +64,9 @@ UV_THRESHOLDS = (6, 8)
 # Calendar: air quality (Euro AQI scale) + pollen grains/m³ row (Open-Meteo).
 # Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps the row disabled).
 # Each threshold tuple is ``(warning, severe)``: at/above the first edge
-# shows an amber bar, at/above the second a red one.
-# POLLEN_SPECIES is variadic — add/remove Open-Meteo ``*_pollen`` names.
+# shows a yellow bar, at/above the second a red one.
+# POLLEN_SPECIES is variadic — add/remove Open-Meteo pollen names, without
+# the ``_pollen`` suffix.
 AQI_THRESHOLDS = (60, 80)
 POLLEN_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
 POLLEN_THRESHOLDS = (50, 100)

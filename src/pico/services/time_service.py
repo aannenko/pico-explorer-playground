@@ -98,8 +98,8 @@ class TimeService:
 
     The RTC stays UTC (set by NTP).  This service adds the correct
     offset (timezone + optional DST) so all consumers get local time
-    via ``now()``.  DST transitions are detected automatically on each
-    ``_tick()`` call — no coupling to NTP sync.
+    via ``now()``.  ``_tick()`` checks for a DST transition once a
+    minute — no coupling to NTP sync.
 
     Must be instantiated after NTP sync so ``time.time()`` is accurate.
     """
@@ -162,7 +162,8 @@ class TimeService:
         """Convert wall-clock duration to real seconds, accounting for DST.
 
         Uses endpoint conversion: to_utc(local_end) - to_utc(local_start).
-        Exact for any event length and any number of DST transitions.
+        Exact for any event length and any number of DST transitions, provided
+        neither endpoint falls in a spring-forward gap (a nonexistent local time).
         """
         return self.to_utc(local_start + wall_clock_sec) - self.to_utc(local_start)
 

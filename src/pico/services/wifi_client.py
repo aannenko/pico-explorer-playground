@@ -26,8 +26,8 @@ _TIMER_PERIOD_MS = const(500)
 class WifiClient:
     """Encapsulates a single WiFi connection state machine.
 
-    Each instance owns its own ``WLAN`` handle, timer, and state, so
-    multiple clients (or a test double) can coexist.
+    Instances share the firmware's single ``WLAN(STA_IF)`` interface; only
+    the timer and state are per instance.
 
     Timer ownership: ``_timer`` is transient — created in
     ``start_connect()`` and destroyed as soon as the state machine leaves

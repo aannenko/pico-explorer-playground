@@ -1,12 +1,3 @@
-"""Test-only reference network service exercising the fetch substrate.
-
-Not wired into ``app.py``.  It is the minimal ``EventStreamService`` subclass —
-the shape every real network service (weather / air / bus) follows: the base
-drives the loop, all fallible work (the HTTP get + parse) lives in one
-``_fetch_and_parse`` so failures back off, and the infallible store bumps a
-generation the calendar polls to refresh.
-"""
-
 from scheduling.event import Event
 from services._event_stream_service import EventStreamService
 
