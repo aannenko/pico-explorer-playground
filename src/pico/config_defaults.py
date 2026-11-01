@@ -49,7 +49,7 @@ BME690_PRSR_OFFSET = 45.0
 SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm / hot
 SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: low -> high
 SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid
-SENSOR_GAS_BANDS = (50, 100, 180, 280, 400)           # kΩ: polluted -> clean
+SENSOR_GAS_BANDS = (50, 100, 200, 350, 500)           # kΩ: polluted -> clean
 
 # Calendar: Weather forecast + UV row (Open-Meteo).
 # The weather row mixes precipitation and UV (they rarely coincide).
