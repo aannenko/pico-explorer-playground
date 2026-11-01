@@ -23,6 +23,11 @@ class ButtonPoller:
             pin, on_press, was_pressed = buttons[i]
             pressed = pin.value() == 0  # active-low with pull-up
             if pressed and not was_pressed:
-                schedule(on_press, 0)
+                # Scheduled rather than called directly: scheduled callbacks
+                # never nest, so no tick runs mid-handler.
+                try:
+                    schedule(on_press, 0)
+                except RuntimeError:
+                    continue
             if pressed != was_pressed:
                 buttons[i] = (pin, on_press, pressed)

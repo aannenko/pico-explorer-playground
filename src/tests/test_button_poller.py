@@ -81,3 +81,27 @@ def test_multiple_buttons_independent() -> None:
     # Both held — no new fires
     poller.poll_once()
     assert len(scheduled) == 2
+
+
+def test_press_is_retried_while_schedule_queue_is_full() -> None:
+    scheduled: list[object] = []
+    queue_full = [True]
+
+    def schedule(fn, arg):
+        if queue_full[0]:
+            raise RuntimeError("schedule queue full")
+        scheduled.append(fn)
+
+    poller = ButtonPoller(schedule=schedule)
+    btn = FakePin()
+    callback = lambda _: None
+    poller.add(btn, callback)
+
+    btn._pressed = True
+    poller.poll_once()
+    assert scheduled == []
+
+    queue_full[0] = False
+    poller.poll_once()
+    poller.poll_once()
+    assert scheduled == [callback]

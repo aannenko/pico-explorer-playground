@@ -35,10 +35,13 @@ def _mk_buzzer():
         pin_id=0,
         pwm_factory=FakePWM,
         pin_factory=FakePin,
-        schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
     return buzzer, timers
+
+
+def _fire(timer) -> None:
+    timer.init_calls[-1]["callback"](timer)
 
 
 # ── initial state ──────────────────────────────────────────────────────
@@ -92,29 +95,39 @@ def test_play_alert_full_pattern() -> None:
     assert buzzer._pwm._duty > 0
     assert buzzer._alert_remaining == 4
 
-    gen = buzzer._alert_generation
+    alert_timer = timers[0]
 
     # Toggle 1: remaining=3 (odd) → off
-    buzzer._toggle_alert(gen)
+    _fire(alert_timer)
     assert buzzer._pwm._duty == 0
     assert buzzer._alert_remaining == 3
 
     # Toggle 2: remaining=2 (even) → beep
-    buzzer._toggle_alert(gen)
+    _fire(alert_timer)
     assert buzzer._pwm._duty > 0
     assert buzzer._alert_remaining == 2
 
     # Toggle 3: remaining=1 (odd) → off
-    buzzer._toggle_alert(gen)
+    _fire(alert_timer)
     assert buzzer._pwm._duty == 0
     assert buzzer._alert_remaining == 1
+    assert alert_timer.deinit_calls == 0
 
     # Toggle 4: remaining=0 → off + deinit
-    buzzer._toggle_alert(gen)
+    _fire(alert_timer)
     assert buzzer._pwm._duty == 0
     assert buzzer._alert_remaining == 0
-    alert_timer = timers[0]
-    assert alert_timer.deinit_calls >= 1
+    assert alert_timer.deinit_calls == 1
+
+
+def test_play_alert_reuses_cached_toggle_ref() -> None:
+    buzzer, timers = _mk_buzzer()
+    buzzer.play_alert()
+    buzzer.play_alert()
+
+    callbacks = [c["callback"] for c in timers[0].init_calls]
+    assert len(callbacks) == 2
+    assert all(cb is buzzer._toggle_alert_ref for cb in callbacks)
 
 
 # ── stop_alert ─────────────────────────────────────────────────────────
@@ -142,50 +155,21 @@ def test_stop_alert_mid_pattern() -> None:
     buzzer, timers = _mk_buzzer()
     buzzer.play_alert(count=5)
 
-    gen = buzzer._alert_generation
-
     # Advance a couple toggles
-    buzzer._toggle_alert(gen)
-    buzzer._toggle_alert(gen)
+    _fire(timers[0])
+    _fire(timers[0])
 
     buzzer.stop_alert()
     assert buzzer._pwm._duty == 0
     assert buzzer._alert_remaining == 0
 
 
-def test_stale_toggle_ignored_after_stop_and_restart() -> None:
-    buzzer, _ = _mk_buzzer()
-    buzzer.play_alert(count=2, freq=1000, interval_ms=100)
-    stale_gen = buzzer._alert_generation
-
+def test_late_toggles_after_stop_keep_buzzer_silent() -> None:
+    buzzer, timers = _mk_buzzer()
+    buzzer.play_alert(count=2)
     buzzer.stop_alert()
-    buzzer.play_alert(count=3, freq=1000, interval_ms=100)
 
-    # Stale toggle from the first alert should be ignored
-    buzzer._toggle_alert(stale_gen)
-    assert buzzer._alert_remaining == 6  # unchanged (3 beeps * 2)
+    _fire(timers[0])
+    _fire(timers[0])
 
-
-# ── schedule wrapper ──────────────────────────────────────────────────
-
-
-def test_schedule_wrapper_forwards_generation() -> None:
-    scheduled: list[tuple[object, int]] = []
-
-    def schedule(fn, arg):
-        scheduled.append((fn, arg))
-
-    timer_factory, _ = make_timer_factory()
-    buzzer = ExplorerBuzzer(
-        pin_id=0,
-        pwm_factory=FakePWM,
-        pin_factory=FakePin,
-        schedule=schedule,
-        timer_factory=timer_factory,
-    )
-
-    buzzer._schedule_toggle_alert(None)
-
-    assert scheduled == [
-        (buzzer._toggle_alert_ref, buzzer._alert_generation),
-    ]
+    assert buzzer._pwm._duty == 0
