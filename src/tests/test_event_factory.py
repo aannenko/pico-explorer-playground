@@ -103,6 +103,17 @@ def test_weekend_duration_is_63h():
             assert e.wall_clock_duration_sec == 63 * 3600
 
 
+def test_overnight_weekend_ends_at_next_shift():
+    utc = _utc_epoch(2026, 6, 15, 21, 0, 0)  # Mon 23:00 CEST, inside Mon's 22:00 shift
+    ts = _FakeTimeService(utc)
+    gen = event_factory.work_week_loop(_WORK_DAYS, (22, 0), (6, 0), ts)
+    events = _collect(gen, 11)
+    assert [e.name for e in events[8:]] == ["work", "weekend", "work"]
+    assert events[9].wall_clock_duration_sec == 64 * 3600
+    _, _, _, hour, minute, _, weekday, _ = time.gmtime(events[10].start_timestamp)
+    assert (weekday, hour, minute) == (0, 22, 0)
+
+
 # ── local-epoch positioning ──────────────────────────────────────────
 
 

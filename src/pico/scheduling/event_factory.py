@@ -104,7 +104,7 @@ def work_week_loop(
             _set_if_current(rest_start_week_sec, rest_duration_sec)
         else:
             weekend_duration_sec = rest_duration_sec
-            day = rest_day
+            day = work_day
             while (day := (day + 1) % 7) in weekend_days:
                 weekend_duration_sec += _SEC_IN_DAY
 
