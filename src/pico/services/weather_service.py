@@ -83,7 +83,7 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
             mm = amounts[i] if amounts[i] is not None else 0.0
             rank, color = _intensity(mm)
             candidates.append((rank, kind, color))
-        uv_lvl = event_runs._level(uv[i], uv_warn, uv_severe)
+        uv_lvl = event_runs.level(uv[i], uv_warn, uv_severe)
         if uv_lvl:
             candidates.append((uv_lvl, "UV", _UV_LEVEL_COLOR[uv_lvl]))
 

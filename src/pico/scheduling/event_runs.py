@@ -7,9 +7,10 @@ from scheduling.event import Event
 _SEC_PER_HOUR = const(3600)
 
 
-def _level(value, warn: int, severe: int) -> int:
-    """``warn`` / ``severe`` are inclusive lower bounds; a missing value
-    (``None``) is treated as below warning.
+def level(value: float | None, warn: int, severe: int) -> int:
+    """Severity level of ``value``: 2 at or above ``severe``, 1 at or above ``warn``, else 0.
+
+    ``None``, a missing value, is level 0.
     """
     if value is None:
         return 0

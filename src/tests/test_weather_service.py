@@ -237,7 +237,7 @@ def test_short_uv_index_precip_still_renders():
 
 def test_non_list_uv_index_precip_still_renders():
     # A non-list uv_index that happens to have len()==n (e.g. a string) must
-    # not break _level / fail the fetch — precip still shows.
+    # not break level() / fail the fetch — precip still shows.
     payload = _payload((_T0, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = "9"
     events = _be(payload)
@@ -246,7 +246,7 @@ def test_non_list_uv_index_precip_still_renders():
 
 def test_uv_index_with_non_numeric_element_precip_still_renders():
     # A correctly-sized uv_index list carrying a stray non-numeric element must
-    # not reach _level and crash the fetch — that hour's UV is dropped silently
+    # not reach level() and crash the fetch — that hour's UV is dropped silently
     # and precip still renders.
     payload = _payload((_T0, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = ["oops"]

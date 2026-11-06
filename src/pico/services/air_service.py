@@ -23,7 +23,7 @@ def _pollen_winner(labels, values, warn, severe) -> tuple[int, str | None]:
         v = values[i]
         if v is None:
             continue
-        lvl = event_runs._level(v, warn, severe)
+        lvl = event_runs.level(v, warn, severe)
         if lvl == 0:
             continue
         if lvl > best_level or (lvl == best_level and v > best_value):
@@ -49,7 +49,7 @@ def _build_events(aq_payload, species, aqi_thr, pollen_thr) -> list[Event]:
     emitted: list[tuple[int, str, int]] = []
     for i in range(len(times)):
         candidates = []
-        aqi_lvl = event_runs._level(aqi_arr[i], aqi_warn, aqi_severe)
+        aqi_lvl = event_runs.level(aqi_arr[i], aqi_warn, aqi_severe)
         if aqi_lvl:
             candidates.append((aqi_lvl, "AQI", _LEVEL_COLOR[aqi_lvl]))
         pol_lvl, pol_label = _pollen_winner(

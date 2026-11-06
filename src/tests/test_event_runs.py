@@ -2,14 +2,14 @@
 
 import pytest
 
-from scheduling.event_runs import _level, best_by_priority, merge_runs
+from scheduling.event_runs import best_by_priority, level, merge_runs
 
 _HOUR = 3600
 _E0 = 1_700_000_000
 
 
 # ---------------------------------------------------------------------------
-# _level
+# level
 # ---------------------------------------------------------------------------
 
 
@@ -18,13 +18,13 @@ _E0 = 1_700_000_000
     [(None, 0), (0, 0), (59, 0), (60, 1), (70, 1), (79, 1), (80, 2), (200, 2)],
 )
 def test_level_bands(value, expected):
-    assert _level(value, 60, 80) == expected
+    assert level(value, 60, 80) == expected
 
 
 def test_level_inclusive_lower_bounds():
     # Exactly at an edge classifies into that band (inclusive >=).
-    assert _level(6, 6, 8) == 1
-    assert _level(8, 6, 8) == 2
+    assert level(6, 6, 8) == 1
+    assert level(8, 6, 8) == 2
 
 
 # ---------------------------------------------------------------------------
