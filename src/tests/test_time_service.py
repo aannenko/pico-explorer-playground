@@ -14,8 +14,8 @@ from services.time_service import (
 )
 
 from conftest import (
-    CEST_EXTRA as _CEST_EXTRA,
-    CET_OFFSET as _CET_OFFSET,
+    CEST_EXTRA_SEC as _CEST_EXTRA_SEC,
+    CET_OFFSET_SEC as _CET_OFFSET_SEC,
     DST_END as _DST_END,
     DST_START as _DST_START,
     utc_epoch as _utc_epoch,
@@ -111,14 +111,14 @@ def test_second_monday_of_january_2024():
 def test_cet_dst_start_2026():
     # Last Sunday of March 2026 at 02:00 CET = 01:00 UTC
     rule = (3, -1, 6, 2)
-    epoch = _transition_utc(2026, rule, offset_hours=1)
+    epoch = _transition_utc(2026, rule, offset_sec=3600)
     assert epoch == _utc_epoch(2026, 3, 29, 1, 0, 0)
 
 
 def test_cest_dst_end_2026():
     # Last Sunday of October 2026 at 03:00 CEST = 01:00 UTC
     rule = (10, -1, 6, 3)
-    epoch = _transition_utc(2026, rule, offset_hours=2)
+    epoch = _transition_utc(2026, rule, offset_sec=7200)
     assert epoch == _utc_epoch(2026, 10, 25, 1, 0, 0)
 
 
@@ -128,37 +128,37 @@ def test_cest_dst_end_2026():
 def test_is_dst_winter():
     # January 2026 — definitely not DST
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is False
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
 
 
 def test_is_dst_summer():
     # July 2026 — definitely DST
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is True
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
 
 
 def test_is_dst_just_before_spring_forward():
     # 2026-03-29 00:59 UTC → 01:59 CET, not yet DST
     utc = _utc_epoch(2026, 3, 29, 0, 59, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is False
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
 
 
 def test_is_dst_at_spring_forward():
     # 2026-03-29 01:00 UTC → 02:00 CET → clocks jump to 03:00 CEST
     utc = _utc_epoch(2026, 3, 29, 1, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is True
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
 
 
 def test_is_dst_just_before_fall_back():
     # 2026-10-25 00:59 UTC → 02:59 CEST, still DST
     utc = _utc_epoch(2026, 10, 25, 0, 59, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is True
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
 
 
 def test_is_dst_at_fall_back():
     # 2026-10-25 01:00 UTC → 03:00 CEST → clocks fall back to 02:00 CET
     utc = _utc_epoch(2026, 10, 25, 1, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END) is False
+    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
 
 
 # ── _next_transition_utc ────────────────────────────────────────────
@@ -167,21 +167,21 @@ def test_is_dst_at_fall_back():
 def test_next_transition_from_winter():
     # January → next transition is spring forward (March)
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END)
+    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
     assert nxt == _utc_epoch(2026, 3, 29, 1, 0, 0)
 
 
 def test_next_transition_from_summer():
     # July → next transition is fall back (October)
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END)
+    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
     assert nxt == _utc_epoch(2026, 10, 25, 1, 0, 0)
 
 
 def test_next_transition_after_fall_back():
     # November → next transition is spring forward of next year
     utc = _utc_epoch(2026, 11, 1, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET, _CEST_EXTRA, _DST_START, _DST_END)
+    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
     assert nxt == _utc_epoch(2027, 3, 28, 1, 0, 0)
 
 
@@ -508,3 +508,157 @@ def test_real_duration_no_dst_config():
     )
     local = svc.now()
     assert svc.real_duration(local, 9 * 3600) == 9 * 3600
+
+
+# ── fractional offsets ──────────────────────────────────────────────
+
+# Newfoundland: UTC-3:30, +1 h DST from the 2nd Sunday of March at 02:00 NST
+# to the 1st Sunday of November at 02:00 NDT.
+_NEWFOUNDLAND_DST_START = (3, 2, 6, 2)
+_NEWFOUNDLAND_DST_END = (11, 1, 6, 2)
+# Lord Howe Island: UTC+10:30, +30 min DST from the 1st Sunday of October at
+# 02:00 LHST to the 1st Sunday of April at 02:00 LHDT.
+_LORD_HOWE_DST_START = (10, 1, 6, 2)
+_LORD_HOWE_DST_END = (4, 1, 6, 2)
+
+
+@pytest.mark.parametrize(
+    "tz_offset_hours, offset_sec",
+    [
+        (5.5, 19_800),
+        (5.75, 20_700),
+        (-3.5, -12_600),
+        (12.75, 45_900),
+        (14.0, 50_400),
+        (-12.0, -43_200),
+    ],
+)
+def test_tz_offset_keeps_times_ints(tz_offset_hours, offset_sec):
+    utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
+    svc = TimeService(
+        tz_offset_hours=tz_offset_hours, dst_start=None, dst_end=None,
+        get_time=lambda: utc,
+    )
+    local = svc.now()
+    assert type(local) is int
+    assert local == utc + offset_sec
+    assert type(svc.total_offset(utc)) is int
+    to_utc = svc.to_utc(local)
+    assert type(to_utc) is int
+    assert to_utc == utc
+
+
+@pytest.mark.parametrize("tz_offset_hours, offset_sec", [(0.00025, 1), (-0.00025, -1)])
+def test_offset_rounds_to_nearest_second(tz_offset_hours, offset_sec):
+    utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
+    svc = TimeService(
+        tz_offset_hours=tz_offset_hours, dst_start=None, dst_end=None,
+        get_time=lambda: utc,
+    )
+    assert svc.now() == utc + offset_sec
+
+
+@pytest.mark.parametrize(
+    "utc",
+    [
+        _utc_epoch(2026, 3, 29, 0, 59, 0),
+        _utc_epoch(2026, 3, 29, 1, 0, 0),
+        _utc_epoch(2026, 10, 25, 0, 59, 0),
+        _utc_epoch(2026, 10, 25, 1, 0, 0),
+    ],
+)
+def test_zero_dst_offset_ignores_the_default_dst_rules(utc):
+    # A zone without DST (India) keeps the default EU rules with a zero DST offset.
+    svc = TimeService(
+        tz_offset_hours=5.5, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=0, get_time=lambda: utc,
+    )
+    local = svc.now()
+    assert type(local) is int
+    assert local == utc + 19_800
+
+
+def test_newfoundland_dst_transitions():
+    svc = TimeService(
+        tz_offset_hours=-3.5, dst_start=_NEWFOUNDLAND_DST_START,
+        dst_end=_NEWFOUNDLAND_DST_END, dst_offset_hours=1.0,
+        get_time=lambda: _utc_epoch(2026, 1, 15, 12, 0, 0),
+    )
+    # Sun 2026-03-08 02:00 NST = 05:30 UTC; Sun 2026-11-01 02:00 NDT = 04:30 UTC.
+    spring = _utc_epoch(2026, 3, 8, 5, 30, 0)
+    fall = _utc_epoch(2026, 11, 1, 4, 30, 0)
+    assert svc.total_offset(spring - 1) == -12_600
+    assert svc.total_offset(spring) == -9_000
+    assert svc.total_offset(fall - 1) == -9_000
+    assert svc.total_offset(fall) == -12_600
+
+
+def test_lord_howe_half_hour_dst_transitions():
+    svc = TimeService(
+        tz_offset_hours=10.5, dst_start=_LORD_HOWE_DST_START,
+        dst_end=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
+        get_time=lambda: _utc_epoch(2026, 7, 15, 12, 0, 0),
+    )
+    # Sun 2026-04-05 02:00 LHDT = Sat 15:00 UTC; Sun 2026-10-04 02:00 LHST = Sat 15:30 UTC.
+    fall = _utc_epoch(2026, 4, 4, 15, 0, 0)
+    spring = _utc_epoch(2026, 10, 3, 15, 30, 0)
+    assert svc.total_offset(fall - 1) == 39_600
+    assert svc.total_offset(fall) == 37_800
+    assert svc.total_offset(spring - 1) == 37_800
+    assert svc.total_offset(spring) == 39_600
+    assert type(svc.total_offset(spring)) is int
+
+
+def test_lord_howe_fall_back_lengthens_by_half_an_hour():
+    utc = _utc_epoch(2026, 4, 4, 13, 0, 0)  # Sun 00:00 LHDT
+    svc = TimeService(
+        tz_offset_hours=10.5, dst_start=_LORD_HOWE_DST_START,
+        dst_end=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
+        get_time=lambda: utc,
+    )
+    local_start = svc.now()
+    assert type(local_start) is int
+    # 00:00 to 04:00 on the wall clock spans the 02:00 LHDT -> 01:30 LHST fall-back.
+    real = svc.real_duration(local_start, 4 * 3600)
+    assert type(real) is int
+    assert real == 4 * 3600 + 1800
+
+
+def test_lord_howe_ambiguous_local_time_prefers_dst():
+    utc = _utc_epoch(2026, 4, 4, 13, 0, 0)  # Sun 00:00 LHDT
+    svc = TimeService(
+        tz_offset_hours=10.5, dst_start=_LORD_HOWE_DST_START,
+        dst_end=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
+        get_time=lambda: utc,
+    )
+    # 01:45 occurs at 14:45 UTC (LHDT) and again at 15:15 UTC (LHST).
+    local_0145 = svc.now() + 105 * 60
+    assert svc.to_utc(local_0145) == _utc_epoch(2026, 4, 4, 14, 45, 0)
+
+
+def test_lord_howe_spring_forward_shortens_by_half_an_hour():
+    utc = _utc_epoch(2026, 10, 3, 14, 30, 0)  # Sun 01:00 LHST
+    svc = TimeService(
+        tz_offset_hours=10.5, dst_start=_LORD_HOWE_DST_START,
+        dst_end=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
+        get_time=lambda: utc,
+    )
+    # 01:00 to 04:00 on the wall clock spans the 02:00 LHST -> 02:30 LHDT gap.
+    assert svc.real_duration(svc.now(), 3 * 3600) == 3 * 3600 - 1800
+
+
+def test_tick_applies_fractional_dst_offset():
+    clock = [_utc_epoch(2026, 10, 3, 15, 0, 0)]  # 30 min before Lord Howe's spring-forward
+    sched = FakeScheduler()
+    svc = TimeService(
+        tz_offset_hours=10.5, dst_start=_LORD_HOWE_DST_START,
+        dst_end=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
+        get_time=lambda: clock[0], tick_scheduler=sched,
+    )
+    assert svc.now() == clock[0] + 37_800
+    clock[0] = _utc_epoch(2026, 10, 3, 15, 30, 0)
+    svc._next_dst_check_ms = 0
+    sched.callbacks[0]()
+    local = svc.now()
+    assert type(local) is int
+    assert local == clock[0] + 39_600

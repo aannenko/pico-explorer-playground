@@ -255,10 +255,10 @@ def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg
     del status_display
 
     time_service = TimeService(
-        tz_offset_hours=config.TIME_ZONE_OFFSET,
+        tz_offset_hours=config.TIME_ZONE_OFFSET_HOURS,
         dst_start=config.DST_START,
         dst_end=config.DST_END,
-        dst_offset_hours=config.DST_OFFSET,
+        dst_offset_hours=config.DST_OFFSET_HOURS,
         tick_scheduler=tick_scheduler,
     )
 

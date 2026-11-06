@@ -296,8 +296,8 @@ class RecordingRenderer:
 
 
 # DST test constants — shared between test_time_service and test_event_factory.
-CET_OFFSET = 1
-CEST_EXTRA = 1
+CET_OFFSET_SEC = 3600
+CEST_EXTRA_SEC = 3600
 DST_START = (3, -1, 6, 2)   # Last Sun of Mar at 02:00 CET
 DST_END = (10, -1, 6, 3)    # Last Sun of Oct at 03:00 CEST
 

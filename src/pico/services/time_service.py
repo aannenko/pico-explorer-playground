@@ -40,26 +40,26 @@ def _mday_of_nth_weekday(year: int, month: int, week: int, weekday: int) -> int:
     return 1 + (weekday - first_wd) % 7 + (week - 1) * 7
 
 
-def _transition_utc(year: int, rule: tuple, offset_hours: int) -> int:
+def _transition_utc(year: int, rule: tuple, offset_sec: int) -> int:
     """Return the UTC epoch of ``rule``'s transition in ``year``.
 
-    ``offset_hours`` is the UTC offset the rule's hour is expressed in.
+    ``offset_sec`` is the UTC offset the rule's hour is expressed in.
     """
     month, week, weekday, hour = rule
     mday = _mday_of_nth_weekday(year, month, week, weekday)
-    return time.mktime((year, month, mday, hour, 0, 0, 0, 0)) - offset_hours * _SEC_PER_HOUR
+    return time.mktime((year, month, mday, hour, 0, 0, 0, 0)) - offset_sec
 
 
 def _is_dst(
     utc_epoch: int,
-    tz_offset_hours: int,
-    dst_offset_hours: int,
+    tz_offset_sec: int,
+    dst_offset_sec: int,
     dst_start: tuple,
     dst_end: tuple,
 ) -> bool:
     year = time.gmtime(utc_epoch)[0]
-    start = _transition_utc(year, dst_start, tz_offset_hours)
-    end = _transition_utc(year, dst_end, tz_offset_hours + dst_offset_hours)
+    start = _transition_utc(year, dst_start, tz_offset_sec)
+    end = _transition_utc(year, dst_end, tz_offset_sec + dst_offset_sec)
     if start < end:
         return start <= utc_epoch < end
     # Southern hemisphere: DST wraps around the new year
@@ -68,8 +68,8 @@ def _is_dst(
 
 def _next_transition_utc(
     utc_epoch: int,
-    tz_offset_hours: int,
-    dst_offset_hours: int,
+    tz_offset_sec: int,
+    dst_offset_sec: int,
     dst_start: tuple,
     dst_end: tuple,
 ) -> int:
@@ -79,8 +79,8 @@ def _next_transition_utc(
     year = time.gmtime(utc_epoch)[0]
     result = 0
     for y in (year, year + 1):
-        s = _transition_utc(y, dst_start, tz_offset_hours)
-        e = _transition_utc(y, dst_end, tz_offset_hours + dst_offset_hours)
+        s = _transition_utc(y, dst_start, tz_offset_sec)
+        e = _transition_utc(y, dst_end, tz_offset_sec + dst_offset_sec)
         if s > utc_epoch and (result == 0 or s < result):
             result = s
         if e > utc_epoch and (result == 0 or e < result):
@@ -99,25 +99,30 @@ class TimeService:
     local standard time for the start and in local DST time for the end.
     ``None`` for either rule disables DST.
 
+    Offsets are hours and may be fractional (e.g. 5.75); they are rounded to
+    whole seconds.  ``dst_offset_hours`` must not be negative.
+
     Must be instantiated after NTP sync so ``time.time()`` is accurate.
     """
 
     def __init__(
         self,
-        tz_offset_hours: int,
+        tz_offset_hours: float,
         dst_start: tuple[int, int, int, int] | None,
         dst_end: tuple[int, int, int, int] | None,
-        dst_offset_hours: int = 0,
+        dst_offset_hours: float = 0.0,
         get_time=time.time,  # () -> int
         tick_scheduler=None,
     ) -> None:
-        self._tz_offset_hours = tz_offset_hours
+        # Whole seconds, converted once: a float offset would make every epoch it
+        # touches a float, which rp2's single-precision floats round to 128 s.
+        self._tz_offset_sec = round(tz_offset_hours * _SEC_PER_HOUR)
+        self._dst_offset_sec = round(dst_offset_hours * _SEC_PER_HOUR)
         self._dst_start = dst_start
         self._dst_end = dst_end
-        self._dst_offset_hours = dst_offset_hours
         self._get_time = get_time
 
-        self._offset_sec = tz_offset_hours * _SEC_PER_HOUR
+        self._offset_sec = self._tz_offset_sec
         self._dst_active = False
         self._next_transition = 0
         self._next_dst_check_ms = time.ticks_ms()
@@ -137,25 +142,25 @@ class TimeService:
     def total_offset(self, utc_timestamp: int) -> int:
         """Total UTC offset in seconds at a given UTC timestamp (tz + DST if active)."""
         if self._dst_start is None or self._dst_end is None:
-            return self._tz_offset_hours * _SEC_PER_HOUR
+            return self._tz_offset_sec
         if _is_dst(
             utc_timestamp,
-            self._tz_offset_hours,
-            self._dst_offset_hours,
+            self._tz_offset_sec,
+            self._dst_offset_sec,
             self._dst_start,
             self._dst_end,
         ):
-            return (self._tz_offset_hours + self._dst_offset_hours) * _SEC_PER_HOUR
-        return self._tz_offset_hours * _SEC_PER_HOUR
+            return self._tz_offset_sec + self._dst_offset_sec
+        return self._tz_offset_sec
 
     def to_utc(self, local_epoch: int) -> int:
         """Convert local-epoch to UTC epoch.
 
-        During fall-back overlap (ambiguous local hour), prefers the DST
+        During fall-back overlap (an ambiguous local time), prefers the DST
         (earlier UTC) interpretation — correct for forward-progressing events.
         """
         # Estimating with the max offset never overshoots a fall-back boundary.
-        max_offset = (self._tz_offset_hours + self._dst_offset_hours) * _SEC_PER_HOUR
+        max_offset = self._tz_offset_sec + self._dst_offset_sec
         utc_est = local_epoch - max_offset
         return local_epoch - self.total_offset(utc_est)
 
@@ -182,21 +187,21 @@ class TimeService:
         utc = self._get_time()
         self._dst_active = _is_dst(
             utc,
-            self._tz_offset_hours,
-            self._dst_offset_hours,
+            self._tz_offset_sec,
+            self._dst_offset_sec,
             self._dst_start,
             self._dst_end,
         )
 
         if self._dst_active:
-            self._offset_sec = (self._tz_offset_hours + self._dst_offset_hours) * _SEC_PER_HOUR
+            self._offset_sec = self._tz_offset_sec + self._dst_offset_sec
         else:
-            self._offset_sec = self._tz_offset_hours * _SEC_PER_HOUR
+            self._offset_sec = self._tz_offset_sec
 
         self._next_transition = _next_transition_utc(
             utc,
-            self._tz_offset_hours,
-            self._dst_offset_hours,
+            self._tz_offset_sec,
+            self._dst_offset_sec,
             self._dst_start,
             self._dst_end,
         )

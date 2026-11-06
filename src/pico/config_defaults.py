@@ -23,13 +23,14 @@ TEXT_SCALE = const(3)
 WIFI_SSID = "YourSSID"
 WIFI_PASSWORD = "YourPassword"
 
-TIME_ZONE_OFFSET = const(1)  # Prague winter time (UTC+1)
+TIME_ZONE_OFFSET_HOURS = 1.0  # Prague winter time (UTC+1); fractional zones work, e.g. 5.5
 
 # Daylight Saving Time rules: (month, week, weekday, hour)
 # week: -1 = last occurrence; weekday: 0=Mon .. 6=Sun (MicroPython convention)
+# Set them to your zone's rules, or DST_OFFSET_HOURS = 0 if it has no DST.
 DST_START = (3, -1, 6, 2)   # Last Sunday of March at 02:00 (standard time)
 DST_END = (10, -1, 6, 3)    # Last Sunday of October at 03:00 (DST time)
-DST_OFFSET = const(1)       # +1 hour during DST (CEST = UTC+2)
+DST_OFFSET_HOURS = 1.0      # Added during DST (CEST = UTC+2)
 
 # Socket timeout (s) per HTTP connect/read, not a whole-fetch deadline; DNS lookups aren't covered.
 HTTP_TIMEOUT_S = const(3)

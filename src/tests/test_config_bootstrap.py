@@ -6,6 +6,8 @@ import sys
 import pytest
 
 import config_bootstrap
+from conftest import utc_epoch
+from services.time_service import TimeService
 
 
 # Workspace fixture: writes ad-hoc ``<name>.py`` files into a tmp_path
@@ -490,3 +492,23 @@ def test_list_default_rejects_tuple_override(workspace) -> None:
 
     with pytest.raises(config_bootstrap.InvalidConfigError):
         config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
+
+
+@pytest.mark.parametrize(
+    "utc", [utc_epoch(2026, 1, 15, 12, 0, 0), utc_epoch(2026, 7, 15, 12, 0, 0)]
+)
+def test_real_defaults_take_a_fractional_zone_without_dst(workspace, utc) -> None:
+    workspace.write_user("TIME_ZONE_OFFSET_HOURS = 5.5\nDST_OFFSET_HOURS = 0\n")
+    cfg = config_bootstrap.apply_overrides("config_defaults", _USER_NAME)
+
+    svc = TimeService(
+        tz_offset_hours=cfg.TIME_ZONE_OFFSET_HOURS,
+        dst_start=cfg.DST_START,
+        dst_end=cfg.DST_END,
+        dst_offset_hours=cfg.DST_OFFSET_HOURS,
+        get_time=lambda: utc,
+    )
+    local = svc.now()
+    assert type(local) is int
+    assert local == utc + 19_800
+    assert svc.to_utc(local) == utc
