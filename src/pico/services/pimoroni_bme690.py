@@ -77,6 +77,7 @@ class PimoroniBME690:
         # Index directly: slicing the driver's tuple would allocate another tuple.
         reading = self._bme.read()
         heater_stable = reading[4] & STATUS_HEATER_STABLE
+        # A tuple, not array('f'): each array('f') read boxes a new float.
         self._last_reading = (
             reading[0] + self._temp_offset,
             reading[1] / 100 + self._prsr_offset,

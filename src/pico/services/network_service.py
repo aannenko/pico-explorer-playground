@@ -36,7 +36,7 @@ class NetworkService:
         """Block until WiFi connects and NTP syncs, else raise ``RuntimeError``.
 
         ``status_fn`` receives progress messages during this call only; it isn't
-        retained.
+        retained, so periodic resyncs never draw over the active view.
         """
         def _notify(msg: str) -> None:
             if status_fn is not None:

@@ -1,5 +1,10 @@
 class Display:
-    """Base class for a view: one full screen of the app."""
+    """Base class for a view: one full screen of the app.
+
+    An ``on_button_a`` / ``on_button_b`` override must redraw what the press
+    changed before returning: the press restarts the view's redraw cadence, so
+    the next scheduled render is a full period away.
+    """
 
     refresh_period_ms = 1000  # 0 renders every scheduler tick
 

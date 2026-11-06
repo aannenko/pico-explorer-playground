@@ -121,8 +121,9 @@ class EventWindow:
         while buf:
             event = buf[0][0]
             end = event.start_timestamp + event.wall_clock_duration_sec
-            # An interrupted long event must not pin expired successors or
-            # reappear after they expire.
+            # Clip at the next start, as the calendar renderer does, so an
+            # interrupted long event neither pins expired successors nor
+            # reappears after they expire.
             if len(buf) > 1:
                 end = min(end, buf[1][0].start_timestamp)
             if end > window_start:

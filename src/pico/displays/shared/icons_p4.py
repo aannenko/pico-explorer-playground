@@ -12,7 +12,8 @@ def draw_icon(
     """Draw ``icon`` with top-left ``(x, y)``, each pixel a ``scale``-px square.
 
     Transparent pixels are skipped, so callers must provide the intended background.
-    Draws pixel by pixel in Python, so keep it off per-frame paths.
+    Draws pixel by pixel in Python (PicoGraphics' own ``sprite()`` draws nothing
+    under ``PEN_P4``), so keep it off per-frame paths.
     """
     w, h, data = icon
     ni = 0
