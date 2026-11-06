@@ -7,7 +7,7 @@ the four demo rows are 1..4.
 import demo_streams
 import pytest
 
-from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL
+from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_BLUE
 from scheduling.event_window import EventWindow
 
 _PAST_SEC = 1800
@@ -42,7 +42,7 @@ def test_demo_streams_assign_sequential_color_indices():
     streams = demo_streams.build_demo_streams(_FakeTimeService(), _PAST_SEC)
 
     assert [_first_event(s).color_index for s in streams] == [
-        STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL,
+        STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_BLUE,
     ]
 
 

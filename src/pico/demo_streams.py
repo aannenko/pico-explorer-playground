@@ -1,6 +1,6 @@
 import random
 
-from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL
+from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_BLUE
 from scheduling.event import Event
 from scheduling.stream import Stream
 from services.time_service import TimeService
@@ -79,7 +79,7 @@ def build_demo_streams(
             gap_percent=25,
             start_timestamp=start,
             time_service=time_service,
-            color_index=STREAM_TEAL,
+            color_index=STREAM_BLUE,
             window_past_sec=window_past_sec,
         ),
     ]

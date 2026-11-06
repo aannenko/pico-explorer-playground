@@ -65,7 +65,7 @@ STREAM_COLORS = [
     SKY,
     YELLOW,
     PINK,
-    SKY,
+    BLUE,
     BROWN,
     GRAY,
     GREEN,
@@ -77,7 +77,7 @@ STREAM_ORANGE = const(0)
 STREAM_SKY = const(1)
 STREAM_YELLOW = const(2)
 STREAM_PINK = const(3)
-STREAM_TEAL = const(4)
+STREAM_BLUE = const(4)
 STREAM_BROWN = const(5)
 STREAM_GRAY = const(6)
 STREAM_GREEN = const(7)

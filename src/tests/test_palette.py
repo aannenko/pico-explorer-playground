@@ -3,6 +3,7 @@ from __future__ import annotations
 import displays.palette as palette
 from displays.palette import (
     BLACK,
+    BLUE,
     ICON_SLOTS,
     LABEL_FOR_SLOT,
     ORANGE,
@@ -109,12 +110,16 @@ def test_stream_colors_are_valid_slots() -> None:
         assert 0 <= slot <= 15, f"STREAM_COLORS[{idx}] out of slot range"
 
 
+def test_stream_colors_are_distinct() -> None:
+    assert len(set(STREAM_COLORS)) == len(STREAM_COLORS), "two stream colours share a slot"
+
+
 def test_stream_color_constants_match_positions() -> None:
     assert palette.STREAM_ORANGE == 0
     assert palette.STREAM_SKY == 1
     assert palette.STREAM_YELLOW == 2
     assert palette.STREAM_PINK == 3
-    assert palette.STREAM_TEAL == 4
+    assert palette.STREAM_BLUE == 4
     assert palette.STREAM_BROWN == 5
     assert palette.STREAM_GRAY == 6
     assert palette.STREAM_GREEN == 7
@@ -123,7 +128,7 @@ def test_stream_color_constants_match_positions() -> None:
 
 
 def test_stream_colors_map_to_expected_slots() -> None:
-    # work-week → ORANGE; severity ramp green/red; waste BIO → BROWN.
     assert STREAM_COLORS[palette.STREAM_ORANGE] == ORANGE
+    assert STREAM_COLORS[palette.STREAM_BLUE] == BLUE
     assert STREAM_COLORS[palette.STREAM_BROWN] == BROWN
     assert STREAM_COLORS[palette.STREAM_PINK] == PINK
