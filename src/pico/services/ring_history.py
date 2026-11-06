@@ -1,32 +1,24 @@
-"""Pre-allocated ring buffers for time-series history of N numeric metrics.
-
-Holds the last ``capacity`` samples of each of ``num_metrics`` floats sourced
-from a user-supplied ``sampler`` callable.  A ``TickScheduler`` subscriber
-commits one snapshot every ``ticks_per_commit`` ticks; commits also bump
-``commit_count`` so consumers can detect "new data" without doing diff work.
-
-The ``sampler`` is called as ``sampler()`` and must return an indexable
-sequence (tuple/list) whose first ``num_metrics`` entries are floats —
-extra trailing entries (e.g. a sensor's status string) are ignored.
-
-Construction performs **one immediate commit** so the newest slot is
-populated from boot; callers must ensure ``sampler()`` returns valid data
-at construction time.
-
-This module owns no timers; the application is responsible for registering
-``self._tick_ref`` on the long-lived ``TickScheduler``.
-"""
-
 from array import array
 
 import micropython
 
 
 class RingHistory:
+    """Rolling history of the last ``capacity`` samples per metric.
+
+    ``sampler()`` must return an indexable sequence whose first ``num_metrics``
+    entries are floats; any further entries are ignored.  Construction commits
+    once, so ``sampler`` must return valid data by then.  Raises ``ValueError``
+    if ``num_metrics``, ``capacity`` or ``ticks_per_commit`` is below 1.
+
+    Owns no timer: ``_tick_ref`` must be called periodically.  Each commit
+    increments ``commit_count``.
+    """
+
     @micropython.native
     def __init__(
         self,
-        sampler,  # () -> sequence[float] of length >= num_metrics
+        sampler,  # () -> Sequence
         *,
         num_metrics: int,
         capacity: int,
@@ -61,16 +53,14 @@ class RingHistory:
         return self._capacity
 
     def filled(self, metric_idx: int) -> int:
-        """Number of stored samples (0..capacity), NaN placeholders included."""
+        """Number of stored samples, 0..capacity."""
         return self._filled
 
     @micropython.native
     def value_at(self, metric_idx: int, value_idx: int) -> float:
-        """Return the sample ``value_idx`` slots back from newest.
+        """Return the sample ``value_idx`` slots back from the newest.
 
-        ``value_idx == 0`` is the most recent sample; ``value_idx == filled()-1``
-        is the oldest still held.  No bounds-check — callers loop up to
-        ``filled(metric_idx)``.
+        Requires ``0 <= value_idx < filled(metric_idx)``.
         """
         i = self._head - 1 - value_idx
         if i < 0:
@@ -78,13 +68,7 @@ class RingHistory:
         return self._buffers[metric_idx][i]
 
     def update_latest(self, metric_idx: int, value: float) -> None:
-        """Overwrite the most-recent sample for one metric, without advancing.
-
-        Lets a consumer backfill a value that wasn't valid at commit time — e.g.
-        the BME690 gas reading committed while the heater was still warming —
-        the moment a good reading arrives, so it appears without waiting for the
-        next commit.
-        """
+        """Overwrite the newest sample of one metric without advancing the ring."""
         if self._filled == 0:
             return
         i = self._head - 1
@@ -93,11 +77,6 @@ class RingHistory:
         self._buffers[metric_idx][i] = value
 
     def _tick(self) -> None:
-        """TickScheduler subscriber — zero-arg (scheduler calls ``callback()``).
-
-        Runs in scheduled (not IRQ) context, so ``sampler()`` allocations
-        are safe.
-        """
         self._tick_counter += 1
         if self._tick_counter >= self._ticks_per_commit:
             self._tick_counter = 0

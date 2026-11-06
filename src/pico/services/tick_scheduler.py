@@ -8,11 +8,16 @@ _MIN_PERIOD_MS = const(100)
 
 
 class TickScheduler:
+    """Fixed-period tick on one ``machine.Timer``, shared by registered callbacks.
+
+    A ``period_ms`` below ``_MIN_PERIOD_MS`` is raised to it.
+    """
+
     def __init__(
         self,
         period_ms: int = 500,
-        schedule=micropython.schedule,
-        timer_factory=Timer,
+        schedule=micropython.schedule,  # (callback, arg) -> None
+        timer_factory=Timer,  # (int) -> Timer
     ) -> None:
         self._subscribers: list = []  # list[Callable[[], None]]
         self._schedule = schedule
@@ -24,6 +29,7 @@ class TickScheduler:
 
     @property
     def ms_per_tick(self) -> int:
+        """Effective tick period in milliseconds."""
         return self._period_ms
 
     def start(self) -> None:
@@ -34,13 +40,22 @@ class TickScheduler:
         )
 
     def stop(self) -> None:
+        """A tick already queued still runs."""
         self._timer.deinit()
 
-    def register(self, callback) -> None:
+    def register(self, callback) -> None:  # callback: () -> None
+        """Call ``callback()`` on every tick; registering it again has no effect.
+
+        Callbacks run from the ``schedule`` queue on the main thread, not in an
+        IRQ, so they may allocate but should return quickly: blocking work
+        freezes rendering and buttons.  One that raises skips the rest of that
+        tick's callbacks.
+        """
         if callback not in self._subscribers:
             self._subscribers.append(callback)
 
-    def unregister(self, callback) -> None:
+    def unregister(self, callback) -> None:  # callback: () -> None
+        """A callback that isn't registered is ignored."""
         try:
             self._subscribers.remove(callback)
         except ValueError:
@@ -56,6 +71,7 @@ class TickScheduler:
             self._pending = False
 
     def _schedule_tick(self, _: Timer) -> None:
+        # _pending collapses firings queued behind blocking work into one scheduled run.
         if self._pending:
             return
         self._pending = True

@@ -10,9 +10,9 @@ from displays.shared.header import format_header_time, header_fits
 from scheduling.event_window import EventWindow
 from scheduling.stream import FRESH
 
-WINDOW_PAST_SEC = const(30 * 60)      # 30 minutes of past
-WINDOW_FUTURE_SEC = const(90 * 60)    # 90 minutes of future
-WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)  # 7200s
+WINDOW_PAST_SEC = const(30 * 60)
+WINDOW_FUTURE_SEC = const(90 * 60)
+WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)
 
 _MAX_STREAMS = const(5)
 _HEADER_MARGIN = const(6)
@@ -24,7 +24,7 @@ _MIN_LABEL_PX = const(14)
 _SEC_PER_HOUR = const(3600)
 _SEC_PER_QUARTER = const(900)
 _TICK_MARK_HEIGHT = const(4)
-_STATUS_GLYPH_PX = const(4)  # right-edge square shown when a row's data isn't fresh
+_STATUS_GLYPH_PX = const(4)
 
 
 def _fmt_remaining(sec: int) -> str:
@@ -34,6 +34,8 @@ def _fmt_remaining(sec: int) -> str:
 
 
 class Colors:
+    """Pens for the Calendar view, except event bars and their labels."""
+
     def __init__(
         self,
         background: int,
@@ -50,6 +52,11 @@ class Colors:
 
 
 class Geometry:
+    """Pixel layout of the Calendar view: a header, ``_MAX_STREAMS`` rows and a time axis.
+
+    Raises ``RuntimeError`` if the header doesn't fit the panel width.
+    """
+
     def __init__(
         self,
         pico_graphics: PicoGraphics,
@@ -63,7 +70,6 @@ class Geometry:
         self.graphics = pico_graphics
         self.width, self.height = pico_graphics.get_bounds()
 
-        # Header geometry
         self.header_font = header_font
         self.header_text_scale = header_text_scale
         self.header_height = header_font_height * header_text_scale
@@ -74,16 +80,13 @@ class Geometry:
                 "calendar geometry: no room for header (font/scale too large)"
             )
 
-        # Bar label geometry
         self.bar_font = bar_font
         self.bar_text_scale = bar_text_scale
         self.bar_text_height = bar_font_height * bar_text_scale
 
-        # Time axis geometry (reuses bar font)
         self.axis_height = bar_font_height * bar_text_scale
         self.axis_y = self.height - self.axis_height
 
-        # Event rows — always laid out for _MAX_STREAMS rows
         body_top = self.header_height + _HEADER_MARGIN
         body_bottom = self.axis_y - _AXIS_MARGIN
         body_height = body_bottom - body_top
@@ -103,11 +106,12 @@ class Geometry:
             self.row_y.append(row_top)
             self.gap_y.append(row_top + bar_height)
 
-        # "Now" line x position (25% from left)
         self.now_x = self.width // 4
 
 
 class Renderer:
+    """Times are local epoch seconds."""
+
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
         self._gfx = geometry.graphics
@@ -115,6 +119,7 @@ class Renderer:
         self._last_header = ""
 
     def reset(self) -> None:
+        """Clear the screen to empty rows and forget the drawn header."""
         self._last_header = ""
         gfx = self._gfx
         geom = self._geom
@@ -127,6 +132,7 @@ class Renderer:
             gfx.rectangle(0, geom.row_y[row_idx], geom.width, geom.row_height)
 
     def header_write(self, text: str) -> None:
+        """Draw ``text`` in the header strip unless it is already shown."""
         if text == self._last_header:
             return
         self._last_header = text
@@ -172,14 +178,13 @@ class Renderer:
                 ev_start = event.start_timestamp
                 ev_end = ev_start + event.wall_clock_duration_sec
 
-                # Truncate at the next event's start so overlapping bars don't
-                # stack; also suppresses the remaining-time on a clipped bar.
+                # Prevent overlapping bars from stacking; this also hides the
+                # remaining time of a clipped bar.
                 if i + 1 < n_visible:
                     next_start = visible[i + 1][0].start_timestamp
                     if next_start < ev_end:
                         ev_end = next_start
 
-                # Clip to window
                 x0 = max(0, (ev_start - window_start) * width // WINDOW_TOTAL_SEC)
                 x1 = min(width, (ev_end - window_start) * width // WINDOW_TOTAL_SEC)
 
@@ -189,8 +194,7 @@ class Renderer:
                 gfx.set_pen(pen)
                 gfx.rectangle(x0, row_top, x1 - x0, bar_h)
 
-                # Seams keep adjacent or overlapping bars distinct, same colour
-                # or not.
+                # Seams keep adjacent bars distinct, same colour or not.
                 gfx.set_pen(self._colors.empty_row)
                 if x0 - _BAR_SEAM_PX >= 0:
                     gfx.rectangle(x0 - _BAR_SEAM_PX, row_top, _BAR_SEAM_PX, bar_h)
@@ -201,7 +205,6 @@ class Renderer:
                 label_right = x0
                 usable_px = bar_px - 2 * _BAR_TEXT_MARGIN
 
-                # Left-aligned name label
                 if usable_px >= _MIN_LABEL_PX and event.name:
                     label = event.name.upper()
                     text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
@@ -223,7 +226,6 @@ class Renderer:
                         gfx.text(label, x0 + _BAR_TEXT_MARGIN, text_y, scale=geom.bar_text_scale)
                         label_right = x0 + _BAR_TEXT_MARGIN + text_w
 
-                # Right-aligned remaining time when event end is beyond window
                 if ev_end > window_end:
                     remaining = ev_end - now
                     if remaining > 0:
@@ -234,8 +236,6 @@ class Renderer:
                             gfx.set_pen(LABEL_FOR_SLOT[pen])
                             gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
 
-            # Right-edge glyph when this row's data isn't fresh (network rows
-            # only; static rows return None and draw nothing).
             status = stream.status()
             if status is not None and status != FRESH:
                 gfx.set_pen(self._colors.now_line)
@@ -243,6 +243,7 @@ class Renderer:
 
     @micropython.native
     def draw_time_axis(self, window_start: int, window_end: int) -> None:
+        """Redraw the time axis: quarter-hour ticks and hour labels."""
         geom = self._geom
         gfx = self._gfx
         width = geom.width
@@ -250,13 +251,11 @@ class Renderer:
         baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
         tick_bottom = baseline_y + _TICK_MARK_HEIGHT
 
-        # Clear axis label area + tick mark band
         gfx.set_pen(self._colors.background)
         gfx.rectangle(0, baseline_y + 1, width, geom.axis_y + geom.axis_height - baseline_y - 1)
 
         gfx.set_font(geom.bar_font)
 
-        # Iterate every 15 minutes; draw tick mark at each, hour label at full hours
         first_q = (window_start // _SEC_PER_QUARTER) * _SEC_PER_QUARTER
         if first_q < window_start:
             first_q += _SEC_PER_QUARTER
@@ -281,6 +280,7 @@ class Renderer:
             t += _SEC_PER_QUARTER
 
     def draw_static_overlay(self) -> None:
+        """Draw the parts that never move: the now-line and the axis baseline."""
         geom = self._geom
         gfx = self._gfx
 
@@ -291,15 +291,21 @@ class Renderer:
             gap_top = geom.gap_y[i]
             gfx.line(x, gap_top, x, gap_top + geom.gap_height - 1)
 
-        # Horizontal baseline at the bottom of the last gap
         baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
         gfx.line(0, baseline_y, geom.width - 1, baseline_y)
 
     def update(self) -> None:
+        """Push the framebuffer to the panel."""
         self._gfx.update()
 
 
 class Display(_Display):
+    """Calendar view: a timeline of event rows that scrolls with the clock.
+
+    ``streams`` must hold at most ``_MAX_STREAMS`` rows, and ``get_time`` must
+    return local epoch seconds.
+    """
+
     refresh_period_ms = 60_000
 
     def __init__(

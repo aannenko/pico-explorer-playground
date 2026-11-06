@@ -17,19 +17,19 @@ except ImportError:
 
 
 class HttpError(Exception):
-    """Base for the transport, status, protocol and JSON failures ``get_json`` classifies."""
+    pass
 
 
 class HttpTimeout(HttpError):
-    """Socket timed out while connecting or reading."""
+    pass
 
 
 class HttpConnectError(HttpError):
-    """Non-timeout socket failure: DNS, connection refused, or a failed read."""
+    """Any non-timeout socket failure: DNS, a refused connection or a failed read."""
 
 
 class HttpStatusError(HttpError):
-    """Server replied with a non-2xx status."""
+    """Any non-2xx status."""
 
     def __init__(self, status: int) -> None:
         super().__init__("HTTP status {}".format(status))
@@ -37,12 +37,11 @@ class HttpStatusError(HttpError):
 
 
 class HttpParseError(HttpError):
-    """Response body was not valid JSON, or not a JSON object."""
+    """The body isn't valid JSON, or isn't a JSON object."""
 
 
 class HttpProtocolError(HttpError):
-    """Reply was not a usable HTTP response (bad status line, unsupported
-    scheme / transfer-encoding / redirect) — e.g. a captive portal."""
+    """The reply isn't a usable HTTP response, e.g. from a captive portal."""
 
 
 def _classify_oserror(exc: OSError) -> HttpError:
@@ -56,9 +55,7 @@ def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
     """GET ``url`` and return the parsed JSON body as a dict.
 
     Raises an ``HttpError`` subclass for transport, status, protocol and JSON
-    failures; anything else (e.g. ``MemoryError``) is printed with
-    ``log_exception`` and re-raised.  Collects garbage first to reduce
-    fragmented-heap allocation failures, and always closes the response.
+    failures; anything else (e.g. ``MemoryError``) is logged and re-raised.
     """
     try:
         return _get_json(url, headers, timeout_s)
@@ -70,7 +67,7 @@ def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
 
 
 def _get_json(url: str, headers: dict | None, timeout_s: int) -> dict:
-    gc.collect()
+    gc.collect()  # reduces fragmented-heap allocation failures
     response = None
     try:
         try:
@@ -78,6 +75,8 @@ def _get_json(url: str, headers: dict | None, timeout_s: int) -> dict:
         except OSError as exc:
             raise _classify_oserror(exc)
         except (ValueError, NotImplementedError) as exc:
+            # urequests raises these for a bad status line or an unsupported scheme,
+            # chunked transfer encoding or redirect status.
             raise HttpProtocolError(str(exc))
 
         status = response.status_code

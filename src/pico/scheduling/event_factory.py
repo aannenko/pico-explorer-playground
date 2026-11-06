@@ -5,7 +5,7 @@ from micropython import const
 from scheduling.event import Event
 from services.time_service import TimeService
 
-_WEEK_DAYS = {0, 1, 2, 3, 4, 5, 6}  # Monday=0 .. Sunday=6
+_WEEK_DAYS = {0, 1, 2, 3, 4, 5, 6}
 _SEC_IN_DAY = const(24 * 60 * 60)
 _SEC_IN_WEEK = const(_SEC_IN_DAY * 7)
 
@@ -23,14 +23,14 @@ def work_week_loop(
     work_start: tuple[int, int],
     work_end: tuple[int, int],
     time_service: TimeService,
-):
+):  # Iterator[Event]
     """Yield work / rest / weekend events forever, starting with the currently running one.
 
-    Operates in local-epoch throughout; ``real_duration_sec`` is
-    DST-corrected at yield time via ``time_service``.  Assumes one
-    sub-24h shift per work day with a fixed daily start/end (shifts may
-    cross midnight); gaps between work days collapse into a single
-    weekend event spanning > 24h.
+    ``work_days`` holds weekday numbers, 0=Mon .. 6=Sun.
+
+    Operates in local-epoch throughout.  Assumes one sub-24h shift per work
+    day with a fixed daily start/end (shifts may cross midnight); gaps
+    between work days collapse into a single weekend event spanning > 24h.
     """
 
     work_start_hour, work_start_minute = work_start
@@ -49,10 +49,9 @@ def work_week_loop(
 
     is_work_midnight = work_start > work_end
 
-    # Calculate the number of events
     num_events = len(work_days) * _EVENTS_PER_WORK_DAY
 
-    # Pre-calculate event durations (wall-clock — constant regardless of DST)
+    # Wall-clock durations are constant regardless of DST.
     work_start_second_of_day = work_start_hour * 3600 + work_start_minute * 60
     work_end_second_of_day = work_end_hour * 3600 + work_end_minute * 60
     work_duration_sec = (
@@ -63,12 +62,10 @@ def work_week_loop(
 
     rest_duration_sec = _SEC_IN_DAY - work_duration_sec
 
-    # Prepare the binary buffer with all events
     buffer = bytearray(num_events * _STRUCT_SIZE)
     offset = 0
     current_event_index = 0
 
-    # Use local-epoch for positioning: gmtime(local) gives local components
     now_local = time_service.now()
     _, _, _, now_hour, now_minute, now_second, now_weekday, _ = time.gmtime(now_local)
     elapsed_week_sec = now_weekday * _SEC_IN_DAY + now_hour * 3600 + now_minute * 60 + now_second
@@ -84,7 +81,7 @@ def work_week_loop(
         )
         if is_current:
             event_start_week_sec = (
-                event_start_week_sec  # event started this week
+                event_start_week_sec
                 if event_start_week_sec <= elapsed_week_sec
                 else event_start_week_sec - _SEC_IN_WEEK  # event started last week
             )
@@ -93,7 +90,6 @@ def work_week_loop(
 
     weekend_days = _WEEK_DAYS - work_days
     for work_day in sorted(work_days):
-        # Work event
         work_start_week_sec = work_day * _SEC_IN_DAY + work_start_second_of_day
         struct.pack_into(_STRUCT_FORMAT, buffer, offset, work_duration_sec, _WORK)
         _set_if_current(work_start_week_sec, work_duration_sec)
@@ -104,11 +100,9 @@ def work_week_loop(
         rest_day = work_day if not is_work_midnight else tomorrow
         rest_start_week_sec = rest_day * _SEC_IN_DAY + work_end_second_of_day
         if tomorrow in work_days:
-            # Rest event
             struct.pack_into(_STRUCT_FORMAT, buffer, offset, rest_duration_sec, _REST)
             _set_if_current(rest_start_week_sec, rest_duration_sec)
         else:
-            # Weekend event
             weekend_duration_sec = rest_duration_sec
             day = rest_day
             while (day := (day + 1) % 7) in weekend_days:
@@ -119,8 +113,6 @@ def work_week_loop(
 
         offset += _STRUCT_SIZE
 
-    # Yield events starting from the current one.
-    # DST correction is computed at yield time (not pre-stored in buffer).
     while True:
         offset = current_event_index * _STRUCT_SIZE
         event_duration_sec, event_type = struct.unpack_from(_STRUCT_FORMAT, buffer, offset)
@@ -130,12 +122,12 @@ def work_week_loop(
             event_name = "work"
         elif event_type == _REST:
             event_name = "rest"
-        else:  # event_type == _WEEKEND
+        else:
             event_name = "weekend"
 
         real_dur = time_service.real_duration(current_event_start_timestamp, event_duration_sec)
 
         yield Event(event_name, current_event_start_timestamp, event_duration_sec, real_dur)
 
-        current_event_start_timestamp += event_duration_sec  # advance by wall-clock
+        current_event_start_timestamp += event_duration_sec
         current_event_index = (current_event_index + 1) % num_events

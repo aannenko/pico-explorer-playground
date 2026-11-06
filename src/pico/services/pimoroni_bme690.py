@@ -28,8 +28,8 @@ class PimoroniBME690:
         hum_offset: float,
         prsr_offset: float,
         sensor_read_delay_ms: int = 5000,
-        schedule=micropython.schedule,
-        timer_factory=Timer,
+        schedule=micropython.schedule,  # (callback, arg) -> None
+        timer_factory=Timer,  # (int) -> Timer
     ) -> None:
         self._temp_offset = temp_offset
         self._hum_offset = hum_offset
@@ -62,15 +62,19 @@ class PimoroniBME690:
         )
 
     def read(self) -> tuple[float, float, float, float, str]:
+        """Return the latest reading: °C, hPa, %RH, gas kΩ and heater status.
+
+        Gas is NaN while the heater status is ``"Unstable"``.  Returns the same
+        tuple until the next sensor read replaces it.
+        """
         return self._last_reading
 
     def deinit(self) -> None:
+        """Stop the periodic sensor reads."""
         self._timer.deinit()
 
     def _do_read(self) -> None:
-        # Index the driver's result directly rather than slicing ``[0:5]`` — the
-        # slice would allocate a throwaway tuple on every read (~5 s, runs even
-        # when the Sensors view isn't active).
+        # Index directly: slicing the driver's tuple would allocate another tuple.
         reading = self._bme.read()
         heater_stable = reading[4] & STATUS_HEATER_STABLE
         self._last_reading = (
@@ -88,6 +92,7 @@ class PimoroniBME690:
             self._pending = False
 
     def _timer_callback(self, _: Timer) -> None:
+        # _pending collapses firings queued behind blocking work into one scheduled run.
         if self._pending:
             return
         self._pending = True

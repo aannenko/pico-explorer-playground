@@ -1,20 +1,13 @@
-"""Shared Open-Meteo access for the network calendar streams.
-
-Builds the two endpoint URLs (forecast + air-quality), runs the fetch via an
-injected getter, and exposes the hourly-array helpers both consumers share.
-
-HTTP (not HTTPS) on purpose: no TLS handshake and its large contiguous-heap block.
-"""
+"""Open-Meteo access for hourly forecast and air-quality data."""
 
 import time
 
+# HTTP (not HTTPS) on purpose: no TLS handshake and its large contiguous-heap block.
 _FORECAST_URL = "http://api.open-meteo.com/v1/forecast"
 _AIR_QUALITY_URL = "http://air-quality-api.open-meteo.com/v1/air-quality"
 
-# ``hours`` (forecast_hours) and ``past_hours`` are supplied by the caller, not
-# hardcoded here: both are derived in app.py from the calendar windows + refresh
-# cadence (this module can't see either).  Keep the span small so each response
-# body stays under ~1 KiB — larger bodies fail to allocate on the device.
+# Keep ``hours`` and ``past_hours`` small, so each response body stays under ~1 KiB:
+# larger bodies can fail to allocate on-device.
 
 
 def _build_url(
@@ -34,14 +27,16 @@ def _build_url(
 def fetch_forecast(
     http_get, lat: float, lon: float, metrics: str, timeout_s: int, hours: int, past_hours: int
 ) -> dict:
-    # http_get: (url, timeout_s) -> dict; may raise the typed http_client errors.
+    """Fetch hourly forecast ``metrics``, ``past_hours`` back to ``hours`` ahead."""
+    # http_get: (url, timeout_s) -> dict
     return http_get(_build_url(_FORECAST_URL, lat, lon, metrics, hours, past_hours), timeout_s=timeout_s)
 
 
 def fetch_air_quality(
     http_get, lat: float, lon: float, metrics: str, timeout_s: int, hours: int, past_hours: int
 ) -> dict:
-    # http_get: (url, timeout_s) -> dict; may raise the typed http_client errors.
+    """Fetch hourly air-quality ``metrics``, ``past_hours`` back to ``hours`` ahead."""
+    # http_get: (url, timeout_s) -> dict
     return http_get(_build_url(_AIR_QUALITY_URL, lat, lon, metrics, hours, past_hours), timeout_s=timeout_s)
 
 
@@ -60,11 +55,9 @@ def parse_iso_local(text: str) -> int:
 
 
 def extract_hourly(payload: dict, keys) -> list[list]:  # keys: Iterable[str]
-    """Return the requested ``hourly`` arrays, validating equal lengths.
+    """Return the requested ``hourly`` arrays, in ``keys`` order.
 
-    Raises ``KeyError`` for a missing key and ``ValueError`` when the arrays
-    disagree in length, so a malformed payload makes the caller's fetch state
-    machine back off instead of publishing a truncated snapshot.
+    Raises ``KeyError`` for a missing key and ``ValueError`` for unequal array lengths.
     """
     hourly = payload["hourly"]
     arrays = [hourly[k] for k in keys]

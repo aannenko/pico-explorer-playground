@@ -11,12 +11,14 @@ _DEFAULT_ALERT_FREQ = const(1000)
 
 
 class ExplorerBuzzer:
+    """Pico Explorer piezo buzzer (PWM) for non-blocking beep alerts."""
+
     def __init__(
         self,
         pin_id: int = BUZZER_PIN,
-        pwm_factory=PWM,
-        pin_factory=Pin,
-        timer_factory=Timer,
+        pwm_factory=PWM,  # (Pin) -> PWM
+        pin_factory=Pin,  # (int) -> Pin
+        timer_factory=Timer,  # (int) -> Timer
     ) -> None:
         self._pwm = pwm_factory(pin_factory(pin_id))
         self._pwm.duty_u16(0)
@@ -34,6 +36,7 @@ class ExplorerBuzzer:
         freq: int = _DEFAULT_ALERT_FREQ,
         interval_ms: int = _DEFAULT_ALERT_INTERVAL_MS,
     ) -> None:
+        """Beep ``count`` times at ``freq`` Hz, ``interval_ms`` on then off."""
         self._alert_remaining = count * 2
         self._alert_freq = freq
         self._beep(freq)

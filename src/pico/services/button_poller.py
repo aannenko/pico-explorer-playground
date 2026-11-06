@@ -4,15 +4,17 @@ from machine import Pin
 class ButtonPoller:
     """Edge-detecting button poller using raw Pin levels (active-low).
 
-    Uses machine.Pin instead of pimoroni.Button, whose read() auto-repeats
-    while a button is held.
+    Tracks edges itself rather than via pimoroni.Button, whose read() consumes
+    each press: a press whose schedule() hits a full queue is retried on the
+    next poll.
     """
 
-    def __init__(self, schedule) -> None:
+    def __init__(self, schedule) -> None:  # schedule: (callback, arg) -> None
         self._schedule = schedule
         self._buttons: list[tuple] = []  # list[tuple[Pin, Callable[[int], None], bool]]
 
-    def add(self, pin: Pin, on_press) -> None:
+    def add(self, pin: Pin, on_press) -> None:  # on_press: (int) -> None
+        """Watch ``pin``; each press schedules ``on_press(0)``."""
         self._buttons.append((pin, on_press, False))
 
     def poll_once(self) -> None:
@@ -20,7 +22,7 @@ class ButtonPoller:
         schedule = self._schedule
         for i in range(len(buttons)):
             pin, on_press, was_pressed = buttons[i]
-            pressed = pin.value() == 0  # active-low with pull-up
+            pressed = pin.value() == 0
             if pressed and not was_pressed:
                 # Scheduled rather than called directly: scheduled callbacks
                 # never nest, so no tick runs mid-handler.

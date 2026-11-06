@@ -1,9 +1,4 @@
-"""Application composition: wire services, displays, and schedulers.
-
-``build_app`` returns the long-lived objects ``main.py`` needs to start
-and drive the app.  Splitting composition out of ``main.py`` keeps the
-entry point minimal and makes the wiring testable on the host.
-"""
+"""Composition root: builds and wires the app's services and displays."""
 
 from micropython import const
 from machine import Pin
@@ -48,15 +43,13 @@ _SEC_PER_HOUR = const(3600)
 
 _NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
 
-# Single source of truth for the weather/air fetch cadence.
 _STREAM_REFRESH_MS = const(30 * 60 * 1000)
-# Forecast slack beyond the calendar window: covers scroll plus a couple of
-# failed retries.
+# Forecast slack beyond the calendar window: covers scroll plus failed retries.
 _STREAM_SLACK_REFRESHES = const(2)
 
 # Derived here because app.py is the one place that sees both the calendar's
 # future window (owned by displays.calendar) and the fetch cadence above.  The
-# extra hour absorbs the snap to the current hour boundary.
+# extra hour absorbs Open-Meteo's forecast_hours starting at the current hour.
 _STREAM_HORIZON_SEC = (
     calendar.WINDOW_FUTURE_SEC
     + _STREAM_SLACK_REFRESHES * (_STREAM_REFRESH_MS // 1000)
@@ -64,9 +57,7 @@ _STREAM_HORIZON_SEC = (
 )
 _STREAM_FORECAST_HOURS = (_STREAM_HORIZON_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
 
-# How many past hours to request so the calendar's past window (left of the
-# now-line) stays populated: the API's forecast_hours starts at the current
-# hour, so without this the past strip would render blank.  ceil(past / 1 h).
+# Without past_hours, that start could leave part of the calendar's past window empty.
 _STREAM_PAST_HOURS = (calendar.WINDOW_PAST_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
 
 
@@ -79,16 +70,11 @@ _SENSOR_BANDS_KEYS = (
 
 
 def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
-    """Semantic backstop for ``SENSOR_*_BANDS`` — runs after the loader has
-    already enforced *structural* shape (5-tuple of ints) via
-    ``config_bootstrap.apply_overrides``.  This check covers what the loader
-    intentionally doesn't: strictly ascending order and uniqueness.  Failures
-    here are rendered on the panel before the long WiFi/NTP bootstrap, so a
-    bad threshold doesn't manifest as a blank or frozen screen later.
+    """Halt unless each ``SENSOR_*_BANDS`` holds 5 strictly ascending edges.
 
-    Tolerant of any input shape — wraps the comparisons in try/except so a
-    scalar (``SENSOR_TEMP_BANDS = 14``) or non-comparable mixed types surface
-    the same panel error instead of an uncaught traceback.
+    The config loader validates only their structure, not order or uniqueness.
+    Halting shows the error on ``status_display`` and raises ``SystemExit``,
+    even for a scalar or edges of mixed types.
     """
     for name in _SENSOR_BANDS_KEYS:
         bands = getattr(config, name, None)
@@ -102,13 +88,14 @@ def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
         except (TypeError, ValueError):
             ok = False
         if not ok:
-            # Full diagnostic to serial; short panel-friendly message on screen.
             print("config error:", name, "=", repr(bands))
             status_display.show("Bad config", "edit & reboot")
             raise SystemExit(1)
 
 
 class App:
+    """Handles to the long-lived objects of the composed app."""
+
     def __init__(
         self,
         display_manager: DisplayManager,
@@ -154,13 +141,6 @@ def _build_sensors_display(
     geometry: sensors.Geometry,
     history: RingHistory,
 ):
-    """Wire the sensors Display from pre-built parts.
-
-    Geometry and history are built earlier in ``build_app`` so sensor capture
-    can start before the blocking network sync; this runs once ``time_service``
-    (which needs NTP) is available.  Per-band ``(fill, marker)`` pens are derived
-    inside the Display from its ``ROWS`` table (single source for icon + fill).
-    """
     return sensors.Display(
         renderer=sensors.Renderer(
             geometry=geometry,
@@ -183,8 +163,7 @@ def _build_sensors_display(
 
 
 def _build_calendar_display(pico_graphics, time_service: TimeService, network_streams):
-    # Calendar lays out 5 rows: local generators, then network streams,
-    # then demos fill any remaining slots.
+    # Calendar lays out 5 rows.
     streams = [
         work_week.build_stream(time_service),
         waste.build_stream(time_service, config.WASTE_SCHEDULE),
@@ -220,11 +199,12 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
     )
 
 
-def build_app(pico_graphics, schedule_fn) -> App:
-    """Compose services and displays; return them for ``main.py`` to drive.
+def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg) -> None
+    """Compose the services and displays.
 
-    ``schedule_fn`` is ``micropython.schedule`` on-device; tests can pass
-    a synchronous substitute.
+    Blocks through the initial WiFi connect and NTP sync, raising
+    ``RuntimeError`` if either fails.  The returned app's ``tick_scheduler`` is
+    not yet started.
     """
     status_display = StatusDisplay(
         pico_graphics=pico_graphics,
@@ -236,17 +216,12 @@ def build_app(pico_graphics, schedule_fn) -> App:
         subtext_color=GRAY,
     )
 
-    # Done while ``status_display`` is still alive so a malformed band shows
-    # on the panel rather than during the long network boot that follows.
+    # Fail fast, before the network boot.
     _validate_sensor_bands_or_halt(status_display)
 
     tick_scheduler = TickScheduler()
 
-    # Build sensor + history BEFORE the blocking WiFi+NTP bootstrap so the
-    # immediate first RingHistory commit captures a boot-time reading rather
-    # than one taken 0–5 minutes later.  TickScheduler isn't running yet
-    # (main.py calls .start() after build_app returns), so periodic commits
-    # only kick in then.
+    # Capture the first sensor sample before the network boot.
     bme690_reader = PimoroniBME690(
         temp_offset=config.BME690_TEMP_OFFSET,
         hum_offset=config.BME690_HUM_OFFSET,
@@ -277,10 +252,8 @@ def build_app(pico_graphics, schedule_fn) -> App:
         tick_scheduler=tick_scheduler,
     )
     network_service.connect_and_sync_initial(status_fn=status_display.show)
-    # status_display is not retained; it was a boot-time overlay only.
     del status_display
 
-    # TimeService must be created after NTP sync for accurate time.time().
     time_service = TimeService(
         tz_offset=config.TIME_ZONE_OFFSET,
         dst_start=config.DST_START,
@@ -289,8 +262,6 @@ def build_app(pico_graphics, schedule_fn) -> App:
         tick_scheduler=tick_scheduler,
     )
 
-    # Network calendar streams: long-lived services sharing one fetch
-    # coordinator (single in-flight fetch across all of them).
     fetch_coordinator = FetchCoordinator()
     weather_service = WeatherService(
         latitude=config.LATITUDE,

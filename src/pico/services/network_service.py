@@ -12,6 +12,8 @@ _NTP = const(2)
 
 
 class NetworkService:
+    """NTP clock sync over WiFi: a blocking initial sync, then periodic resyncs."""
+
     def __init__(
         self,
         ssid: str,
@@ -30,10 +32,12 @@ class NetworkService:
         if tick_scheduler is not None:
             tick_scheduler.register(self._tick)
 
-    def connect_and_sync_initial(self, status_fn=None) -> None:
-        # status_fn is only used during the initial blocking bootstrap;
-        # it is not retained, so the boot-time StatusDisplay does not need
-        # to live beyond this call.
+    def connect_and_sync_initial(self, status_fn=None) -> None:  # status_fn: (str) -> None
+        """Block until WiFi connects and NTP syncs, else raise ``RuntimeError``.
+
+        ``status_fn`` receives progress messages during this call only; it isn't
+        retained.
+        """
         def _notify(msg: str) -> None:
             if status_fn is not None:
                 status_fn(msg)
@@ -77,7 +81,7 @@ class NetworkService:
                 self._last_sync_ticks = time.ticks_ms()
                 self._phase = _IDLE
             else:
-                return  # still CONNECTING — come back next tick
+                return
 
         if self._phase == _NTP:
             ntp.sync_time()

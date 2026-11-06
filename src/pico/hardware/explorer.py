@@ -1,5 +1,3 @@
-"""Pico Explorer hardware boundary: GPIO pin numbers for on-board peripherals."""
-
 from micropython import const
 
 

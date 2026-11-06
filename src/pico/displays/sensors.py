@@ -20,26 +20,21 @@ from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
 
 
-_HISTORY_MS = const(24 * 3600 * 1000)  # 24 h of history per metric
+_HISTORY_MS = const(24 * 3600 * 1000)
 _L_GAP = const(3)  # px between value text and graph
 _R_MARGIN = const(0)  # px between graph right edge and screen edge
-_ICON_SCALE = const(2)  # band icons blit at 2x their native px
+_ICON_SCALE = const(2)
 # bitmap8 glyph ink sits high in its cell, so a box-centred icon reads low
 # against digits.
 _ICON_INK_LIFT_PX = const(2)
-# 63 px at bitmap8 scale 3 — the budget every value string must fit.  "-99.9"
-# is the widest _fit_chars can actually emit and also measures 63; integer
-# forms clamp to "9999" (57) / "-999" (54).
+# Its width is the budget every value string must fit: 63 px at bitmap8 scale 3.
+# "-99.9", the widest _fit_chars emits, also measures 63; its integer limits "9999"
+# and "-999" measure 57 and 54.
 _WIDEST_GRAPH_VALUE = "-88.8"
 
 
 def _largest_divisor_of(n: int, max_val: int) -> int:
-    """Return the largest integer d in [1..max_val] that divides n.
-
-    Used at boot to pick a graph width that splits 24 h of ticks into an
-    integer ``ticks_per_commit``.  ``1`` always divides ``n``, so the loop
-    terminates for any ``max_val >= 1``.
-    """
+    """Return the largest ``d`` in 1..``max_val`` that divides ``n``."""
     if max_val < 1:
         raise ValueError("max_val must be >= 1")
     if max_val > n:
@@ -53,6 +48,8 @@ def _largest_divisor_of(n: int, max_val: int) -> int:
 
 
 class Colors:
+    """Pens for the Sensors view's background and text."""
+
     def __init__(
         self,
         background: int,
@@ -67,6 +64,11 @@ class Colors:
 
 
 class Geometry:
+    """Pixel layout of the Sensors view, plus scheduler ticks per graph column.
+
+    Raises ``RuntimeError`` if the font and scale leave no room for the header or graph.
+    """
+
     @micropython.native
     def __init__(
         self,
@@ -81,7 +83,7 @@ class Geometry:
         self.width, self.height = pico_graphics.get_bounds()
 
         self.font = font
-        pico_graphics.set_font(font)  # must precede measure_text below
+        pico_graphics.set_font(font)
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
         self.line_spacing = self.text_height // 2
@@ -108,12 +110,10 @@ class Geometry:
 
         self.value_rect_height = self.text_height
 
-        # Left-column footprints come from the blobs the rows actually draw
-        # (every icon is self-describing ``(w, h, blob)``), so swapping in
-        # larger art widens the column with no constant to hand-edit.
         icon_px, unit_px = left_column_native_px()
 
         self.icon_scale = _ICON_SCALE
+        # Doubles as the icon height, so band icons must be square.
         self.icon_size_px = icon_px * _ICON_SCALE
         self.icon_y_offset = (self.icon_size_px - self.text_height) // 2 + _ICON_INK_LIFT_PX
 
@@ -133,17 +133,19 @@ class Geometry:
             raise RuntimeError(
                 "sensors geometry: no room for graph (font/scale too large)"
             )
-        # 24 h of scheduler ticks; for 500 ms ticks → 172800.
         total_ticks = _HISTORY_MS // tick_period_ms
+        # A divisor, so the columns span exactly 24 h of ticks.
         self.graph_width = _largest_divisor_of(total_ticks, available)
         self.ticks_per_commit = total_ticks // self.graph_width
-        self.graph_height = self.text_height  # 24 px, matches row height
+        self.graph_height = self.text_height
 
         # Stops at graph_x so clearing a value never erases the graph.
         self.value_clear_width = self.graph_x - self.value_x
 
 
 class Renderer:
+    """Line-based drawing: each line holds an icon, a unit, a value and a history graph."""
+
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
         self._gfx = geometry.graphics
@@ -154,6 +156,7 @@ class Renderer:
         self._update_needed = False
 
     def reset(self) -> None:
+        """Clear the screen and forget the drawn header and lines."""
         self._last_header = ""
         for i in range(len(self._last_lines)):
             self._last_lines[i] = ""
@@ -168,6 +171,7 @@ class Renderer:
         icon: tuple,
         unit: tuple,
     ) -> None:
+        """Draw a line's ``icon`` and ``unit``; their area must already be clear."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
@@ -177,6 +181,7 @@ class Renderer:
         icons_p4.draw_icon(self._gfx, unit, g.unit_x, y, g.unit_scale)
 
     def header_write(self, text: str) -> None:
+        """Draw ``text`` in the header strip unless it is already shown."""
         if text == self._last_header:
             return
         self._last_header = text
@@ -193,6 +198,7 @@ class Renderer:
         self._gfx.text(text, 0, self._geom.header_y, scale=self._geom.text_scale)
 
     def line_write(self, line_idx: int, text: str, *, pen: int) -> None:
+        """Draw ``text`` in a line's value cell unless it is already shown."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         if text == self._last_lines[line_idx]:
@@ -210,7 +216,7 @@ class Renderer:
         self._last_lines[line_idx] = text
 
     def redraw_row_icon(self, line_idx: int, icon: tuple) -> None:
-        """Replace the icon at ``line_idx`` with a different ``(w, h, blob)``."""
+        """Replace a line's icon, erasing the old one."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
@@ -224,10 +230,10 @@ class Renderer:
         self.line_write(line_idx, text, pen=self._colors.value_text)
 
     def secondary_write(self, line_idx: int, text: str) -> None:
+        """Draw ``text`` in a line's value cell as secondary text."""
         self.line_write(line_idx, text, pen=self._colors.secondary_text)
 
     def draw_graph_clear(self, line_idx: int) -> None:
-        """Paint the row's graph rect with the background pen."""
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
         self._update_needed = True
@@ -244,13 +250,10 @@ class Renderer:
         marker_pen: int | None,
         value_y: int | None,
     ) -> None:
-        """Paint one 1×graph_height column: full-height band fill, plus an
-        optional single auto-contrast marker pixel at ``value_y``.
+        """Draw one full-height graph column, optionally with a marker pixel.
 
-        ``col`` is the column index 0..graph_width-1 within the graph rect
-        (caller maps history value_idx → col).  ``value_y`` is the y offset
-        inside the row (0 = top, graph_height-1 = bottom); the marker pixel
-        is only drawn when both ``marker_pen`` and ``value_y`` are not None.
+        ``col`` is graph-local (0..graph_width-1) and ``value_y`` row-local (0 is top);
+        the marker is drawn only when ``marker_pen`` and ``value_y`` are both set.
         """
         if line_idx < 0 or line_idx >= len(self._last_lines):
             return
@@ -265,6 +268,7 @@ class Renderer:
             self._gfx.pixel(x, y + value_y)
 
     def update(self) -> None:
+        """Push the framebuffer to the panel if drawn to since the last push."""
         if not self._update_needed:
             return
         self._update_needed = False
@@ -272,17 +276,11 @@ class Renderer:
 
 
 class Display(_Display):
-    # Static per-row schema in display order: ``(unit, cells)`` where ``cells``
-    # is the 4 bands low→high, each a ``(icon, fill_slot)`` pair — colocating the
-    # band icon and its graph-fill colour so they're a single source and can't
-    # drift.  ``unit`` and each ``icon`` are ``(w, h, blob)`` tuples from
-    # ``_icons_data``; ``fill_slot`` is a ``displays.palette`` slot index.
-    # Band thresholds arrive via ``__init__`` from ``config.SENSOR_*_BANDS`` and
-    # are merged into ``self._rows`` as ``(unit, edges, cells)`` triples.
-    # ``edges`` is a 5-tuple ``(cap_min, t1, t2, t3, cap_max)``; the inner three
-    # drive band classification, the outer two bound the history graph's Y axis.
-    # ``cells[1]`` is what ``initialize`` paints by default so a centered indoor
-    # reading needs no first swap.
+    """Sensors view: live BME690 readings with band icons and 24 h history graphs."""
+
+    # (unit, cells) per row, in ``PimoroniBME690.read()`` order; cells are four
+    # low-to-high (icon, fill_slot) bands, colocated so a band's icon and graph fill
+    # can't drift apart.
     ROWS = (
         (
             _icons_data.UNIT_CELSIUS,
@@ -322,7 +320,6 @@ class Display(_Display):
         ),
     )
 
-    # Row index gated on heater status (see ``_update_display``).
     _GAS_ROW = 3
 
     def __init__(
@@ -342,29 +339,16 @@ class Display(_Display):
         self._time_service = time_service
         self._bme690_reader = bme690_reader
         self._history = history
-        # Per-band (fill, marker) pens; see build_sensor_band_pens.
         self._band_pens = build_sensor_band_pens()
         self._graph_height = graph_height
         self._active = False
-        # Currently painted icon per row; ``None`` forces the first
-        # ``_maybe_swap_icon`` to paint.  Populated by ``initialize``.
         self._row_icons: list[tuple | None] = [None] * len(self.ROWS)
         self._last_rendered_reading: tuple | None = None
-        # Graph redraw triggers: track the last commit_count we drew for, and
-        # the last gas heater stable-state we rendered.  ``-1`` / ``None``
-        # values force a redraw on first ``_update_display`` after init.
         self._last_commit = -1
         self._gas_was_stable: bool | None = None
-        # The header clock changes once a minute.  ``-1`` forces a redraw on the
-        # first ``_update_display``; ``_next_header_check_ms`` gates the
-        # (big-int-allocating, 1970-epoch) wall-clock read to once per minute
-        # boundary (see ``_update_display``) so the 1 s render doesn't read the
-        # clock every tick.
         self._last_header_minute = -1
         self._next_header_check_ms = 0
 
-        # Validate at startup so a bad config raises here, not on the first
-        # sensor read.
         bands_per_row = (temp_bands, pressure_bands, humidity_bands, gas_bands)
         self._rows = tuple(
             (unit, self._validated_bands(i, bands_per_row[i]), cells)
@@ -373,11 +357,9 @@ class Display(_Display):
 
     @staticmethod
     def _validated_bands(row_index: int, bands) -> tuple:
-        """Return ``bands`` as a 5-tuple, or raise ``ValueError`` on bad shape.
+        """Return ``bands`` as a tuple of edges ``(cap_min, t1, t2, t3, cap_max)``.
 
-        Accepts a tuple/list of 5 strictly ascending numeric edges
-        ``(cap_min, t1, t2, t3, cap_max)``.  Rejects any other length, any
-        non-ascending or duplicated sequence.
+        Raises ``ValueError`` unless ``bands`` holds 5 strictly ascending edges.
         """
         if len(bands) != 5:
             raise ValueError(
@@ -396,11 +378,10 @@ class Display(_Display):
 
     @staticmethod
     def _band_index(value: float, edges: tuple) -> int:
-        """Return band 0..3 for ``value`` against the 3 inner edges of ``edges``.
+        """Return ``value``'s band, 0..3, as split by the three inner edges of ``edges``.
 
-        ``edges`` is the full 5-tuple; only ``edges[1:4]`` is used for
-        classification (the outer two bound the graph Y axis, not the bands).
-        Matches the pre-graph behavior: ``value < threshold`` walks low→high.
+        A value on an edge falls in the band above it.  The outer edges bound the graph,
+        not the bands.
         """
         if value < edges[1]:
             return 0
@@ -413,43 +394,30 @@ class Display(_Display):
     @staticmethod
     @micropython.native
     def _y_for(value: float, edges: tuple, graph_height: int) -> int | None:
-        """Map ``value`` to a row-local y in 0..graph_height-1.
+        """Map ``value`` to the row-local y of its marker pixel.
 
-        ``cap_max`` (edges[-1]) → ``y=0`` (top), ``cap_min`` (edges[0]) →
-        ``y=graph_height-1`` (bottom).  Both caps inclusive.  Returns
-        ``None`` for values outside the cap range — the caller draws the
-        column fill-only (no marker pixel).  NaN handling lives at the
-        caller (``_redraw_graphs``), not here; this stays pure math.
+        ``cap_max`` (``edges[-1]``) maps to y 0 (top) and ``cap_min`` (``edges[0]``)
+        to ``graph_height - 1`` (bottom), both inclusive; outside them it returns
+        ``None``.  ``value`` must not be NaN.
         """
         cap_min = edges[0]
         cap_max = edges[-1]
         if value < cap_min or value > cap_max:
             return None
-        # Linear map: at cap_max → 0, at cap_min → graph_height-1.
         return round((cap_max - value) * (graph_height - 1) / (cap_max - cap_min))
 
     @staticmethod
     def _fit_chars(value: float, decimals: int) -> str:
         """Format ``value`` for the sensor value cell.
 
-        Rule: keep ``decimals`` decimals iff the rounded value is in
-        ``(-100, 100)``; otherwise drop to the integer form.  Integer
-        outputs are clamped to ``"9999"`` / ``"-999"`` to guarantee the
-        rendered width never exceeds the 63 px budget set by
-        ``_WIDEST_GRAPH_VALUE = "-88.8"`` (``PicoGraphics.text()`` doesn't
-        clip to the value cell, so an overflow would overdraw the history graph).
+        Shows ``decimals`` places while the rounded value is within (-100, 100), else
+        the nearest integer, clamped to -999..9999.
 
-        Realistic readings (BME690 in the project's typical setup) all fit:
-          - temp:     ``"22.4"``, ``"-9.9"``, ``"-12.3"``, ``"-99.9"``, ``"100"``
-          - humidity: ``"50.5"``, ``"99.9"``, ``"100"`` (decimal drops at >= 100)
-          - pressure: ``"1013"`` (no decimal requested)
-          - gas:      ``"75.3"``, ``"99.9"``, ``"100"``, ``"251"``, ``"1000"``
-
-        The rounded-value check (``round(value, decimals)``) handles the
-        boundary edge: ``-99.99`` formats to ``"-100.0"`` (6 cells, 75 px
-        on-device) which would overdraw; rounded to ``-100.0`` it leaves
-        the in-range window and takes the integer branch instead → ``"-100"``.
+        ``decimals`` must be at most 1, or an in-range value can exceed the
+        ``_WIDEST_GRAPH_VALUE`` budget: ``PicoGraphics.text()`` doesn't clip
+        to the value cell, so an overflow would overdraw the history graph.
         """
+        # Range-check the rounded value: -99.99 formats as "-100.0", which overdraws.
         if decimals > 0 and -100 < round(value, decimals) < 100:
             return "{:.{}f}".format(value, decimals)
         i = round(value)
@@ -466,13 +434,8 @@ class Display(_Display):
 
     @micropython.native
     def _redraw_graphs(self, gas_stable_now: bool) -> None:
-        """Repaint all 4 history graphs based on current ``self._history`` state.
-
-        Triggered by a commit_count bump or a gas heater stable-state change.
-        Gas row has special handling: while heater is unstable, the entire
-        graph region is owned by the wide ``"warming..."`` text and we do
-        not paint there; on the Stable→Warming transition we clear it once
-        to wipe any prior column content.
+        """While gas warms up, its wide status text owns the graph pixels; do not
+        paint columns over it.
         """
         history = self._history
         renderer = self._renderer
@@ -485,21 +448,16 @@ class Display(_Display):
 
             if metric_idx == gas_row:
                 if not gas_stable_now:
-                    # While unstable: only act on the Stable→Warming transition
-                    # (was_stable is True).  Other transitions and steady-state
-                    # warming leave the row alone — the "warming..." text owns
-                    # those pixels.
                     if self._gas_was_stable is True:
                         renderer.draw_graph_clear(gas_row)
                     continue
-                # gas_stable_now is True → fall through to the normal redraw.
 
             renderer.draw_graph_clear(metric_idx)
             graph_height = self._graph_height
             pens_row = band_pens[metric_idx]
             for i in range(history.filled(metric_idx)):
                 value = history.value_at(metric_idx, i)
-                if value != value:  # NaN — leave the column as cleared background
+                if value != value:  # NaN
                     continue
                 band = self._band_index(value, edges)
                 fill_pen, marker_pen = pens_row[band]
@@ -514,9 +472,7 @@ class Display(_Display):
                 )
 
     def _update_display(self) -> None:
-        # Reading the wall clock allocates a big int (1970-epoch build), so only
-        # do it when the next minute boundary is due — gated by the alloc-free ms
-        # clock.  The header still updates within one render of the rollover.
+        # The wall-clock read allocates, so do it only once a minute boundary is due.
         now_ms = time.ticks_ms()
         if time.ticks_diff(now_ms, self._next_header_check_ms) >= 0:
             now = self._time_service.now()
@@ -524,10 +480,8 @@ class Display(_Display):
             if minute != self._last_header_minute:
                 self._last_header_minute = minute
                 self._renderer.header_write(format_header_time(now))
-            # Re-anchor to the next minute boundary.  No slack margin: a read that
-            # lands a hair early sees ``now % 60 ≈ 59`` and recomputes a ~1 s
-            # deadline, so the rollover is still caught within one render — a
-            # margin would instead delay the catch by a render in some phases.
+            # No slack: an early read just recomputes a ~1 s deadline, while slack
+            # can delay catching the minute rollover by a render.
             self._next_header_check_ms = time.ticks_add(now_ms, (60 - now % 60) * 1000)
 
         reading = self._bme690_reader.read()
@@ -535,12 +489,8 @@ class Display(_Display):
         # Graph-redraw check lives BEFORE the reading-identity guard so a
         # history commit observed on a "reading unchanged" tick still fires.
         gas_stable_now = (reading[4] == "Stable")
-        # MOX gas sensor needs heater warm-up: its first samples are NaN and the
-        # boot commit captured one.  The instant it goes stable, backfill the
-        # latest gas slot with the live reading so the gas column appears at once
-        # rather than at the next periodic commit.  ``_gas_was_stable`` is still
-        # not-True on this warming→stable edge (the redraw block below flips it),
-        # so the redraw fires too.
+        # Backfill the newest gas sample once valid rather than at the next commit;
+        # must precede the redraw block, which updates _gas_was_stable.
         if gas_stable_now and self._gas_was_stable is not True:
             self._history.update_latest(self._GAS_ROW, reading[3])
         commit_now = self._history.commit_count
@@ -552,32 +502,23 @@ class Display(_Display):
             self._last_commit = commit_now
             self._gas_was_stable = gas_stable_now
 
-        # PimoroniBME690 replaces _last_reading with a fresh tuple on each
-        # sensor read (~5 s); until then read() returns the same object.
-        # Identity-compare to skip the four f-string formats per tick.
         if reading is not self._last_rendered_reading:
             self._last_rendered_reading = reading
             temp, press, hum, gas_r, status = reading
 
-            # Gas row only follows the reading when the heater is stable.
-            # Index ``reading`` directly via ``range`` (a counting loop) rather
-            # than ``enumerate((temp, press, hum, gas_r))`` — the latter
-            # allocates a throwaway tuple *and* an enumerate object every read.
+            # Direct indexing avoids a temporary tuple and enumerate object.
             for i in range(len(self._rows)):
                 if i == self._GAS_ROW and status != "Stable":
                     continue
                 _unit, edges, cells = self._rows[i]
                 self._maybe_swap_icon(i, cells[self._band_index(reading[i], edges)][0])
 
-            self._renderer.value_write(0, self._fit_chars(temp, 1))
-            self._renderer.value_write(1, self._fit_chars(press, 0))
-            self._renderer.value_write(2, self._fit_chars(hum, 1))
+            self._renderer.value_write(0, self._fit_chars(temp, 1))  # "22.4", "-99.9", "100"
+            self._renderer.value_write(1, self._fit_chars(press, 0))  # "1013"
+            self._renderer.value_write(2, self._fit_chars(hum, 1))  # "50.5", "100"
             if status == "Stable":
-                self._renderer.value_write(3, self._fit_chars(gas_r, 1))
+                self._renderer.value_write(3, self._fit_chars(gas_r, 1))  # "75.3", "251", "1000"
             else:
-                # "warming..." is intentionally wider than the value cell; it
-                # spills into the gas-row graph rect and the gas-row state
-                # machine in _redraw_graphs ensures we don't paint over it.
                 self._renderer.value_write(3, "warming...")
 
         self._renderer.update()
@@ -591,17 +532,15 @@ class Display(_Display):
         self._active = True
         self._renderer.reset()
         for i, (unit, _edges, cells) in enumerate(self._rows):
+            # Band 1 by default, so a typical indoor reading needs no first swap.
             default_icon = cells[1][0]
             self._renderer.draw_left_column(i, default_icon, unit)
             self._row_icons[i] = default_icon
-        # Force first _update_display to paint values even if the reader
-        # returns the same tuple object as the last time we were active.
+        # A cleared screen still needs repainting when the reading object is unchanged.
         self._last_rendered_reading = None
-        # Force a graph redraw on re-entry (the screen was cleared by reset()).
         self._last_commit = -1
         self._gas_was_stable = None
         self._last_header_minute = -1
-        # Force the gated header clock-read on the first render after (re)entry.
         self._next_header_check_ms = time.ticks_ms()
         self._update_display()
 
@@ -612,11 +551,10 @@ class Display(_Display):
 
 
 def build_sensor_band_pens():
-    """Derive the 4x4 grid of ``(fill_slot, marker_slot)`` pairs from
-    ``Display.ROWS`` — the single source that colocates each band's
-    ``(icon, fill)``.  ``marker`` is the fill's auto-contrast (BLACK/WHITE),
-    precomputed here so the render loop never does luminance work.  Indexed
-    ``pens[metric_idx][band_idx]``.
+    """Return each band's ``(fill, marker)`` pens, indexed ``pens[metric_idx][band_idx]``.
+
+    The marker is the fill's auto-contrast, precomputed so the render loop does no
+    palette lookups.
     """
     return tuple(
         tuple((fill, LABEL_FOR_SLOT[fill]) for _icon, fill in cells)
@@ -625,13 +563,9 @@ def build_sensor_band_pens():
 
 
 def left_column_native_px() -> tuple[int, int]:
-    """Return the ``(icon, unit)`` native pixel WIDTHS the left column must fit.
+    """Return the ``(icon, unit)`` native pixel widths the left column must fit.
 
-    Widest blob wins per column: each entry in ``Display.ROWS`` is a
-    self-describing ``(w, h, blob)`` tuple, so the layout tracks the art
-    instead of a hardcoded (or generated) size constant.  Called once at
-    boot from ``Geometry``, which reuses the icon width as the vertical
-    footprint too — so band icons must stay square.
+    Derived from the art so no size constant can drift from it.
     """
     icon_px = 0
     unit_px = 0

@@ -6,12 +6,8 @@ _SAKAMOTO_T = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
 _DAYS_IN_MONTH = (0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 _SEC_PER_HOUR = const(3600)
 
-# How often ``_tick`` samples the wall clock to check for a DST transition.
-# ``time.time()`` heap-allocates a big int on builds whose epoch puts the
-# current year past the small-int range (e.g. the 1970-epoch rp2 build, where
-# 2026 ≈ 1.78e9 > 2**30), so reading it every 500 ms tick to compare against a
-# boundary that is *months* away is pure allocation churn.  A minute of slack on
-# the transition instant is imperceptible.
+# _tick reads the wall clock only this often; a minute of slack on the
+# transition instant is imperceptible.
 _DST_CHECK_INTERVAL_MS = const(60_000)
 
 
@@ -26,10 +22,7 @@ def _days_in_month(year: int, month: int) -> int:
 
 
 def _weekday(year: int, month: int, day: int) -> int:
-    """Day of week: 0=Mon .. 6=Sun (MicroPython convention).
-
-    Uses Sakamoto's algorithm (pure integer math, no mktime/gmtime).
-    """
+    """0=Mon .. 6=Sun (MicroPython convention)."""
     y = year
     if month < 3:
         y -= 1
@@ -39,11 +32,7 @@ def _weekday(year: int, month: int, day: int) -> int:
 
 
 def _nth_weekday_mday(year: int, month: int, week: int, weekday: int) -> int:
-    """Day-of-month for the Nth weekday occurrence.
-
-    week: 1-5 for first-fifth, -1 for last.
-    weekday: 0=Mon .. 6=Sun.
-    """
+    """Return the day of month of the ``week``-th ``weekday`` of ``month``."""
     if week == -1:
         last_day = _days_in_month(year, month)
         last_wd = _weekday(year, month, last_day)
@@ -53,11 +42,9 @@ def _nth_weekday_mday(year: int, month: int, week: int, weekday: int) -> int:
 
 
 def _transition_utc(year: int, rule: tuple, offset_hours: int) -> int:
-    """UTC epoch of a DST transition.
+    """Return the UTC epoch of ``rule``'s transition in ``year``.
 
-    rule: (month, week, weekday, hour).
-    offset_hours: UTC offset the transition hour is expressed in
-                  (standard offset for DST start, DST offset for DST end).
+    ``offset_hours`` is the UTC offset the rule's hour is expressed in.
     """
     month, week, weekday, hour = rule
     mday = _nth_weekday_mday(year, month, week, weekday)
@@ -65,7 +52,6 @@ def _transition_utc(year: int, rule: tuple, offset_hours: int) -> int:
 
 
 def _is_dst(utc_epoch: int, tz_offset: int, dst_offset: int, dst_start: tuple, dst_end: tuple) -> bool:
-    """True if DST is active at the given UTC epoch."""
     year = time.gmtime(utc_epoch)[0]
     start = _transition_utc(year, dst_start, tz_offset)
     end = _transition_utc(year, dst_end, tz_offset + dst_offset)
@@ -76,9 +62,7 @@ def _is_dst(utc_epoch: int, tz_offset: int, dst_offset: int, dst_start: tuple, d
 
 
 def _next_transition_utc(utc_epoch: int, tz_offset: int, dst_offset: int, dst_start: tuple, dst_end: tuple) -> int:
-    """UTC epoch of the next DST transition after utc_epoch.
-
-    Returns 0 if no future transition is found (should not happen
+    """Returns 0 if no future transition is found (should not happen
     for valid rules within a reasonable year range).
     """
     year = time.gmtime(utc_epoch)[0]
@@ -96,10 +80,13 @@ def _next_transition_utc(utc_epoch: int, tz_offset: int, dst_offset: int, dst_st
 class TimeService:
     """Central time authority.  Computes local time from UTC + TZ/DST.
 
-    The RTC stays UTC (set by NTP).  This service adds the correct
-    offset (timezone + optional DST) so all consumers get local time
-    via ``now()``.  ``_tick()`` checks for a DST transition once a
-    minute — no coupling to NTP sync.
+    The RTC stays UTC (set by NTP).  Its 1970-epoch times exceed the small-int
+    range, so every read allocates: gate per-tick reads with ``time.ticks_ms()``.
+
+    ``tz_offset`` and ``dst_offset`` are in hours.  ``dst_start`` and ``dst_end``
+    are ``(month, week, weekday, hour)`` rules: ``week`` 1-5, or -1 for the last;
+    ``weekday`` 0=Mon .. 6=Sun; ``hour`` in local standard time for the start and
+    in local DST time for the end.  ``None`` for either rule disables DST.
 
     Must be instantiated after NTP sync so ``time.time()`` is accurate.
     """
@@ -107,10 +94,10 @@ class TimeService:
     def __init__(
         self,
         tz_offset: int,
-        dst_start: tuple[int, int, int, int] | None,  # (month, week, weekday, hour)
-        dst_end: tuple[int, int, int, int] | None,  # (month, week, weekday, hour)
+        dst_start: tuple[int, int, int, int] | None,
+        dst_end: tuple[int, int, int, int] | None,
         dst_offset: int = 0,
-        get_time=time.time,
+        get_time=time.time,  # () -> int
         tick_scheduler=None,
     ) -> None:
         self._tz_offset = tz_offset
@@ -122,7 +109,6 @@ class TimeService:
         self._offset_sec = tz_offset * _SEC_PER_HOUR
         self._dst_active = False
         self._next_transition = 0
-        # Monotonic-clock gate for the wall-clock DST check (see _tick).
         self._next_dst_check_ms = time.ticks_ms()
 
         self._update_dst()
@@ -131,6 +117,7 @@ class TimeService:
             tick_scheduler.register(self._tick)
 
     def now(self) -> int:
+        """Return the current local-epoch time in seconds."""
         return self._get_time() + self._offset_sec
 
     def utc_now(self) -> int:
@@ -147,13 +134,10 @@ class TimeService:
     def to_utc(self, local_epoch: int) -> int:
         """Convert local-epoch to UTC epoch.
 
-        Two-step: initial estimate using max offset (tz + dst), then
-        refine with actual total_offset at the estimate.  Using max
-        offset ensures the estimate never overshoots a fall-back boundary.
-
         During fall-back overlap (ambiguous local hour), prefers the DST
         (earlier UTC) interpretation — correct for forward-progressing events.
         """
+        # Estimating with the max offset never overshoots a fall-back boundary.
         max_offset = (self._tz_offset + self._dst_offset) * _SEC_PER_HOUR
         utc_est = local_epoch - max_offset
         return local_epoch - self.total_offset(utc_est)
@@ -161,15 +145,12 @@ class TimeService:
     def real_duration(self, local_start: int, wall_clock_sec: int) -> int:
         """Convert wall-clock duration to real seconds, accounting for DST.
 
-        Uses endpoint conversion: to_utc(local_end) - to_utc(local_start).
         Exact for any event length and any number of DST transitions, provided
         neither endpoint falls in a spring-forward gap (a nonexistent local time).
         """
         return self.to_utc(local_start + wall_clock_sec) - self.to_utc(local_start)
 
     def _tick(self) -> None:
-        # Throttle the (big-int-allocating) wall-clock read to ~once a minute
-        # via the allocation-free ms clock; the DST boundary is far away.
         now_ms = time.ticks_ms()
         if time.ticks_diff(now_ms, self._next_dst_check_ms) < 0:
             return

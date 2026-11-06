@@ -45,6 +45,8 @@ def _fmt_time(sec: int) -> str:
 
 
 class Display(_Display):
+    """Countdown view: a preset-duration timer shown as a draining ring."""
+
     def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
         self._timer = countdown_timer
@@ -89,7 +91,7 @@ class Display(_Display):
         self._renderer.update()
 
     def _restore_ring_progress(self) -> None:
-        """Reset renderer and restore ring progress from elapsed time."""
+        """Reset the renderer, clearing the screen, then redraw the timer's name and progress."""
         self._renderer.reset()
         self._renderer.text_write(TEXT_CENTER, self._timer.name)
 
@@ -108,7 +110,6 @@ class Display(_Display):
         self._renderer.update()
 
     def _draw_paused_full(self) -> None:
-        """Full redraw for PAUSED state — restores ring progress and remaining time."""
         self._restore_ring_progress()
         self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(self._timer.remaining_sec)}")
         self._renderer.text_write(TEXT_ABOVE_CENTER, "Paused")

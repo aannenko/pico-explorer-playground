@@ -1,11 +1,4 @@
-"""Build calendar ``Event`` bars from per-hour classified samples.
-
-Pure and network-agnostic.  A producer classifies each hour into candidate
-``(priority, label, color_index)`` tuples, picks the winner with
-``best_by_priority``, then stitches contiguous equal winners into bars with
-``merge_runs``.  Output is ``Event``, so this lives beside the other
-event-builders in ``scheduling/``.
-"""
+"""Building calendar ``Event`` bars from per-hour samples."""
 
 from micropython import const
 
@@ -15,9 +8,7 @@ _SEC_PER_HOUR = const(3600)
 
 
 def _level(value, warn: int, severe: int) -> int:
-    """Classify ``value`` into 0 (below) / 1 (warning) / 2 (severe).
-
-    ``warn`` / ``severe`` are inclusive lower bounds; a missing value
+    """``warn`` / ``severe`` are inclusive lower bounds; a missing value
     (``None``) is treated as below warning.
     """
     if value is None:
@@ -45,12 +36,11 @@ def best_by_priority(candidates: list[tuple[int, str, int]]) -> tuple[str, int] 
 
 
 def merge_runs(emitted: list[tuple[int, str, int]]) -> list[Event]:
-    """Stitch winning hours into bars.
+    """Merge hourly ``(epoch, label, color_index)`` entries into ``Event`` bars.
 
-    ``emitted`` is the winning hours only, in order, as ``(epoch, label,
-    color_index)``.  One ``Event`` per contiguous run of equal ``(label,
-    color_index)`` whose hours are adjacent (``epoch == prev_end``); a label
-    change, color change, or time discontinuity splits the run.
+    Requires ``emitted`` in ascending epoch order.
+
+    Only adjacent hours with equal label and color_index merge into one ``Event``.
     """
     events: list[Event] = []
     run = None  # [label, color_index, start_epoch, end_epoch]

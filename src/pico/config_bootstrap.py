@@ -1,63 +1,25 @@
-"""Layered (ASP.NET-style) configuration loader.
-
-``apply_overrides()`` imports ``config_defaults.py`` (committed schema
-and defaults) and ``config.py`` (git-ignored, sparse overrides), then
-mutates the user module in place: each declared default the user
-doesn't override is copied onto ``config``; each user override is
-structurally validated against the default's type/shape and rejected
-with ``InvalidConfigError`` on mismatch.
-
-The merge mutates the user module in place rather than synthesising a
-new namespace, so pre-existing ``import config`` references see the
-merged values and ``sys.modules['config']`` keeps pointing at the same
-object.
-
-Validation is *structural* only — same Python type, with a single
-widening (``int`` accepted where the default is ``float``).  ``tuple``
-defaults are fixed-shape (matched length + per-element types); ``list``
-defaults are variadic collections (any length, each element matched
-against the first default element as a template).  Semantic invariants
-(range bounds, monotonic ordering, uniqueness) live with their
-consumers.  Placeholder credential detection is intentionally out of
-scope: a ``config.py`` that does not override ``WIFI_SSID`` /
-``WIFI_PASSWORD`` boots with the placeholder defaults and surfaces the
-problem at WiFi connect time.
-"""
+"""Layered (ASP.NET-style) configuration loader."""
 
 import os
 import sys
 
 
 class MissingConfigError(RuntimeError):
-    """User ``config.py`` is absent from the import path."""
+    pass
 
 
 class InvalidConfigError(RuntimeError):
-    """A user override is structurally incompatible with its default."""
+    pass
 
 
 _SENTINEL_ATTR = "_CONFIG_BOOTSTRAP_MERGED"
 
-# MicroPython's slim ``types`` module may omit ``ModuleType``; ``type(sys)``
-# always yields the module type on both runtimes.
+# MicroPython has no built-in ``types`` module.
 _MODULE_TYPE = type(sys)
 
 
 def _is_compatible(expected, actual):
-    """Return True when ``actual`` matches ``expected``'s type and shape.
-
-    Allows the single widening ``int`` -> ``float``.  Tuples are
-    fixed-shape: same length, recursing per-element.  Lists are variadic
-    collections: any length is accepted and each element is validated
-    against ``expected[0]`` as a shape template (an empty default list
-    imposes no element constraint).  Dicts require every key in
-    ``expected`` (extras on ``actual`` are allowed).  ``bool`` and
-    ``int`` are intentionally not interchangeable: ``type(True) is int``
-    is False.
-
-    Type identity is strict, so a ``tuple`` override of a ``list``
-    default (or vice versa) is rejected.
-    """
+    """Return True when ``actual`` matches ``expected``'s type and shape."""
     et = type(expected)
     at = type(actual)
     if et is float and at is int:
@@ -72,9 +34,6 @@ def _is_compatible(expected, actual):
                 return False
         return True
     if et is list:
-        # Variadic collection: any length accepted.  Each override
-        # element is validated against ``expected[0]`` as a shape
-        # template; an empty default list imposes no element constraint.
         if not expected:
             return True
         template = expected[0]
@@ -109,8 +68,7 @@ def _describe(value):
     if name == "tuple":
         return "tuple of length {}".format(len(value))
     if name == "list":
-        # Lists are variadic — length is not a validation criterion, so
-        # reporting one would misleadingly imply it is.
+        # List length isn't validated, so reporting one would imply it must match.
         return "list"
     return name
 
@@ -127,11 +85,8 @@ def _collect_settings(module):
 
 
 def _user_module_file_exists(user_name):
-    """Return True if ``<user_name>.py``/``.mpy`` exists on ``sys.path``.
-
-    Used in place of ``ImportError.name`` inspection so the
-    missing-config-vs-broken-nested-import disambiguation works on
-    MicroPython (whose ``ImportError`` does not expose ``.name``).
+    """Probe files because MicroPython's ``ImportError`` has no ``.name`` to
+    tell a missing config from a broken import inside it.
     """
     candidates = (user_name + ".py", user_name + ".mpy")
     for entry in sys.path:
@@ -146,17 +101,28 @@ def _user_module_file_exists(user_name):
 
 
 def apply_overrides(defaults_name="config_defaults", user_name="config"):
-    """Load ``user_name`` on top of ``defaults_name``, in place.
+    """Load ``user_name`` on top of ``defaults_name``, in place; the two must differ.
+
+    Merging in place, not into a new namespace, keeps pre-existing
+    ``import config`` references and ``sys.modules['config']`` on the merged
+    module.
+
+    Validation is structural only: an override must have its default's
+    type, except that an ``int`` may override a ``float``; a ``bool`` is not
+    an ``int`` here.  A ``tuple`` must also match its default's length and
+    per-element types; a ``list`` may have any length, each element matching
+    the default's first element if it has one; a ``dict`` must have every
+    default key, with a compatible value, and may add keys.  Semantic
+    invariants (range bounds, monotonic ordering, uniqueness) and placeholder
+    credentials are not checked; an unknown public key only prints a warning.
 
     Returns the merged user module.  Idempotent: a second call returns
     the same module without re-validating or re-mutating.
 
     Raises:
-      * ``MissingConfigError`` — ``<user_name>.py``/``.mpy`` not found on
-        ``sys.path``.  Message points the user at ``config_defaults.py``.
-      * ``InvalidConfigError`` — at least one override fails structural
-        compatibility.  When raised, the user module is guaranteed
-        untouched: pass 1 collects every mismatch before pass 2 mutates.
+      * ``MissingConfigError`` — no ``<user_name>.py`` or ``.mpy`` on ``sys.path``.
+      * ``InvalidConfigError`` — an override fails validation; the user module
+        is then untouched: pass 1 collects every mismatch before pass 2 mutates.
       * ``RuntimeError`` — defaults module missing, user-module syntax
         error, or a broken ``import`` inside the user file.
 
@@ -195,7 +161,6 @@ def apply_overrides(defaults_name="config_defaults", user_name="config"):
     try:
         user = __import__(user_name)
     except ImportError as exc:
-        # File exists (per the probe above) so this is a body-import failure.
         raise RuntimeError(
             "config.py exists but failed to import: {}".format(exc)
         )
@@ -225,8 +190,6 @@ def apply_overrides(defaults_name="config_defaults", user_name="config"):
             )
         )
 
-    # Warn about unknown user keys before mutation so the ``dir(user)`` walk
-    # only sees keys the user actually wrote, not defaults we'll copy in.
     for name in dir(user):
         if name == _SENTINEL_ATTR or name in defaults_settings:
             continue

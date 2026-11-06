@@ -1,23 +1,17 @@
 class Display:
-    """Base class for display views managed by ``DisplayManager``.
+    """Base class for a view: one full screen of the app."""
 
-    ``refresh_period_ms`` (class attribute) sets the redraw cadence;
-    the manager converts it to scheduler ticks.  Use ``0`` to render
-    every scheduler tick.  ``initialize`` must produce a complete first
-    render; ``render`` then updates whatever changed.  ``on_button_a``
-    / ``on_button_b`` fire when A/B are pressed while this view is
-    active.
-    """
-
-    refresh_period_ms = 1000
+    refresh_period_ms = 1000  # 0 renders every scheduler tick
 
     def initialize(self) -> None:
+        """Enter the view; must produce a complete first render."""
         pass
 
     def deinitialize(self) -> None:
         pass
 
     def render(self) -> None:
+        """Redraw whatever has changed since the last draw."""
         pass
 
     def on_button_a(self) -> None:
@@ -28,12 +22,9 @@ class Display:
 
 
 class RefreshGate:
-    """Tick-count throttle used by ``DisplayManager``.
+    """Tick-count throttle for a view's redraw cadence.
 
-    Fires every ``period_ticks`` calls to ``ready()``.  A period of ``1``
-    (or less) fires every call.  No wall-clock involvement — the manager
-    converts the display's ``refresh_period_ms`` to ticks using the
-    scheduler period, and calls ``ready()`` once per scheduler tick.
+    A ``period_ticks`` below 1 counts as 1.
     """
 
     def __init__(self, period_ticks: int) -> None:
@@ -44,6 +35,7 @@ class RefreshGate:
         self._count = 0
 
     def ready(self) -> bool:
+        """Count one tick; return True if it completes the period."""
         self._count += 1
         if self._count >= self._period:
             self._count = 0

@@ -1,15 +1,3 @@
-"""Blitter for the 4-bit palette-indexed icons in ``_icons_data``.
-
-Icons are stored as packed 4-bit palette indices (see ``_icons_data``, generated
-by ``src/tools/icons-to-p4.py``) and drawn one palette-coloured rectangle per
-pixel.  They redraw only on view-entry / band-change, so the per-pixel Python
-cost never touches a hot path.
-
-A pen is its palette slot index (0-15); slot ``0`` (BLACK) is the transparent
-index and is skipped.  Icons are always drawn on the black view background, so
-black interior pixels render correctly even though they are skipped.
-"""
-
 from picographics import PicoGraphics  # type: ignore
 
 
@@ -21,9 +9,10 @@ def draw_icon(
     scale: int = 1,
     transparent: int = 0,
 ) -> None:
-    """Blit ``icon`` at ``(x, y)``, each pixel scaled to a ``scale x scale`` rect.
+    """Draw ``icon`` with top-left ``(x, y)``, each pixel a ``scale``-px square.
 
-    Pixels whose slot index equals ``transparent`` are skipped.
+    Transparent pixels are skipped, so callers must provide the intended background.
+    Draws pixel by pixel in Python, so keep it off per-frame paths.
     """
     w, h, data = icon
     ni = 0

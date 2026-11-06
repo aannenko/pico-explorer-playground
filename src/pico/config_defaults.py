@@ -75,7 +75,7 @@ POLLEN_THRESHOLDS = (50, 100)
 #   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
 # label is shown on the bar; color_index picks the bar color, 0-based:
 #   0=amber 1=sky 2=yellow 3=pink 4=sky 5=brown 6=gray
-# period_weeks: 1=weekly, 2=biweekly.  Set to [] to disable the row.
+# period_weeks: 1=weekly, 2=biweekly, 0=once.  Set to [] to disable the row.
 WASTE_SCHEDULE = [
     ("BIO",   5, (2026, 6,  4), 8, 0, 120, 2),
     ("PLAST", 2, (2026, 6,  5), 8, 0, 120, 2),

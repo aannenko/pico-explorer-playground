@@ -1,19 +1,3 @@
-"""Shared lifecycle for the network-backed calendar streams.
-
-A subclass supplies only ``_fetch_and_parse`` (fallible: HTTP + parse, may raise
-so the loop backs off) and its own config.  This base owns the long-lived
-concerns that every network row shares: *when* to fetch (interval + exponential
-backoff), the health/freshness the calendar polls (``status`` / ``generation``),
-publishing the parsed snapshot (``_store``), and registering with the
-``TickScheduler``.
-
-The per-fetch *mechanics* live in ``FetchMachine``; the transient ``FetchState``
-it drives exists only while a fetch attempt is active (from start through harvest
-— including the brief hold in ``INITIAL`` while it waits on Wi-Fi or the gate) and
-is dropped (GC'd) once harvested, so nothing fetch-related is pinned during the
-long idle between fetches.  Disabled services never fetch and report ``DISABLED``.
-"""
-
 import time
 
 from micropython import const
@@ -30,7 +14,13 @@ _MAX_BACKOFF_SHIFT = const(20)
 
 
 class EventStreamService:
-    """Drives one stream's fetch/parse/publish loop; the calendar reads it passively."""
+    """Fetch/parse/publish loop for one network-backed stream, with retry backoff.
+
+    ``stale_after_ms`` defaults to twice ``interval_ms``.
+
+    A ``FetchState`` lives only from ``FetchMachine.start`` to harvest, so no
+    attempt's state stays pinned during the long idle between fetches.
+    """
 
     def __init__(
         self,
@@ -64,14 +54,12 @@ class EventStreamService:
         self._events: list[Event] = []
         self._generation = 0
 
-        # Persistent health, consulted by ``status`` between fetches.
-        self._next_due = clock()  # due immediately at boot
+        self._next_due = clock()
         self._failures = 0
         self._last_success: int | None = None
 
-        # Transient: a ``FetchState`` only while a fetch is in flight, else None.
         self._fetch: FetchState | None = None
-        self._fetcher_ref = self._fetch_and_parse  # cache the subclass bound method
+        self._fetcher_ref = self._fetch_and_parse
 
         self._tick_ref = self.tick
         if tick_scheduler is not None:
@@ -88,14 +76,14 @@ class EventStreamService:
     def _advance(self) -> None:
         if self._fetch is None:
             if time.ticks_diff(self._clock(), self._next_due) < 0:
-                return  # not due yet
+                return
             self._fetch = FetchMachine.start(
                 self._fetcher_ref, self._wifi, self._schedule, self._coordinator
             )
         FetchMachine.tick(self._fetch)
         if FetchMachine.is_done(self._fetch):
             state = self._fetch
-            self._fetch = None  # drop before harvest so a store error can't re-harvest
+            self._fetch = None  # drop before harvest so a raising harvest can't repeat
             self._harvest(state)
 
     def _harvest(self, state) -> None:
@@ -127,14 +115,22 @@ class EventStreamService:
         return delay if delay < self._backoff_max_ms else self._backoff_max_ms
 
     def events_iter(self):  # -> Iterator[Event]
+        """Return an iterator over the latest published events."""
         return iter(self._events)
 
     @property
     def generation(self) -> int:
+        """Number of event snapshots published so far."""
         return self._generation
 
     @property
     def status(self) -> int:
+        """Freshness code: FRESH, STALE, ERROR or DISABLED.
+
+        ERROR after ``error_after_failures`` failed fetches in a row; otherwise FRESH
+        within ``stale_after_ms`` of the last success, and STALE if there is none or
+        it is older.
+        """
         if not self._enabled:
             return DISABLED
         if self._failures >= self._error_after_failures:
@@ -151,6 +147,9 @@ class EventStreamService:
         print("[%s] published %d events (gen %d)" % (self._name, len(self._events), self._generation))
 
     def _fetch_and_parse(self) -> list[Event]:
-        # Fallible: a subclass fetches + parses here; raising backs the loop off
-        # without publishing.  Subclasses must override.
+        """Fetch and parse the latest events; subclasses must override.
+
+        The returned list is published; if it raises, nothing is published and
+        the fetch is retried after a backoff.
+        """
         raise NotImplementedError

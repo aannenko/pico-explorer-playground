@@ -1,10 +1,3 @@
-"""Waste-collection calendar stream from a recurring schedule.
-
-Pure on-device generator: no network, no service lifecycle.  Each schedule
-entry recurs every ``period_weeks`` (a non-positive period emits it once);
-events are emitted in start-time order across all entries.
-"""
-
 import time
 
 from scheduling.event import Event
@@ -15,11 +8,15 @@ _SEC_PER_WEEK = 7 * 24 * 60 * 60
 
 
 def build_stream(time_service: TimeService, schedule: list) -> Stream:
+    """Build the waste-collection stream from the pickup ``schedule``.
+
+    Occurrences of all schedule entries are yielded in start-time order; an
+    entry with a non-positive ``period_weeks`` occurs once.
+    """
     return Stream(events_iter=_waste_loop(time_service, schedule))
 
 
 def _waste_loop(time_service: TimeService, schedule: list):  # Iterator[Event]
-    # Entry: (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
     now = time_service.now()
     cursors = []  # [next_start_local, label, color_index, dur_sec, period_sec]
     for label, color_index, anchor, hh, mm, dur_min, period_weeks in schedule:
@@ -28,7 +25,6 @@ def _waste_loop(time_service: TimeService, schedule: list):  # Iterator[Event]
         dur_sec = dur_min * 60
         period_sec = period_weeks * _SEC_PER_WEEK
         if period_sec > 0:
-            # Skip occurrences already in the past so we begin near the window.
             while start + dur_sec <= now:
                 start += period_sec
         cursors.append([start, label, color_index, dur_sec, period_sec])
@@ -46,4 +42,4 @@ def _waste_loop(time_service: TimeService, schedule: list):  # Iterator[Event]
         if period_sec > 0:
             cursors[earliest][0] = start + period_sec
         else:
-            cursors.pop(earliest)  # non-recurring entry: emit once
+            cursors.pop(earliest)

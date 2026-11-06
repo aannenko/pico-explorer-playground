@@ -1,19 +1,5 @@
-"""Hardware-agnostic stream descriptor used by the calendar display.
-
-A ``Stream`` bundles an event iterator for one calendar row.  Bar colors
-are not carried here — each ``Event`` sets a ``color_index`` instead.
-Keeping streams free of pen/RGB references lets them be defined in config
-or produced remotely without PicoGraphics references.
-
-Refreshable (network-backed) sources additionally supply ``events_fn``
-(a fresh-iterator factory), ``generation_fn`` (a monotonic counter that
-bumps when the snapshot changes) and ``status_fn`` (freshness, rendered
-as a row glyph).  Static generators leave all three ``None``.
-"""
-
 from micropython import const
 
-# Stream freshness, returned by ``status_fn`` and rendered as a row glyph.
 FRESH = const(0)
 STALE = const(1)
 ERROR = const(2)
@@ -21,6 +7,14 @@ DISABLED = const(3)
 
 
 class Stream:
+    """Event source for one calendar row.
+
+    Refreshable sources also supply ``events_fn`` (a fresh-iterator factory),
+    ``generation_fn`` (a monotonic counter that bumps when the snapshot changes)
+    and ``status_fn`` (returning one of the freshness codes above); static
+    generators leave all three ``None``.
+    """
+
     def __init__(
         self,
         events_iter,  # Iterator[Event]

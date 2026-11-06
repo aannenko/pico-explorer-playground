@@ -1,12 +1,16 @@
 class Event:
-    """Scheduled event with both wall-clock and DST-corrected real durations."""
+    """Scheduled event with both wall-clock and DST-corrected real durations.
+
+    ``name`` must be non-empty.  ``real_duration_sec`` defaults to
+    ``wall_clock_duration_sec``.
+    """
 
     def __init__(
         self,
         name: str,
         start_timestamp: int,
         wall_clock_duration_sec: int,
-        real_duration_sec: int = -1,  # DST-corrected
+        real_duration_sec: int = -1,
         color_index: int = 0,  # index into displays.palette.STREAM_COLORS
     ) -> None:
         if not name:

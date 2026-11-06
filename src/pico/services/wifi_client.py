@@ -29,12 +29,8 @@ class WifiClient:
     """Encapsulates a single WiFi connection state machine.
 
     Instances share the firmware's single ``WLAN(STA_IF)`` interface; only
-    the timer and state are per instance.
-
-    Timer ownership: ``_timer`` is transient — created in
-    ``start_connect()`` and destroyed as soon as the state machine leaves
-    CONNECTING (on ``STAT_GOT_IP`` / ``STAT_WRONG_PASSWORD`` or via
-    ``reset()``). See copilot-instructions.md virtual-timer budget.
+    the timer and state are per instance.  ``start_connect``'s virtual
+    ``machine.Timer`` exists only while CONNECTING.
     """
 
     def __init__(self) -> None:
@@ -50,14 +46,13 @@ class WifiClient:
         self._tick_ref = self._tick
         self._timer_callback_ref = self._timer_callback
 
-    # --- Public API ---
-
     @property
     def state(self) -> int:
+        """Connect-attempt state: IDLE, CONNECTING, CONNECTED or FAILED."""
         return self._state
 
     def start_connect(self, ssid: str, password: str) -> None:
-        """Non-blocking connect. Starts a timer that drives the state machine.
+        """Non-blocking connect.
 
         Idempotent if already CONNECTING. From other states, resets first.
         """
@@ -78,7 +73,10 @@ class WifiClient:
         )
 
     def connect(self, ssid: str, password: str, timeout_ms: int = 300_000) -> int:
-        """Blocking connect with timeout. Returns final state."""
+        """Blocking connect with timeout; returns CONNECTED or FAILED.
+
+        A ``timeout_ms`` below ``_ATTEMPT_TTL_MS`` is raised to it.
+        """
         if timeout_ms < _ATTEMPT_TTL_MS:
             timeout_ms = _ATTEMPT_TTL_MS
 
@@ -101,9 +99,11 @@ class WifiClient:
             time.sleep_ms(_CONNECTING_SLEEP_MS)
 
     def is_connected(self) -> bool:
+        """Return whether this client's link is up right now."""
         return self._wlan is not None and self._wlan.isconnected()
 
     def reset(self) -> None:
+        """Abandon any connect attempt and return to IDLE, without disconnecting."""
         if self._timer is not None:
             self._timer.deinit()
             self._timer = None
@@ -115,8 +115,6 @@ class WifiClient:
         self._attempt_start_ms = 0
         self._retry_after_ms = 0
         self._pending = False
-
-    # --- Internals ---
 
     def _begin_connect(self, ssid: str, password: str) -> None:
         if not ssid:
@@ -144,7 +142,7 @@ class WifiClient:
         self._state = CONNECTING
 
     def _tick(self, gen: int) -> None:
-        """Advance connection state machine one step."""
+        """Advance the connection state machine one step."""
         if gen != self._generation:
             return
 
@@ -175,8 +173,8 @@ class WifiClient:
         if wlan_status in (STAT_NO_AP_FOUND, STAT_CONNECT_FAIL):
             needs_retry = True
         elif time.ticks_diff(now_ms, self._attempt_start_ms) >= _ATTEMPT_TTL_MS:
-            # STAT_CONNECTING, LINK_DOWN (0), NOIP (2), or any unexpected
-            # status that persists past the attempt TTL — disconnect and retry
+            # STAT_CONNECTING, LINK_DOWN (0), NOIP (2) or any unexpected status that
+            # persists past the attempt TTL.
             self._wlan.disconnect()
             needs_retry = True
 
@@ -194,6 +192,7 @@ class WifiClient:
             self._timer = None
 
     def _timer_callback(self, _t) -> None:
+        # _pending collapses firings queued behind blocking work into one scheduled run.
         if self._pending:
             return
         self._pending = True

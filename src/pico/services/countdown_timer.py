@@ -9,11 +9,13 @@ DONE = const(3)
 
 
 class CountdownTimer:
+    """Named, pausable countdown measured in seconds."""
+
     def __init__(
         self,
-        on_done=lambda: None,
-        on_configure=lambda: None,
-        get_time=time.time,
+        on_done=lambda: None,  # () -> None
+        on_configure=lambda: None,  # () -> None
+        get_time=time.time,  # () -> int
         tick_scheduler=None,
     ) -> None:
         self._on_done_action = on_done
@@ -32,6 +34,7 @@ class CountdownTimer:
 
     @property
     def state(self) -> int:
+        """Lifecycle state: INITIAL, RUNNING, PAUSED or DONE."""
         return self._state
 
     @property
@@ -44,6 +47,7 @@ class CountdownTimer:
 
     @property
     def elapsed_sec(self) -> int:
+        """Seconds counted down so far, excluding pauses."""
         if self._state == RUNNING:
             return self._get_time() - self._start_timestamp
         if self._state == PAUSED:
@@ -54,6 +58,7 @@ class CountdownTimer:
 
     @property
     def remaining_sec(self) -> int:
+        """Seconds left while running or paused, else 0."""
         if self._state == RUNNING:
             return max(0, self._end_timestamp - self._get_time())
         if self._state == PAUSED:
@@ -61,6 +66,7 @@ class CountdownTimer:
         return 0
 
     def configure(self, name: str, total_sec: int) -> None:
+        """Set up a new countdown, discarding any progress."""
         self._on_configure_action()
         self._state = INITIAL
         self._name = name
@@ -70,6 +76,10 @@ class CountdownTimer:
         self._remaining_sec = 0
 
     def start(self) -> None:
+        """Begin counting down from ``total_sec``.
+
+        Requires the INITIAL state and a positive ``total_sec``.
+        """
         if self._state != INITIAL or self._total_sec <= 0:
             return
         now = self._get_time()
@@ -78,12 +88,14 @@ class CountdownTimer:
         self._state = RUNNING
 
     def pause(self) -> None:
+        """Freeze a running countdown, keeping the time left."""
         if self._state != RUNNING:
             return
         self._remaining_sec = max(0, self._end_timestamp - self._get_time())
         self._state = PAUSED
 
     def resume(self) -> None:
+        """Continue a paused countdown where it left off."""
         if self._state != PAUSED:
             return
         now = self._get_time()
@@ -93,6 +105,7 @@ class CountdownTimer:
         self._state = RUNNING
 
     def reset(self) -> None:
+        """Discard progress, keeping the label and duration."""
         self.configure(self._name, self._total_sec)
 
     def _tick(self) -> None:

@@ -1,33 +1,17 @@
-"""Fetch mechanics for the network-backed calendar streams.
-
-Three small pieces, split by responsibility:
-
-* ``FetchState`` — plain data for ONE fetch attempt: the stage it's in plus the
-  result/error once it finishes.  ``FetchMachine.start`` allocates it when a fetch
-  begins; the owner drops it (GC) the moment it harvests the outcome, so nothing
-  fetch-related is pinned during the long idle between fetches.
-* ``FetchMachine`` — stateless.  Pure functions that drive a ``FetchState``
-  forward: gate, dispatch the blocking work off-tick, record the outcome.  No
-  timing/backoff/freshness lives here — that belongs to the long-lived owner
-  (see ``EventStreamService``).
-* ``FetchCoordinator`` — a one-at-a-time gate.  NOT thread safety (there is one
-  thread); it serialises fetches so two services that come due in the same tick
-  don't queue back-to-back in a single ``schedule`` drain (which would freeze
-  rendering for the sum of both).  The second waits a tick, letting a render slip
-  in between.
-"""
-
 from micropython import const
 
-# ``FetchState`` stages.
-INITIAL = const(0)   # created; tick() will try wifi + the gate, then dispatch
-FETCHING = const(1)  # blocking work dispatched off-tick, not yet finished
-DONE = const(2)      # finished OK; ``result`` is set
-FAILED = const(3)    # finished with an exception; ``error`` is set
+INITIAL = const(0)
+FETCHING = const(1)
+DONE = const(2)
+FAILED = const(3)
 
 
 class FetchCoordinator:
-    """One-at-a-time fetch gate (serialises fetches; not thread safety)."""
+    """One-at-a-time fetch gate; not thread safety (there is one thread).
+
+    Two fetches due in the same tick would otherwise run back-to-back, freezing
+    rendering for both; the second waits a tick instead.
+    """
 
     def __init__(self) -> None:
         self._busy = False
@@ -43,14 +27,12 @@ class FetchCoordinator:
         return True
 
     def release(self) -> None:
-        # Only the fetch that acquired the gate ever calls this (its own
-        # ``_do_fetch`` finally, or its schedule-fail rollback), so an
-        # unconditional clear is safe — there is no cross-release on one thread.
+        """Only the attempt that acquired the gate may release it."""
         self._busy = False
 
 
 class FetchState:
-    """Data for one in-flight fetch; advanced by ``FetchMachine``."""
+    """Data for one fetch attempt: its stage, then its result or error."""
 
     def __init__(self, fetcher, wifi, schedule, coordinator: FetchCoordinator) -> None:
         self.stage = INITIAL
@@ -67,18 +49,21 @@ class FetchMachine:
 
     @staticmethod
     def start(fetcher, wifi, schedule, coordinator) -> FetchState:
+        # fetcher: () -> result; wifi: has is_connected() -> bool; schedule: (callback, arg) -> None
         return FetchState(fetcher, wifi, schedule, coordinator)
 
     @staticmethod
     def tick(state: FetchState) -> None:
+        """Dispatch the fetch once WiFi is up and the gate is free."""
         if state.stage != INITIAL:
-            return  # FETCHING waits for the scheduled callback; DONE/FAILED terminal
+            return
         if not state.wifi.is_connected():
-            return  # hold in INITIAL; re-poll cheaply next tick
+            return
         if not state.coordinator.try_acquire():
-            return  # another fetch in flight; stay INITIAL
+            return
         state.stage = FETCHING
         try:
+            # Scheduled, so the current tick finishes before the blocking fetch.
             state.schedule(FetchMachine._do_fetch, state)
         except Exception:
             state.coordinator.release()
@@ -86,7 +71,6 @@ class FetchMachine:
 
     @staticmethod
     def _do_fetch(state: FetchState) -> None:
-        # Runs off the tick via schedule(); the blocking work lives here.
         try:
             state.result = state.fetcher()
             state.stage = DONE
@@ -98,4 +82,5 @@ class FetchMachine:
 
     @staticmethod
     def is_done(state: FetchState) -> bool:
+        """Return whether the attempt finished, with a result or an error."""
         return state.stage == DONE or state.stage == FAILED

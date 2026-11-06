@@ -1,14 +1,3 @@
-"""Weather forecast calendar stream (Open-Meteo): precipitation + UV.
-
-Long-lived ``EventStreamService`` subclass: polls Open-Meteo every 30 min and emits
-one row mixing two temporally anti-correlated metrics — precipitation
-(background = intensity green/yellow/red, label RAIN/SNOW/STORM) and the UV
-index (label UV).  They rarely coincide (heavy precip ⟺ cloud ⟺ low UV), so
-sharing a row keeps it dense.  On the rare overlap, precip wins ties and
-heavier precip, but a *severe* UV warning still shows through light precip.
-Disabled until real coordinates are configured.
-"""
-
 import time
 
 from displays.palette import STREAM_GREEN, STREAM_YELLOW, STREAM_RED
@@ -24,17 +13,17 @@ _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 _MODERATE_MM = 2.5
 _HEAVY_MM = 7.6
 
-# UV severity level (1 warning / 2 severe) -> global palette index.
 _UV_LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
 def _weather_type(code: int) -> str | None:
-    """Map a WMO weather code to a precip label, or None if not precipitation.
+    """Map a WMO weather code to a precipitation label.
 
-    Drizzle / rain / freezing rain / rain showers -> RAIN, snow (incl.
-    showers) -> SNOW, thunderstorm -> STORM.  Clear / cloud / fog codes
-    return None so the hour is skipped even if its probability cleared the
-    gate (a "precip" bar over a clear sky would be misleading).
+    Returns ``None`` for non-precipitation codes: probability alone must not
+    draw a precipitation bar.
+
+    WMO drizzle, rain, freezing rain and rain showers map to RAIN, snow and
+    snow showers to SNOW, thunderstorms to STORM.
     """
     if 51 <= code <= 67 or 80 <= code <= 82:
         return "RAIN"
@@ -48,8 +37,7 @@ def _weather_type(code: int) -> str | None:
 def _intensity(mm: float) -> tuple[int, int]:
     """Map an hourly precipitation amount to ``(priority_rank, color_index)``.
 
-    Rank 1/2/3 (light/moderate/heavy) ranks precip against UV on the rare
-    same-hour overlap; the color is a ``STREAM_COLORS`` index.
+    Ranks 1/2/3 mean light/moderate/heavy.
     """
     if mm < _MODERATE_MM:
         return (1, STREAM_GREEN)
@@ -59,13 +47,12 @@ def _intensity(mm: float) -> tuple[int, int]:
 
 
 def _uv_column(payload: dict, n: int) -> list:
-    """Read the hourly ``uv_index`` array defensively (length ``n``).
+    """Return the payload's ``n`` hourly UV index values.
 
-    UV shares the forecast payload, but precip must render even if UV is
-    absent or malformed, so any problem degrades to ``None`` rather than
-    failing the fetch: a missing key / non-list / wrong-length array yields an
-    all-``None`` column, and a stray non-numeric element yields ``None`` for
-    just that hour.
+    Precip must render even if UV is absent or malformed, so any problem
+    degrades to ``None`` rather than failing the fetch: a missing key, non-list
+    or wrong-length array gives an all-``None`` column, and a non-numeric
+    element gives ``None`` for that hour.
     """
     try:
         uv = payload["hourly"]["uv_index"]
@@ -77,14 +64,9 @@ def _uv_column(payload: dict, n: int) -> list:
 
 
 def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, int]) -> list[Event]:
-    """Turn an Open-Meteo forecast payload into merged weather bars.
+    """Return the weather bars from a forecast payload.
 
-    Each hour picks the higher-priority of its precipitation and UV
-    candidates (precip listed first → wins ties; severe UV still beats light
-    precip), and contiguous equal winners merge into one bar.  Raises on a
-    malformed payload (missing precip keys, mismatched array lengths) so the
-    caller's fetch state machine backs off and keeps the last good snapshot;
-    a malformed UV array only suppresses UV (see ``_uv_column``).
+    Precipitation wins equal-priority ties; severe UV beats light precipitation.
     """
     times, probs, amounts, codes = openmeteo_client.extract_hourly(
         payload, ("time", "precipitation_probability", "precipitation", "weathercode")
@@ -113,7 +95,13 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
 
 
 class WeatherService(EventStreamService):
-    """Weather row (precipitation + UV) over one Open-Meteo forecast fetch."""
+    """Weather row (precipitation + UV) over one Open-Meteo forecast fetch.
+
+    Precipitation and UV rarely coincide, so sharing a row keeps it dense.
+
+    Coordinates of 0.0/0.0 mean unconfigured: the service stays disabled rather
+    than silently fetch Gulf-of-Guinea weather.
+    """
 
     def __init__(
         self,
@@ -140,8 +128,6 @@ class WeatherService(EventStreamService):
         self._timeout_s = timeout_s
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
-        # Coordinates left at 0.0/0.0 mean "unconfigured": stay disabled rather
-        # than silently fetch Gulf-of-Guinea weather.
         enabled = not (latitude == 0.0 and longitude == 0.0)
         super().__init__(
             wifi, coordinator, schedule, interval_ms, "weather", enabled,
@@ -153,7 +139,6 @@ class WeatherService(EventStreamService):
             print("[weather] disabled: set LATITUDE/LONGITUDE in config.py")
 
     def _fetch_and_parse(self) -> list[Event]:
-        # Fallible: HTTP error or malformed payload raises -> the loop backs off.
         print("[weather] fetching lat=%s lon=%s" % (self._lat, self._lon))
         payload = openmeteo_client.fetch_forecast(
             self._http_get, self._lat, self._lon, _METRICS, self._timeout_s,

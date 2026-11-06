@@ -2,6 +2,8 @@ from picographics import PicoGraphics  # type: ignore
 
 
 class StatusDisplay:
+    """Full-screen status message: centred text with optional subtext below."""
+
     def __init__(
         self,
         pico_graphics: PicoGraphics,
@@ -25,6 +27,7 @@ class StatusDisplay:
         self._subtext_y = (h // 2) + 5
 
     def show(self, text: str, subtext: str = "") -> None:
+        """Replace the whole screen with the message, pushed to the panel at once."""
         self._gfx.set_font(self._font)
 
         self._gfx.set_pen(self._background)

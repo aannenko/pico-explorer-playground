@@ -1,10 +1,3 @@
-"""Demo event streams used by the calendar display.
-
-These are placeholder streams to populate the calendar while the web
-configuration server is not yet built.  Expected to be deleted once
-users can define their own streams.
-"""
-
 import random
 
 from displays.palette import STREAM_SKY, STREAM_YELLOW, STREAM_PINK, STREAM_TEAL
@@ -26,11 +19,7 @@ def _random_event_loop(
     color_index: int,
     window_past_sec: int,
 ):  # Iterator[Event]
-    """Yield random events from *names* with durations from *durations* and occasional gaps.
-
-    Every event is tagged with *color_index* so the whole row renders in
-    one color.
-    """
+    """Yield random events from ``names`` and ``durations`` forever, with occasional gaps."""
     cursor = start_timestamp
 
     while True:
@@ -53,10 +42,9 @@ def _random_event_loop(
 def build_demo_streams(
     time_service: TimeService, window_past_sec: int
 ) -> list[Stream]:
-    """Return the placeholder demo streams (weather + random events)."""
+    """Return placeholder streams of random events, starting ``window_past_sec`` ago."""
     start = time_service.now() - window_past_sec
 
-    # One color_index per row (work_week is row 0).
     iterators = [
         _random_event_loop(
             names=_WEATHER_NAMES,

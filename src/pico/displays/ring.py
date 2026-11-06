@@ -1,3 +1,5 @@
+"""Progress-ring screen: a segmented ring around up to three centred text lines."""
+
 import math
 import micropython
 
@@ -10,9 +12,9 @@ RING_SEGMENTS = const(120)
 SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
 
 # Coordinates in the form of X,Y; 5,5 is center, 0,0 is top-left, 9,9 is bottom-right
-TEXT_CENTER = const(55)  # 5,5
-TEXT_ABOVE_CENTER = const(54)  # 5,4
-TEXT_BELOW_CENTER = const(56)  # 5,6
+TEXT_CENTER = const(55)
+TEXT_ABOVE_CENTER = const(54)
+TEXT_BELOW_CENTER = const(56)
 
 _RING_THICKNESS_DIVISOR = const(30)
 _RING_OUTER_MARGIN = const(2)
@@ -33,6 +35,8 @@ class Colors:
 
 
 class Geometry:
+    """Pixel layout of the ring screen, with ``TEXT_*`` boxes that fit inside the ring."""
+
     @micropython.native
     def __init__(
         self,
@@ -43,12 +47,10 @@ class Geometry:
     ) -> None:
         self.graphics = pico_graphics
 
-        # Display geometry
         self.width, self.height = pico_graphics.get_bounds()
         self.x_center = self.width // 2 + self.width % 2
         self.y_center = self.height // 2 + self.height % 2
 
-        # Ring geometry
         self.ring_thickness = min(self.width, self.height) // _RING_THICKNESS_DIVISOR
         self.outer_circle_r = min(self.x_center, self.y_center) - _RING_OUTER_MARGIN
         self.inner_circle_r = self.outer_circle_r - self.ring_thickness
@@ -76,7 +78,6 @@ class Geometry:
             self.x_inner_vertices[i] = int(x_center + inner_r * cos)
             self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
-        # Text geometry
         self.font = font
         pico_graphics.set_font(font)
         self.text_scale = text_scale
@@ -99,6 +100,8 @@ class Geometry:
 
 
 class Renderer:
+    """Incremental drawing: the ring only drains until ``reset`` refills it."""
+
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
         self._gfx = geometry.graphics
@@ -109,10 +112,11 @@ class Renderer:
         self._last_text_above_center = ""
         self._last_text_below_center = ""
 
-        # Pre-allocated buffer for single-segment clears (hot path)
+        # Reuse the polygon list to avoid allocating it on single-segment clears.
         self._seg_buf = [(0, 0), (0, 0), (0, 0), (0, 0)]
 
     def reset(self) -> None:
+        """Clear the screen to a full ring with no text."""
         self._segments_cleared = 0
         self._last_text_center = ""
         self._last_text_above_center = ""
@@ -129,9 +133,11 @@ class Renderer:
 
     @property
     def segments_cleared(self) -> int:
+        """Ring segments cleared since ``reset``, 0..``RING_SEGMENTS``."""
         return self._segments_cleared
 
     def ring_clear_segments(self, total_count: int) -> None:
+        """Clear segments clockwise from the top until ``total_count`` are cleared."""
         if total_count <= self._segments_cleared:
             return
 
@@ -153,15 +159,12 @@ class Renderer:
 
         count = total_count - self._segments_cleared
 
-        # Fast path: single segment (common per-tick case). _seg_buf is
-        # reused but the four (x, y) tuples are freshly allocated each call
-        # — a pre-allocated array would save 4 small tuples per segment but isn't
-        # worth the API change for polygon().
         if count == 1:
             idx = self._segments_cleared
             nxt = idx + 1
             geom = self._geom
             buf = self._seg_buf
+            # polygon() accepts only (x, y) tuples, so these four still allocate.
             buf[0] = (geom.x_outer_vertices[idx], geom.y_outer_vertices[idx])
             buf[1] = (geom.x_outer_vertices[nxt], geom.y_outer_vertices[nxt])
             buf[2] = (geom.x_inner_vertices[nxt], geom.y_inner_vertices[nxt])
@@ -170,7 +173,6 @@ class Renderer:
             self._segments_cleared += 1
             return
 
-        # Multi-segment path (rare — initialize with progress)
         total_points = (count + 1) * 2
         points = [(0, 0)] * total_points
 
@@ -212,6 +214,10 @@ class Renderer:
         self._gfx.rectangle(text_x, text_y, text_width, self._geom.text_height)
 
     def text_write(self, position: int, text: str) -> None:
+        """Draw ``text`` at ``position`` unless it is already shown.
+
+        ``text`` must fit the position's ``Geometry`` box width.
+        """
         if position == TEXT_CENTER:
             current_text = self._last_text_center
         elif position == TEXT_ABOVE_CENTER:
@@ -251,4 +257,5 @@ class Renderer:
         self._gfx.text(text, text_x, text_y, scale=self._geom.text_scale)
 
     def update(self) -> None:
+        """Push the framebuffer to the panel."""
         self._gfx.update()
