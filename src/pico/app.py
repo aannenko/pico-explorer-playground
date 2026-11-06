@@ -9,7 +9,7 @@ from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
 from displays.palette import (
     BLACK,
-    DKGRAY,
+    DARK_GRAY,
     GRAY,
     ORANGE,
     STREAM_COLORS,
@@ -190,7 +190,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
                 background=BLACK,
                 header_text=WHITE,
                 axis_text=WHITE,
-                empty_row=DKGRAY,
+                empty_row=DARK_GRAY,
                 now_line=WHITE,
             ),
         ),
@@ -199,7 +199,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
     )
 
 
-def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg) -> None
+def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> None
     """Compose the services and displays.
 
     Blocks through the initial WiFi connect and NTP sync, raising
@@ -251,7 +251,7 @@ def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg
         sync_interval_ms=_NET_SYNC_INTERVAL_MS,
         tick_scheduler=tick_scheduler,
     )
-    network_service.connect_and_sync_initial(status_fn=status_display.show)
+    network_service.connect_and_sync_initial(on_progress=status_display.show)
     del status_display
 
     time_service = TimeService(
@@ -270,7 +270,7 @@ def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg
         uv_thresholds=config.UV_THRESHOLDS,
         wifi=wifi_client,
         coordinator=fetch_coordinator,
-        schedule=schedule_fn,
+        schedule=schedule,
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
@@ -292,7 +292,7 @@ def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg
         pollen_thresholds=config.POLLEN_THRESHOLDS,
         wifi=wifi_client,
         coordinator=fetch_coordinator,
-        schedule=schedule_fn,
+        schedule=schedule,
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
@@ -324,7 +324,7 @@ def build_app(pico_graphics, schedule_fn) -> App:  # schedule_fn: (callback, arg
     display_manager.initialize_current()
     tick_scheduler.register(display_manager.tick)
 
-    button_poller = ButtonPoller(schedule=schedule_fn)
+    button_poller = ButtonPoller(schedule=schedule)
     button_poller.add(Pin(BUTTON_A_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_a_ref)
     button_poller.add(Pin(BUTTON_B_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_b_ref)
     button_poller.add(Pin(BUTTON_X_PIN, Pin.IN, Pin.PULL_UP), display_manager.previous_ref)

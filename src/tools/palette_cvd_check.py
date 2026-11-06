@@ -31,8 +31,8 @@ from displays.palette import PALETTE_RGB  # noqa: E402
 
 # Names for the 12 authored slots (slots 12-15 are spare); RGBs come from the
 # canonical PALETTE_RGB so they can never drift.
-_NAMES = ("BLACK", "WHITE", "GRAY", "DKGRAY", "BLUE", "GREEN", "YELLOW",
-          "RED", "SKY", "ORANGE", "RPURPLE", "BROWN")
+_NAMES = ("BLACK", "WHITE", "GRAY", "DARK_GRAY", "BLUE", "GREEN", "YELLOW",
+          "RED", "SKY", "ORANGE", "PINK", "BROWN")
 PALETTE = tuple((_NAMES[i], *PALETTE_RGB[i]) for i in range(len(_NAMES)))
 
 # Pairs within these slots are skipped: luminance alone tells them apart.
@@ -170,7 +170,7 @@ for kind in ("normal", "protan", "deutan", "tritan"):
 METRIC_SETS = (
     ("TEMPERATURE", ("SKY", "GREEN", "ORANGE", "RED")),
     ("HUMIDITY", ("YELLOW", "GREEN", "SKY", "BLUE")),
-    ("PRESSURE", ("RPURPLE", "GREEN", "YELLOW", "ORANGE")),
+    ("PRESSURE", ("PINK", "GREEN", "YELLOW", "ORANGE")),
     ("GAS", ("RED", "ORANGE", "GREEN", "SKY")),
 )
 print("### Per-metric band-fill distinguishability (worst pair per CVD type) ###")

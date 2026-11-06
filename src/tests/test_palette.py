@@ -7,7 +7,7 @@ from displays.palette import (
     LABEL_FOR_SLOT,
     ORANGE,
     PALETTE_RGB,
-    RPURPLE,
+    PINK,
     BROWN,
     STREAM_COLORS,
     WHITE,
@@ -41,14 +41,14 @@ def test_slot_constants_match_their_indices() -> None:
     assert palette.BLACK == 0
     assert palette.WHITE == 1
     assert palette.GRAY == 2
-    assert palette.DKGRAY == 3
+    assert palette.DARK_GRAY == 3
     assert palette.BLUE == 4
     assert palette.GREEN == 5
     assert palette.YELLOW == 6
     assert palette.RED == 7
     assert palette.SKY == 8
     assert palette.ORANGE == 9
-    assert palette.RPURPLE == 10
+    assert palette.PINK == 10
     assert palette.BROWN == 11
 
 
@@ -110,12 +110,12 @@ def test_stream_colors_are_valid_slots() -> None:
 
 
 def test_stream_color_constants_match_positions() -> None:
-    assert palette.STREAM_AMBER == 0
+    assert palette.STREAM_ORANGE == 0
     assert palette.STREAM_SKY == 1
     assert palette.STREAM_YELLOW == 2
     assert palette.STREAM_PINK == 3
     assert palette.STREAM_TEAL == 4
-    assert palette.STREAM_REDBROWN == 5
+    assert palette.STREAM_BROWN == 5
     assert palette.STREAM_GRAY == 6
     assert palette.STREAM_GREEN == 7
     assert palette.STREAM_RED == 8
@@ -124,6 +124,6 @@ def test_stream_color_constants_match_positions() -> None:
 
 def test_stream_colors_map_to_expected_slots() -> None:
     # work-week → ORANGE; severity ramp green/red; waste BIO → BROWN.
-    assert STREAM_COLORS[palette.STREAM_AMBER] == ORANGE
-    assert STREAM_COLORS[palette.STREAM_REDBROWN] == BROWN
-    assert STREAM_COLORS[palette.STREAM_PINK] == RPURPLE
+    assert STREAM_COLORS[palette.STREAM_ORANGE] == ORANGE
+    assert STREAM_COLORS[palette.STREAM_BROWN] == BROWN
+    assert STREAM_COLORS[palette.STREAM_PINK] == PINK

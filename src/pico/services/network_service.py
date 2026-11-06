@@ -32,15 +32,15 @@ class NetworkService:
         if tick_scheduler is not None:
             tick_scheduler.register(self._tick)
 
-    def connect_and_sync_initial(self, status_fn=None) -> None:  # status_fn: (str) -> None
+    def connect_and_sync_initial(self, on_progress=None) -> None:  # on_progress: (str) -> None
         """Block until WiFi connects and NTP syncs, else raise ``RuntimeError``.
 
-        ``status_fn`` receives progress messages during this call only; it isn't
+        ``on_progress`` receives progress messages during this call only; it isn't
         retained, so periodic resyncs never draw over the active view.
         """
         def _notify(msg: str) -> None:
-            if status_fn is not None:
-                status_fn(msg)
+            if on_progress is not None:
+                on_progress(msg)
 
         _notify("wifi")
         result = self._wifi.connect(self._ssid, self._password)

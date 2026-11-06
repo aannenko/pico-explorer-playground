@@ -10,7 +10,7 @@ right order.
 from __future__ import annotations
 
 from displays import sensors
-from displays.palette import BLUE, GREEN, LABEL_FOR_SLOT, ORANGE, RED, RPURPLE, SKY, YELLOW
+from displays.palette import BLUE, GREEN, LABEL_FOR_SLOT, ORANGE, RED, PINK, SKY, YELLOW
 from displays.sensors import build_sensor_band_pens
 from displays.shared import _icons_data
 
@@ -70,7 +70,7 @@ def test_band_pen_metric_order_guard() -> None:
     # Guards the ROWS metric order (temp / PRESSURE / HUMIDITY / gas): if
     # pressure↔humidity ever swap, these break loudly.
     pens = build_sensor_band_pens()
-    assert pens[1][0][0] == RPURPLE, "pressure band-0 fill must be RPURPLE"
+    assert pens[1][0][0] == PINK, "pressure band-0 fill must be PINK"
     assert pens[2][0][0] == YELLOW, "humidity band-0 fill must be YELLOW"
 
 
@@ -84,7 +84,7 @@ def test_rows_match_expected_band_order() -> None:
             (d.ICON_THERMO_ORANGE, ORANGE), (d.ICON_THERMO_RED, RED),
         )),
         (d.UNIT_MBAR, (
-            (d.ICON_GAUGE_MIN, RPURPLE), (d.ICON_GAUGE_LOW, GREEN),
+            (d.ICON_GAUGE_MIN, PINK), (d.ICON_GAUGE_LOW, GREEN),
             (d.ICON_GAUGE_HIGH, YELLOW), (d.ICON_GAUGE_MAX, ORANGE),
         )),
         (d.UNIT_PERCENT, (

@@ -59,7 +59,7 @@ graph TD
     CalendarDisplay -- "get_time" --> TimeService
     CalendarDisplay --> EventWindow --> scheduling["scheduling/event + event_runs + event_factory + stream"]
 
-    NetworkService -- "status_fn (bootstrap only)" --> StatusDisplay
+    NetworkService -- "on_progress (bootstrap only)" --> StatusDisplay
     NetworkService --> WifiClient
     NetworkService --> ntp["utilities/ntp"]
     WeatherService -- "precip + UV" --> WifiClient

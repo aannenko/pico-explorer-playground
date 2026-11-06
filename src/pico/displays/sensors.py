@@ -10,7 +10,7 @@ from displays.palette import (
     LABEL_FOR_SLOT,
     ORANGE,
     RED,
-    RPURPLE,
+    PINK,
     SKY,
     YELLOW,
 )
@@ -294,7 +294,7 @@ class Display(_Display):
         (
             _icons_data.UNIT_MBAR,
             (
-                (_icons_data.ICON_GAUGE_MIN, RPURPLE),
+                (_icons_data.ICON_GAUGE_MIN, PINK),
                 (_icons_data.ICON_GAUGE_LOW, GREEN),
                 (_icons_data.ICON_GAUGE_HIGH, YELLOW),
                 (_icons_data.ICON_GAUGE_MAX, ORANGE),
