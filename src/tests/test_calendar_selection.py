@@ -70,10 +70,10 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
 ):
     clock = [utc_epoch(2026, 9, 14, 7, 0, 0)]
     time_service = TimeService(
-        tz_offset=config_defaults.TIME_ZONE_OFFSET,
+        tz_offset_hours=config_defaults.TIME_ZONE_OFFSET,
         dst_start=config_defaults.DST_START,
         dst_end=config_defaults.DST_END,
-        dst_offset=config_defaults.DST_OFFSET,
+        dst_offset_hours=config_defaults.DST_OFFSET,
         get_time=lambda: clock[0],
     )
     monkeypatch.setattr(demo_streams.random, "choice", lambda items: items[0])

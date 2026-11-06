@@ -56,7 +56,7 @@ def test_random_event_loop_stamps_color_index_on_every_event():
     gen = demo_streams._random_event_loop(
         names=("a", "b"),
         durations=(60, 120),
-        gap_chance=0,  # no gaps → deterministic yields
+        gap_percent=0,  # no gaps → deterministic yields
         start_timestamp=0,
         time_service=ts,
         color_index=3,

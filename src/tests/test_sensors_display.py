@@ -201,9 +201,9 @@ def test_negative_clamp_at_minus_999(monkeypatch) -> None:
     assert ("value_write", (0, "-999"), {}) in renderer.calls
 
 
-def test_fit_chars_helper_boundary_cases() -> None:
+def test_format_value_helper_boundary_cases() -> None:
     """Direct exercise of the formatter to lock in its branch behavior."""
-    fn = sensors.Display._fit_chars
+    fn = sensors.Display._format_value
 
     # In-range values (``-100 < round(value, decimals) < 100``) keep the decimal.
     assert fn(22.4, 1) == "22.4"
@@ -617,9 +617,9 @@ def _graph_calls(renderer: RecordingRenderer) -> list[tuple]:
     return [c for c in renderer.calls if c[0] in ("draw_graph_clear", "draw_graph_column")]
 
 
-def test_y_for_boundary_values() -> None:
-    """``_y_for`` boundary semantics: caps inclusive; out-of-range → None."""
-    fn = sensors.Display._y_for
+def test_marker_y_boundary_values() -> None:
+    """``_marker_y`` boundary semantics: caps inclusive; out-of-range → None."""
+    fn = sensors.Display._marker_y
     edges = (10, 12, 24, 28, 40)
     # cap_max = 40 → top (y=0); cap_min = 10 → bottom (y=23).
     assert fn(40.0, edges, 24) == 0
@@ -845,8 +845,8 @@ def test_in_cap_value_renders_fill_and_marker(monkeypatch) -> None:
     _line, _col, fill_pen, marker_pen, value_y = args
     assert fill_pen == d._band_pens[0][2][0]
     assert marker_pen == d._band_pens[0][2][1]
-    # value_y matches the documented _y_for formula for graph_height=24.
-    expected = sensors.Display._y_for(25.0, _TEST_BAND_KWARGS["temp_bands"], _FAKE_GRAPH_HEIGHT)
+    # value_y matches the documented _marker_y formula for graph_height=24.
+    expected = sensors.Display._marker_y(25.0, _TEST_BAND_KWARGS["temp_bands"], _FAKE_GRAPH_HEIGHT)
     assert value_y == expected
 
 

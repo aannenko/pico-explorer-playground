@@ -17,7 +17,7 @@ TEXT_ABOVE_CENTER = const(54)
 TEXT_BELOW_CENTER = const(56)
 
 _RING_THICKNESS_DIVISOR = const(30)
-_RING_OUTER_MARGIN = const(2)
+_RING_OUTER_MARGIN_PX = const(2)
 
 
 class Colors:
@@ -52,7 +52,7 @@ class Geometry:
         self.y_center = self.height // 2 + self.height % 2
 
         self.ring_thickness = min(self.width, self.height) // _RING_THICKNESS_DIVISOR
-        self.outer_circle_r = min(self.x_center, self.y_center) - _RING_OUTER_MARGIN
+        self.outer_circle_r = min(self.x_center, self.y_center) - _RING_OUTER_MARGIN_PX
         self.inner_circle_r = self.outer_circle_r - self.ring_thickness
         self.outer_poly_r = self.outer_circle_r + 2
         self.inner_poly_r = self.inner_circle_r - 1

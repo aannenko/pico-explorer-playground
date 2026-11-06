@@ -15,15 +15,15 @@ WINDOW_FUTURE_SEC = const(90 * 60)
 WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)
 
 _MAX_STREAMS = const(5)
-_HEADER_MARGIN = const(6)
-_AXIS_MARGIN = const(3)
-_BAR_TEXT_MARGIN = const(2)
+_HEADER_MARGIN_PX = const(6)
+_AXIS_MARGIN_PX = const(3)
+_BAR_TEXT_MARGIN_PX = const(2)
 _BAR_SEAM_PX = const(1)
 _MIN_LABEL_PX = const(14)
 
 _SEC_PER_HOUR = const(3600)
 _SEC_PER_QUARTER = const(900)
-_TICK_MARK_HEIGHT = const(4)
+_TICK_MARK_HEIGHT_PX = const(4)
 _STATUS_GLYPH_PX = const(4)
 
 
@@ -87,8 +87,8 @@ class Geometry:
         self.axis_height = bar_font_height * bar_text_scale
         self.axis_y = self.height - self.axis_height
 
-        body_top = self.header_height + _HEADER_MARGIN
-        body_bottom = self.axis_y - _AXIS_MARGIN
+        body_top = self.header_height + _HEADER_MARGIN_PX
+        body_bottom = self.axis_y - _AXIS_MARGIN_PX
         body_height = body_bottom - body_top
 
         cell_height = body_height // _MAX_STREAMS
@@ -203,7 +203,7 @@ class Renderer:
                 bar_px = x1 - x0
                 text_y = row_top + (bar_h - geom.bar_text_height) // 2 + 2
                 label_right = x0
-                usable_px = bar_px - 2 * _BAR_TEXT_MARGIN
+                usable_px = bar_px - 2 * _BAR_TEXT_MARGIN_PX
 
                 if usable_px >= _MIN_LABEL_PX and event.name:
                     label = event.name.upper()
@@ -223,15 +223,15 @@ class Renderer:
 
                     if text_w <= usable_px:
                         gfx.set_pen(LABEL_FOR_SLOT[pen])
-                        gfx.text(label, x0 + _BAR_TEXT_MARGIN, text_y, scale=geom.bar_text_scale)
-                        label_right = x0 + _BAR_TEXT_MARGIN + text_w
+                        gfx.text(label, x0 + _BAR_TEXT_MARGIN_PX, text_y, scale=geom.bar_text_scale)
+                        label_right = x0 + _BAR_TEXT_MARGIN_PX + text_w
 
                 if ev_end > window_end:
                     remaining = ev_end - now
                     if remaining > 0:
                         rem_text = _fmt_remaining(remaining)
                         rem_w = gfx.measure_text(rem_text, scale=geom.bar_text_scale)
-                        rem_x = x1 - rem_w - _BAR_TEXT_MARGIN
+                        rem_x = x1 - rem_w - _BAR_TEXT_MARGIN_PX
                         if rem_x > label_right + 1:
                             gfx.set_pen(LABEL_FOR_SLOT[pen])
                             gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
@@ -249,7 +249,7 @@ class Renderer:
         width = geom.width
 
         baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
-        tick_bottom = baseline_y + _TICK_MARK_HEIGHT
+        tick_bottom = baseline_y + _TICK_MARK_HEIGHT_PX
 
         gfx.set_pen(self._colors.background)
         gfx.rectangle(0, baseline_y + 1, width, geom.axis_y + geom.axis_height - baseline_y - 1)

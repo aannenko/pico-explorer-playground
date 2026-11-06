@@ -37,15 +37,15 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 | `app.py` | `TEXT_SCALE` 3 (config) | primary text: Status, Ring, Calendar header, Sensors values + unit glyphs |
 | `app.py` | `bar_text_scale` 2 | Calendar bar labels and time axis |
 | `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the cell budget (design §2) |
-| `sensors.py` | `_L_GAP` 3, `_R_MARGIN` 0 | value→graph gap, graph→edge |
+| `sensors.py` | `_VALUE_GRAPH_GAP_PX` 3, `_GRAPH_RIGHT_MARGIN_PX` 0 | value→graph gap, graph→edge |
 | `sensors.py` | inline `+ 4`, `+ 6` | icon→unit and unit→value gaps |
 | `sensors.py` | inline `+ 2` | icon lift: bitmap8 ink sits high in its cell |
-| `calendar.py` | `_HEADER_MARGIN` 6, `_AXIS_MARGIN` 3 | header→rows, rows→axis |
-| `calendar.py` | `_BAR_TEXT_MARGIN` 2, `_MIN_LABEL_PX` 14 | label inset, minimum bar width for a label |
-| `calendar.py` | `_TICK_MARK_HEIGHT` 4, `_STATUS_GLYPH_PX` 4 | axis ticks, stale-data square |
+| `calendar.py` | `_HEADER_MARGIN_PX` 6, `_AXIS_MARGIN_PX` 3 | header→rows, rows→axis |
+| `calendar.py` | `_BAR_TEXT_MARGIN_PX` 2, `_MIN_LABEL_PX` 14 | label inset, minimum bar width for a label |
+| `calendar.py` | `_TICK_MARK_HEIGHT_PX` 4, `_STATUS_GLYPH_PX` 4 | axis ticks, stale-data square |
 | `calendar.py` | `max(3, …)` | minimum row gap |
 | `calendar.py` | inline `+ 2` in bar `text_y` | label lift: the same bitmap8 ink offset |
-| `ring.py` | `_RING_OUTER_MARGIN` 2 | ring→edge |
+| `ring.py` | `_RING_OUTER_MARGIN_PX` 2 | ring→edge |
 | `status.py` | `h // 2 + 5` | subtext offset |
 
 **1-px elements, which need a policy rather than a multiply (open question 2):**

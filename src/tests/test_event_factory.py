@@ -20,14 +20,14 @@ _WORK_DAYS = {0, 1, 2, 3, 4}
 class _FakeTimeService:
     """Minimal TimeService stand-in for factory tests."""
 
-    def __init__(self, utc_epoch: int, tz_offset: int = 1, dst_offset: int = 1,
+    def __init__(self, utc_epoch: int, tz_offset_hours: int = 1, dst_offset_hours: int = 1,
                  dst_start=_DST_START, dst_end=_DST_END):
         from services.time_service import TimeService
         self._svc = TimeService(
-            tz_offset=tz_offset,
+            tz_offset_hours=tz_offset_hours,
             dst_start=dst_start,
             dst_end=dst_end,
-            dst_offset=dst_offset,
+            dst_offset_hours=dst_offset_hours,
             get_time=lambda: utc_epoch,
         )
 
@@ -200,7 +200,7 @@ def test_fall_back_weekend_longer():
 def test_no_dst_config_real_equals_wall():
     """Without DST config, real always equals wall-clock."""
     utc = _utc_epoch(2026, 6, 15, 7, 0, 0)
-    ts = _FakeTimeService(utc, tz_offset=5, dst_offset=0, dst_start=None, dst_end=None)
+    ts = _FakeTimeService(utc, tz_offset_hours=5, dst_offset_hours=0, dst_start=None, dst_end=None)
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:

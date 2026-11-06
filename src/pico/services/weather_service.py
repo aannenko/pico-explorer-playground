@@ -34,11 +34,8 @@ def _weather_type(code: int) -> str | None:
     return None
 
 
-def _intensity(mm: float) -> tuple[int, int]:
-    """Map an hourly precipitation amount to ``(priority_rank, color_index)``.
-
-    Ranks 1/2/3 mean light/moderate/heavy.
-    """
+def _precip_rank_and_color(mm: float) -> tuple[int, int]:
+    """Ranks 1/2/3 mean light/moderate/heavy."""
     if mm < _MODERATE_MM:
         return (1, STREAM_GREEN)
     if mm < _HEAVY_MM:
@@ -81,7 +78,7 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
         kind = None if (prob is None or prob < prob_threshold) else _weather_type(codes[i])
         if kind is not None:
             mm = amounts[i] if amounts[i] is not None else 0.0
-            rank, color = _intensity(mm)
+            rank, color = _precip_rank_and_color(mm)
             candidates.append((rank, kind, color))
         uv_lvl = event_runs.level(uv[i], uv_warn, uv_severe)
         if uv_lvl:

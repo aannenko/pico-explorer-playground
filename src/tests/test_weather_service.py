@@ -17,7 +17,7 @@ from services.http_client import HttpConnectError
 from services.weather_service import (
     WeatherService,
     _build_events,
-    _intensity,
+    _precip_rank_and_color,
     _weather_type,
 )
 
@@ -53,8 +53,8 @@ def test_weather_type_mapping(code, expected):
         (20.0, (3, STREAM_RED)),
     ],
 )
-def test_intensity_rank_and_color(mm, expected):
-    assert _intensity(mm) == expected
+def test_precip_rank_and_color(mm, expected):
+    assert _precip_rank_and_color(mm) == expected
 
 
 # ---------------------------------------------------------------------------

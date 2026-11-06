@@ -7,13 +7,13 @@ from services.time_service import TimeService
 
 _WEATHER_NAMES = ("sun", "rain", "snow", "fog")
 _WEATHER_DURATIONS = (15 * 60, 30 * 60, 60 * 60, 120 * 60, 150 * 60)
-_WEATHER_GAP_CHANCE = 20  # percent chance of a gap
+_WEATHER_GAP_PERCENT = 20
 
 
 def _random_event_loop(
     names: tuple,
     durations: tuple,
-    gap_chance: int,
+    gap_percent: int,
     start_timestamp: int,
     time_service: TimeService,
     color_index: int,
@@ -29,7 +29,7 @@ def _random_event_loop(
             cursor = window_start
         dur = random.choice(durations)
 
-        if random.randint(1, 100) <= gap_chance:
+        if random.randint(1, 100) <= gap_percent:
             cursor += dur
             continue
 
@@ -49,7 +49,7 @@ def build_demo_streams(
         _random_event_loop(
             names=_WEATHER_NAMES,
             durations=_WEATHER_DURATIONS,
-            gap_chance=_WEATHER_GAP_CHANCE,
+            gap_percent=_WEATHER_GAP_PERCENT,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_SKY,
@@ -58,7 +58,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("code", "review", "deploy", "test", "debug"),
             durations=(15 * 60, 30 * 60, 45 * 60, 60 * 60),
-            gap_chance=15,
+            gap_percent=15,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_YELLOW,
@@ -67,7 +67,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("call", "standup", "retro", "chat"),
             durations=(15 * 60, 30 * 60, 60 * 60),
-            gap_chance=40,
+            gap_percent=40,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_PINK,
@@ -76,7 +76,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("run", "walk", "gym", "yoga", "rest"),
             durations=(20 * 60, 30 * 60, 45 * 60, 60 * 60, 90 * 60),
-            gap_chance=25,
+            gap_percent=25,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_TEAL,

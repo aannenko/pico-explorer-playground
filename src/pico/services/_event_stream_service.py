@@ -28,7 +28,7 @@ class EventStreamService:
         coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
-        name: str,  # log tag, e.g. "weather" / "air"
+        log_tag: str,
         enabled: bool,
         clock=time.ticks_ms,  # () -> int
         tick_scheduler=None,
@@ -41,9 +41,9 @@ class EventStreamService:
         self._coordinator = coordinator
         self._schedule = schedule
         self._interval_ms = interval_ms
-        self._name = name
-        self._tick_err_tag = "[%s] tick err:" % name
-        self._store_err_tag = "[%s] store err:" % name
+        self._log_tag = log_tag
+        self._tick_err_tag = "[%s] tick err:" % log_tag
+        self._store_err_tag = "[%s] store err:" % log_tag
         self._enabled = enabled
         self._clock = clock
         self._backoff_base_ms = backoff_base_ms
@@ -100,7 +100,7 @@ class EventStreamService:
             self._failures += 1
             delay = self._backoff_delay()
             print(
-                "[%s] err (fail #%d, retry in %dms):" % (self._name, self._failures, delay),
+                "[%s] err (fail #%d, retry in %dms):" % (self._log_tag, self._failures, delay),
                 state.error,
             )
             self._next_due = time.ticks_add(now, delay)
@@ -144,7 +144,7 @@ class EventStreamService:
     def _store(self, events: list[Event]) -> None:
         self._events = events
         self._generation += 1
-        print("[%s] published %d events (gen %d)" % (self._name, len(self._events), self._generation))
+        print("[%s] published %d events (gen %d)" % (self._log_tag, len(self._events), self._generation))
 
     def _fetch_and_parse(self) -> list[Event]:
         """Fetch and parse the latest events; subclasses must override.

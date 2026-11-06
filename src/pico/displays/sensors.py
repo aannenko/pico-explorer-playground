@@ -21,14 +21,14 @@ from services.pimoroni_bme690 import PimoroniBME690
 
 
 _HISTORY_MS = const(24 * 3600 * 1000)
-_L_GAP = const(3)  # px between value text and graph
-_R_MARGIN = const(0)  # px between graph right edge and screen edge
+_VALUE_GRAPH_GAP_PX = const(3)
+_GRAPH_RIGHT_MARGIN_PX = const(0)
 _ICON_SCALE = const(2)
 # bitmap8 glyph ink sits high in its cell, so a box-centred icon reads low
 # against digits.
 _ICON_INK_LIFT_PX = const(2)
 # Its width is the budget every value string must fit: 63 px at bitmap8 scale 3.
-# "-99.9", the widest _fit_chars emits, also measures 63; its integer limits "9999"
+# "-99.9", the widest _format_value emits, also measures 63; its integer limits "9999"
 # and "-999" measure 57 and 54.
 _WIDEST_GRAPH_VALUE = "-88.8"
 
@@ -127,8 +127,8 @@ class Geometry:
         value_max_text_width = pico_graphics.measure_text(
             _WIDEST_GRAPH_VALUE, scale=text_scale
         )
-        self.graph_x = self.value_x + value_max_text_width + _L_GAP
-        available = self.width - self.graph_x - _R_MARGIN
+        self.graph_x = self.value_x + value_max_text_width + _VALUE_GRAPH_GAP_PX
+        available = self.width - self.graph_x - _GRAPH_RIGHT_MARGIN_PX
         if available < 1:
             raise RuntimeError(
                 "sensors geometry: no room for graph (font/scale too large)"
@@ -393,10 +393,8 @@ class Display(_Display):
 
     @staticmethod
     @micropython.native
-    def _y_for(value: float, edges: tuple, graph_height: int) -> int | None:
-        """Map ``value`` to the row-local y of its marker pixel.
-
-        ``cap_max`` (``edges[-1]``) maps to y 0 (top) and ``cap_min`` (``edges[0]``)
+    def _marker_y(value: float, edges: tuple, graph_height: int) -> int | None:
+        """``cap_max`` (``edges[-1]``) maps to y 0 (top) and ``cap_min`` (``edges[0]``)
         to ``graph_height - 1`` (bottom), both inclusive; outside them it returns
         ``None``.  ``value`` must not be NaN.
         """
@@ -407,10 +405,8 @@ class Display(_Display):
         return round((cap_max - value) * (graph_height - 1) / (cap_max - cap_min))
 
     @staticmethod
-    def _fit_chars(value: float, decimals: int) -> str:
-        """Format ``value`` for the sensor value cell.
-
-        Shows ``decimals`` places while the rounded value is within (-100, 100), else
+    def _format_value(value: float, decimals: int) -> str:
+        """Show ``decimals`` places while the rounded value is within (-100, 100), else
         the nearest integer, clamped to -999..9999.
 
         ``decimals`` must be at most 1, or an in-range value can exceed the
@@ -461,7 +457,7 @@ class Display(_Display):
                     continue
                 band = self._band_index(value, edges)
                 fill_pen, marker_pen = pens_row[band]
-                y = self._y_for(value, edges, graph_height)
+                y = self._marker_y(value, edges, graph_height)
                 col = capacity - 1 - i
                 renderer.draw_graph_column(
                     metric_idx,
@@ -513,11 +509,11 @@ class Display(_Display):
                 _unit, edges, cells = self._rows[i]
                 self._maybe_swap_icon(i, cells[self._band_index(reading[i], edges)][0])
 
-            self._renderer.value_write(0, self._fit_chars(temp, 1))  # "22.4", "-99.9", "100"
-            self._renderer.value_write(1, self._fit_chars(press, 0))  # "1013"
-            self._renderer.value_write(2, self._fit_chars(hum, 1))  # "50.5", "100"
+            self._renderer.value_write(0, self._format_value(temp, 1))  # "22.4", "-99.9", "100"
+            self._renderer.value_write(1, self._format_value(press, 0))  # "1013"
+            self._renderer.value_write(2, self._format_value(hum, 1))  # "50.5", "100"
             if status == "Stable":
-                self._renderer.value_write(3, self._fit_chars(gas_r, 1))  # "75.3", "251", "1000"
+                self._renderer.value_write(3, self._format_value(gas_r, 1))  # "75.3", "251", "1000"
             else:
                 self._renderer.value_write(3, "warming...")
 

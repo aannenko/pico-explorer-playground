@@ -7,8 +7,8 @@ from services.time_service import (
     _days_in_month,
     _is_dst,
     _is_leap,
+    _mday_of_nth_weekday,
     _next_transition_utc,
-    _nth_weekday_mday,
     _transition_utc,
     _weekday,
 )
@@ -78,31 +78,31 @@ def test_weekday(date, expected):
     assert _weekday(*date) == expected
 
 
-# ── _nth_weekday_mday ────────────────────────────────────────────────
+# ── _mday_of_nth_weekday ─────────────────────────────────────────────
 
 
 def test_last_sunday_of_march_2026():
-    assert _nth_weekday_mday(2026, 3, -1, 6) == 29
+    assert _mday_of_nth_weekday(2026, 3, -1, 6) == 29
 
 
 def test_last_sunday_of_october_2026():
-    assert _nth_weekday_mday(2026, 10, -1, 6) == 25
+    assert _mday_of_nth_weekday(2026, 10, -1, 6) == 25
 
 
 def test_last_sunday_of_march_2025():
-    assert _nth_weekday_mday(2025, 3, -1, 6) == 30
+    assert _mday_of_nth_weekday(2025, 3, -1, 6) == 30
 
 
 def test_last_sunday_of_october_2025():
-    assert _nth_weekday_mday(2025, 10, -1, 6) == 26
+    assert _mday_of_nth_weekday(2025, 10, -1, 6) == 26
 
 
 def test_first_monday_of_january_2024():
-    assert _nth_weekday_mday(2024, 1, 1, 0) == 1  # Jan 1 2024 is Monday
+    assert _mday_of_nth_weekday(2024, 1, 1, 0) == 1  # Jan 1 2024 is Monday
 
 
 def test_second_monday_of_january_2024():
-    assert _nth_weekday_mday(2024, 1, 2, 0) == 8
+    assert _mday_of_nth_weekday(2024, 1, 2, 0) == 8
 
 
 # ── _transition_utc ─────────────────────────────────────────────────
@@ -199,10 +199,10 @@ class FakeScheduler:
 def test_now_returns_local_epoch():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: utc,
     )
     # Summer: CET+1 DST+1 = UTC+2
@@ -212,10 +212,10 @@ def test_now_returns_local_epoch():
 def test_utc_now_returns_raw_time():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: utc,
     )
     assert svc.utc_now() == utc
@@ -224,10 +224,10 @@ def test_utc_now_returns_raw_time():
 def test_now_winter_offset():
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: utc,
     )
     # Winter: CET+1 only
@@ -237,10 +237,10 @@ def test_now_winter_offset():
 def test_no_dst_config_uses_tz_only():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=5,
+        tz_offset_hours=5,
         dst_start=None,
         dst_end=None,
-        dst_offset=0,
+        dst_offset_hours=0,
         get_time=lambda: utc,
     )
     assert svc.now() == utc + 5 * 3600
@@ -252,10 +252,10 @@ def test_tick_triggers_dst_transition():
 
     sched = FakeScheduler()
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: clock[0],
         tick_scheduler=sched,
     )
@@ -275,10 +275,10 @@ def test_tick_no_transition_when_not_reached():
     clock = [_utc_epoch(2026, 1, 15, 12, 0, 0)]
 
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: clock[0],
     )
     initial_offset = svc._offset_sec
@@ -295,10 +295,10 @@ def test_tick_fall_back_transition():
     clock = [_utc_epoch(2026, 10, 25, 0, 30, 0)]  # 02:30 CEST, before fall back
 
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=lambda: clock[0],
     )
     assert svc._dst_active is True
@@ -325,10 +325,10 @@ def test_tick_throttles_wall_clock_reads(fake_ticks):
 
     fake_ticks[0] = 0
     svc = TimeService(
-        tz_offset=1,
+        tz_offset_hours=1,
         dst_start=_DST_START,
         dst_end=_DST_END,
-        dst_offset=1,
+        dst_offset_hours=1,
         get_time=get_time,
     )
     reads_after_init = reads[0]
@@ -352,7 +352,7 @@ def test_tick_throttles_wall_clock_reads(fake_ticks):
 def test_constructor_registers_tick():
     sched = FakeScheduler()
     TimeService(
-        tz_offset=0,
+        tz_offset_hours=0,
         dst_start=None,
         dst_end=None,
         get_time=lambda: 0,
@@ -367,8 +367,8 @@ def test_constructor_registers_tick():
 def test_total_offset_winter():
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     assert svc.total_offset(utc) == 1 * 3600
 
@@ -376,8 +376,8 @@ def test_total_offset_winter():
 def test_total_offset_summer():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     assert svc.total_offset(utc) == 2 * 3600
 
@@ -385,8 +385,8 @@ def test_total_offset_summer():
 def test_total_offset_no_dst_config():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=5, dst_start=None, dst_end=None,
-        dst_offset=0, get_time=lambda: utc,
+        tz_offset_hours=5, dst_start=None, dst_end=None,
+        dst_offset_hours=0, get_time=lambda: utc,
     )
     assert svc.total_offset(utc) == 5 * 3600
 
@@ -397,8 +397,8 @@ def test_total_offset_no_dst_config():
 def test_to_utc_winter_round_trip():
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     local = svc.now()
     assert svc.to_utc(local) == utc
@@ -407,8 +407,8 @@ def test_to_utc_winter_round_trip():
 def test_to_utc_summer_round_trip():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     local = svc.now()
     assert svc.to_utc(local) == utc
@@ -417,8 +417,8 @@ def test_to_utc_summer_round_trip():
 def test_to_utc_no_dst_config():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
-        tz_offset=5, dst_start=None, dst_end=None,
-        dst_offset=0, get_time=lambda: utc,
+        tz_offset_hours=5, dst_start=None, dst_end=None,
+        dst_offset_hours=0, get_time=lambda: utc,
     )
     local = svc.now()
     assert svc.to_utc(local) == utc
@@ -428,8 +428,8 @@ def test_to_utc_last_hour_before_fall_back():
     """00:30 UTC on fall-back day: local is 02:30 CEST, to_utc must give 00:30 UTC."""
     utc = _utc_epoch(2026, 10, 25, 0, 30, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     local = utc + 2 * 3600  # 02:30 CEST
     assert svc.to_utc(local) == utc
@@ -439,8 +439,8 @@ def test_to_utc_just_after_spring_forward():
     """03:00 CEST (right after spring-forward) → 01:00 UTC."""
     utc = _utc_epoch(2026, 3, 29, 1, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     local = utc + 2 * 3600  # 03:00 CEST
     assert svc.to_utc(local) == utc
@@ -452,8 +452,8 @@ def test_to_utc_just_after_spring_forward():
 def test_real_duration_no_crossing():
     utc = _utc_epoch(2026, 6, 15, 6, 0, 0)  # summer, Mon
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc,
     )
     local_start = svc.now()
     assert svc.real_duration(local_start, 9 * 3600) == 9 * 3600
@@ -464,8 +464,8 @@ def test_real_duration_spring_forward():
     # Sat 2026-03-28 17:00 CET = 16:00 UTC. Transition: Sun 2026-03-29 01:00 UTC.
     utc_start = _utc_epoch(2026, 3, 28, 16, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc_start,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc_start,
     )
     local_sat_1700 = utc_start + 1 * 3600  # 17:00 CET
     wall_clock = 15 * 3600  # 15h wall-clock rest
@@ -478,8 +478,8 @@ def test_real_duration_fall_back():
     # Sat 2026-10-24 17:00 CEST = 15:00 UTC. Transition: Sun 2026-10-25 01:00 UTC.
     utc_start = _utc_epoch(2026, 10, 24, 15, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc_start,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc_start,
     )
     local_sat_1700 = utc_start + 2 * 3600  # 17:00 CEST
     wall_clock = 15 * 3600  # 15h wall-clock rest
@@ -491,8 +491,8 @@ def test_real_duration_weekend_fall_back():
     """Weekend Fri 17:00 CEST → Mon 08:00 CET = 63h wall, 64h real."""
     utc_start = _utc_epoch(2026, 10, 23, 15, 0, 0)
     svc = TimeService(
-        tz_offset=1, dst_start=_DST_START, dst_end=_DST_END,
-        dst_offset=1, get_time=lambda: utc_start,
+        tz_offset_hours=1, dst_start=_DST_START, dst_end=_DST_END,
+        dst_offset_hours=1, get_time=lambda: utc_start,
     )
     local_fri_1700 = utc_start + 2 * 3600
     wall_clock = 63 * 3600  # Fri 17:00 → Mon 08:00 = 63h wall
@@ -503,8 +503,8 @@ def test_real_duration_weekend_fall_back():
 def test_real_duration_no_dst_config():
     utc = _utc_epoch(2026, 7, 15, 6, 0, 0)
     svc = TimeService(
-        tz_offset=5, dst_start=None, dst_end=None,
-        dst_offset=0, get_time=lambda: utc,
+        tz_offset_hours=5, dst_start=None, dst_end=None,
+        dst_offset_hours=0, get_time=lambda: utc,
     )
     local = svc.now()
     assert svc.real_duration(local, 9 * 3600) == 9 * 3600

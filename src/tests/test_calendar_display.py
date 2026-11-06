@@ -559,7 +559,7 @@ class TestTickMarks:
         renderer.draw_time_axis(window_start, window_end)
 
         baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
-        tick_bottom = baseline_y + 4  # _TICK_MARK_HEIGHT
+        tick_bottom = baseline_y + calendar._TICK_MARK_HEIGHT_PX
 
         # 2h window at quarter-aligned start → marks at 0:00, 0:15, ..., 1:45 = 8 marks
         tick_lines = [c for c in gfx.line_calls if c[1] == baseline_y and c[3] == tick_bottom]
