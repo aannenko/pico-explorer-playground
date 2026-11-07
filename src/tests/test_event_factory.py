@@ -55,7 +55,7 @@ def test_yields_10_events_per_cycle():
     ts = _FakeTimeService(utc)
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
-    names = [e.name for e in events]
+    names = [e.label for e in events]
     assert names.count("work") == 5
     assert names.count("rest") == 4
     assert names.count("weekend") == 1
@@ -69,7 +69,7 @@ def test_events_are_contiguous():
     events = _collect(gen, 20)
     for i in range(len(events) - 1):
         assert events[i].start_timestamp + events[i].wall_clock_duration_sec == events[i + 1].start_timestamp, \
-            f"gap between event {i} ({events[i].name}) and {i+1} ({events[i+1].name})"
+            f"gap between event {i} ({events[i].label}) and {i+1} ({events[i+1].label})"
 
 
 def test_work_duration_is_9h():
@@ -78,7 +78,7 @@ def test_work_duration_is_9h():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:
-        if e.name == "work":
+        if e.label == "work":
             assert e.wall_clock_duration_sec == 9 * 3600
 
 
@@ -88,7 +88,7 @@ def test_rest_duration_is_15h():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:
-        if e.name == "rest":
+        if e.label == "rest":
             assert e.wall_clock_duration_sec == 15 * 3600
 
 
@@ -99,7 +99,7 @@ def test_weekend_duration_is_63h():
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     events = _collect(gen, 10)
     for e in events:
-        if e.name == "weekend":
+        if e.label == "weekend":
             assert e.wall_clock_duration_sec == 63 * 3600
 
 
@@ -108,7 +108,7 @@ def test_overnight_weekend_ends_at_next_shift():
     ts = _FakeTimeService(utc)
     gen = event_factory.work_week_loop(_WORK_DAYS, (22, 0), (6, 0), ts)
     events = _collect(gen, 11)
-    assert [e.name for e in events[8:]] == ["work", "weekend", "work"]
+    assert [e.label for e in events[8:]] == ["work", "weekend", "work"]
     assert events[9].wall_clock_duration_sec == 64 * 3600
     _, _, _, hour, minute, _, weekday, _ = time.gmtime(events[10].start_timestamp)
     assert (weekday, hour, minute) == (0, 22, 0)
@@ -123,7 +123,7 @@ def test_timestamps_are_local_epoch():
     ts = _FakeTimeService(utc)
     gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
     event = next(gen)  # current event (should be "work" starting at 08:00 local)
-    assert event.name == "work"
+    assert event.label == "work"
     t = time.gmtime(event.start_timestamp)
     assert t[3] == 8   # hour
     assert t[4] == 0   # minute
@@ -141,7 +141,7 @@ def test_no_dst_crossing_real_equals_wall():
     events = _collect(gen, 10)
     for e in events:
         assert e.real_duration_sec == e.wall_clock_duration_sec, \
-            f"{e.name}: real={e.real_duration_sec} != wall={e.wall_clock_duration_sec}"
+            f"{e.label}: real={e.real_duration_sec} != wall={e.wall_clock_duration_sec}"
 
 
 # ── DST correction: spring forward ──────────────────────────────────
@@ -164,7 +164,8 @@ def test_spring_forward_rest_shorter():
         if utc_start < spring_utc < utc_end:
             # This event crosses spring-forward
             assert e.real_duration_sec == e.wall_clock_duration_sec - 3600, \
-                f"{e.name}: expected real = wall - 3600, got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
+                f"{e.label}: expected real = wall - 3600, " \
+                f"got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
             break
     else:
         pytest.fail("No event found crossing spring-forward transition")
@@ -188,7 +189,8 @@ def test_fall_back_weekend_longer():
         utc_end = utc_start + e.real_duration_sec
         if utc_start < fall_utc < utc_end:
             assert e.real_duration_sec == e.wall_clock_duration_sec + 3600, \
-                f"{e.name}: expected real = wall + 3600, got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
+                f"{e.label}: expected real = wall + 3600, " \
+                f"got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
             break
     else:
         pytest.fail("No event found crossing fall-back transition")

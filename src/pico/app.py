@@ -194,7 +194,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
                 now_line=WHITE,
             ),
         ),
-        streams=windows,
+        event_windows=windows,
         get_time=time_service.now,
     )
 

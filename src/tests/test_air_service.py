@@ -82,7 +82,7 @@ def test_single_aqi_warning_hour():
 
     assert len(events) == 1
     ev = events[0]
-    assert ev.name == "AQI"
+    assert ev.label == "AQI"
     assert ev.color_index == STREAM_YELLOW
     assert ev.start_timestamp == _EPOCH0
     assert ev.wall_clock_duration_sec == _HOUR
@@ -93,18 +93,18 @@ def test_severe_maps_to_red():
 
 
 def test_pollen_label_is_uppercased_species_name():
-    assert _events(_aq_payload([_T0], [10], birch=[120]))[0].name == "BIRCH"
+    assert _events(_aq_payload([_T0], [10], birch=[120]))[0].label == "BIRCH"
 
 
 def test_aqi_wins_tie_over_pollen():
     # Equal level AQI vs pollen -> AQI wins (listed first).
     events = _events(_aq_payload([_T0], [60], grass=[55]))
-    assert events[0].name == "AQI"
+    assert events[0].label == "AQI"
 
 
 def test_pollen_wins_when_strictly_higher():
     events = _events(_aq_payload([_T0], [60], grass=[120]))
-    assert events[0].name == "GRASS"
+    assert events[0].label == "GRASS"
     assert events[0].color_index == STREAM_RED
 
 
@@ -121,7 +121,7 @@ def test_severity_change_splits_run():
 
 def test_metric_change_splits_run_even_at_same_level():
     events = _events(_aq_payload([_T0, _T1], [60, 10], grass=[0, 55]))
-    assert [e.name for e in events] == ["AQI", "GRASS"]
+    assert [e.label for e in events] == ["AQI", "GRASS"]
     assert [e.color_index for e in events] == [STREAM_YELLOW, STREAM_YELLOW]
 
 
@@ -161,7 +161,7 @@ def test_empty_species_is_aqi_only():
     aq = {"hourly": {"time": [_T0], "european_aqi": [60]}}
     events = _build_events(aq, [], _AQI_THR, _POLLEN_THR)
     assert len(events) == 1
-    assert events[0].name == "AQI"
+    assert events[0].label == "AQI"
 
 
 def test_emitted_color_indices_are_valid_palette_indices():
@@ -238,7 +238,7 @@ class _Harness:
         self.clock_val += ms
 
     def visible_names(self) -> list[str]:
-        return [e.name for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
+        return [e.label for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
 
 
 def test_disabled_when_coordinates_unset():

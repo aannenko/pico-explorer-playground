@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from displays.countdown import Display, DURATIONS
+from displays.countdown import Display, DURATIONS_SEC
 from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from services.countdown_timer import (
     CountdownTimer,
@@ -24,8 +24,8 @@ class FakeRenderer(RecordingRenderer):
         self.calls.append(("reset", (), {}))
         self.segments_cleared = 0
 
-    def ring_clear_segments(self, count: int) -> None:
-        self.calls.append(("ring_clear_segments", (count,), {}))
+    def clear_ring_segments(self, count: int) -> None:
+        self.calls.append(("clear_ring_segments", (count,), {}))
         if count > self.segments_cleared:
             self.segments_cleared = count
 
@@ -59,7 +59,7 @@ def test_initialize_shows_idle_screen_with_default_label() -> None:
     assert d._active is True
     assert engine.state == INITIAL
     assert ("reset", (), {}) in renderer.calls
-    assert ("text_write", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -100,18 +100,18 @@ def test_on_button_b_cycles_duration_in_idle() -> None:
     renderer.update_calls = 0
 
     d.on_button_b()
-    assert engine.name == "4 hours"
+    assert engine.label == "4 hours"
     assert engine.total_sec == 4 * 3600
-    assert ("text_write", (TEXT_CENTER, "4 hours"), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, "4 hours"), {}) in renderer.calls
     assert renderer.update_calls == 1
 
 
 def test_on_button_b_cycles_wrap_around() -> None:
     d, engine, *_ = _mk_display()
     d.initialize()
-    for _ in range(len(DURATIONS)):
+    for _ in range(len(DURATIONS_SEC)):
         d.on_button_b()
-    assert engine.name == "2 hours"
+    assert engine.label == "2 hours"
 
 
 def test_on_button_b_resets_in_running() -> None:
@@ -138,7 +138,7 @@ def test_on_button_a_starts_countdown() -> None:
 
     assert engine.state == RUNNING
     assert ("reset", (), {}) in renderer.calls
-    assert ("text_write", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -149,7 +149,7 @@ def test_on_button_a_pauses_in_running() -> None:
     d.on_button_a()  # Pause
 
     assert engine.state == PAUSED
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
 
 
 # ── button A/B in DONE state ──────────────────────────────────────────
@@ -168,7 +168,7 @@ def test_on_button_a_in_done_resets_to_initial() -> None:
 
     assert engine.state == INITIAL
     assert ("reset", (), {}) in renderer.calls
-    assert ("text_write", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
 
 
 def test_on_button_b_in_done_resets_to_initial() -> None:
@@ -199,7 +199,7 @@ def test_update_display_formats_elapsed_and_remaining() -> None:
 
     d._update_display()
 
-    assert ("text_write", (TEXT_ABOVE_CENTER, "01:01:01"), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "01:01:01"), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -211,7 +211,7 @@ def test_update_display_does_nothing_in_idle() -> None:
 
     d._update_display()
 
-    time_writes = [c for c in renderer.calls if c[0] == "text_write"]
+    time_writes = [c for c in renderer.calls if c[0] == "write_text"]
     assert time_writes == []
     assert renderer.update_calls == 0
 
@@ -226,10 +226,10 @@ def test_update_display_detects_done_state() -> None:
 
     d._update_display()  # Display should detect DONE and draw it
 
-    assert ("text_write", (TEXT_CENTER, engine.name), {}) in renderer.calls
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
-    assert ("text_write", (TEXT_BELOW_CENTER, "-00:00:00"), {}) in renderer.calls
-    assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, engine.label), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
+    assert ("write_text", (TEXT_BELOW_CENTER, "-00:00:00"), {}) in renderer.calls
+    assert ("clear_ring_segments", (RING_SEGMENTS,), {}) in renderer.calls
 
 
 # ── render() ───────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@ def test_render_updates_ring_segments_while_running() -> None:
     d.render()
 
     # expected cleared: 600 * 120 // 7200 = 10
-    assert ("ring_clear_segments", (10,), {}) in renderer.calls
+    assert ("clear_ring_segments", (10,), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -264,8 +264,8 @@ def test_render_detects_done_state() -> None:
 
     d.render()
 
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
-    assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
+    assert ("clear_ring_segments", (RING_SEGMENTS,), {}) in renderer.calls
 
 
 # ── ring segment calculation ──────────────────────────────────────────
@@ -282,7 +282,7 @@ def test_update_display_advances_ring_segments() -> None:
     clock[0] = 1600
     d._update_display()
 
-    assert ("ring_clear_segments", (10,), {}) in renderer.calls
+    assert ("clear_ring_segments", (10,), {}) in renderer.calls
     assert renderer.update_calls == 1
 
 
@@ -310,7 +310,7 @@ def test_pause_shows_paused_text() -> None:
 
     d.on_button_a()  # Pause
 
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
 
 
 def test_resume_restores_ring_and_time() -> None:
@@ -328,7 +328,7 @@ def test_resume_restores_ring_and_time() -> None:
 
     assert engine.state == RUNNING
     # Ring progress restored: 60 * 120 // 7200 = 1 segment
-    assert ("ring_clear_segments", (1,), {}) in renderer.calls
+    assert ("clear_ring_segments", (1,), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -372,8 +372,8 @@ def test_countdown_survives_display_switch() -> None:
 
     # Ring segments should be recalculated: 600 * 120 // 7200 = 10
     assert renderer.segments_cleared == 10
-    assert ("ring_clear_segments", (10,), {}) in renderer.calls
-    assert ("text_write", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
+    assert ("clear_ring_segments", (10,), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
     assert renderer.update_calls >= 1
 
 
@@ -393,10 +393,10 @@ def test_done_fires_while_away() -> None:
     # Come back — display should show "Done!"
     renderer.calls.clear()
     d.initialize()
-    assert ("text_write", (TEXT_CENTER, engine.name), {}) in renderer.calls
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
-    assert ("text_write", (TEXT_BELOW_CENTER, "-00:00:00"), {}) in renderer.calls
-    assert ("ring_clear_segments", (RING_SEGMENTS,), {}) in renderer.calls
+    assert ("write_text", (TEXT_CENTER, engine.label), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
+    assert ("write_text", (TEXT_BELOW_CENTER, "-00:00:00"), {}) in renderer.calls
+    assert ("clear_ring_segments", (RING_SEGMENTS,), {}) in renderer.calls
 
 
 def test_paused_survives_display_switch() -> None:
@@ -415,10 +415,10 @@ def test_paused_survives_display_switch() -> None:
 
     # Ring progress restored: 60 * 120 // 7200 = 1 segment
     assert renderer.segments_cleared == 1
-    assert ("ring_clear_segments", (1,), {}) in renderer.calls
-    assert ("text_write", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
+    assert ("clear_ring_segments", (1,), {}) in renderer.calls
+    assert ("write_text", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
     # Remaining time shown
-    remaining_writes = [c for c in renderer.calls if c[0] == "text_write" and c[1][0] == TEXT_BELOW_CENTER]
+    remaining_writes = [c for c in renderer.calls if c[0] == "write_text" and c[1][0] == TEXT_BELOW_CENTER]
     assert len(remaining_writes) == 1
     assert remaining_writes[0][1][1].startswith("-")
 
@@ -454,12 +454,12 @@ def test_resume_after_display_switch_updates_screen() -> None:
     assert engine.state == RUNNING
 
     # Elapsed time should be rendered (60s elapsed before pause)
-    elapsed_writes = [c for c in renderer.calls if c[0] == "text_write" and c[1][0] == TEXT_ABOVE_CENTER]
+    elapsed_writes = [c for c in renderer.calls if c[0] == "write_text" and c[1][0] == TEXT_ABOVE_CENTER]
     assert len(elapsed_writes) >= 1
     assert elapsed_writes[-1][1][1] == "00:01:00"
 
     # Remaining time should be rendered
-    remaining_writes = [c for c in renderer.calls if c[0] == "text_write" and c[1][0] == TEXT_BELOW_CENTER]
+    remaining_writes = [c for c in renderer.calls if c[0] == "write_text" and c[1][0] == TEXT_BELOW_CENTER]
     assert len(remaining_writes) >= 1
     assert remaining_writes[-1][1][1] == "-00:04:00"
 

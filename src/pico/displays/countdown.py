@@ -19,7 +19,7 @@ from services.countdown_timer import (
 
 _MAX_PRINTED_SEC = const(999 * 3600 + 59 * 60 + 59)  # 999:59:59
 
-DURATIONS = (
+DURATIONS_SEC = (
     5 * 60,
     10 * 60,
     15 * 60,
@@ -35,7 +35,7 @@ _DEFAULT_DURATION_SEC = const(2 * 60 * 60)
 
 
 @micropython.native
-def _fmt_time(sec: int) -> str:
+def _format_hms(sec: int) -> str:
     hours = sec // 3600
     if 0 <= sec <= _MAX_PRINTED_SEC:
         minutes = sec // 60 % 60
@@ -49,82 +49,82 @@ class Display(_Display):
 
     def __init__(self, renderer: Renderer, countdown_timer: CountdownTimer) -> None:
         self._renderer = renderer
-        self._timer = countdown_timer
+        self._countdown_timer = countdown_timer
 
-        self._duration_index = DURATIONS.index(_DEFAULT_DURATION_SEC)
-        self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
+        self._duration_index = DURATIONS_SEC.index(_DEFAULT_DURATION_SEC)
+        self._countdown_timer.configure(LABELS[self._duration_index], DURATIONS_SEC[self._duration_index])
 
         self._active = False
 
     def on_button_a(self) -> None:
-        state = self._timer.state
+        state = self._countdown_timer.state
         if state == INITIAL:
-            self._timer.start()
+            self._countdown_timer.start()
             self._draw_running()
         elif state == RUNNING:
-            self._timer.pause()
+            self._countdown_timer.pause()
             self._draw_paused()
         elif state == PAUSED:
-            self._timer.resume()
+            self._countdown_timer.resume()
             self._draw_running()
         elif state == DONE:
-            self._timer.reset()
+            self._countdown_timer.reset()
             self._draw_idle()
 
     def on_button_b(self) -> None:
-        state = self._timer.state
+        state = self._countdown_timer.state
         if state == INITIAL:
             self._cycle_duration()
-            self._renderer.text_write(TEXT_CENTER, self._timer.name)
+            self._renderer.write_text(TEXT_CENTER, self._countdown_timer.label)
             self._renderer.update()
         elif state in (RUNNING, PAUSED, DONE):
-            self._timer.reset()
+            self._countdown_timer.reset()
             self._draw_idle()
 
     def _cycle_duration(self) -> None:
-        self._duration_index = (self._duration_index + 1) % len(DURATIONS)
-        self._timer.configure(LABELS[self._duration_index], DURATIONS[self._duration_index])
+        self._duration_index = (self._duration_index + 1) % len(DURATIONS_SEC)
+        self._countdown_timer.configure(LABELS[self._duration_index], DURATIONS_SEC[self._duration_index])
 
     def _draw_idle(self) -> None:
         self._renderer.reset()
-        self._renderer.text_write(TEXT_CENTER, self._timer.name)
+        self._renderer.write_text(TEXT_CENTER, self._countdown_timer.label)
         self._renderer.update()
 
     def _restore_ring_progress(self) -> None:
-        """Reset the renderer, clearing the screen, then redraw the timer's name and progress."""
+        """Reset the renderer, clearing the screen, then redraw the timer's label and progress."""
         self._renderer.reset()
-        self._renderer.text_write(TEXT_CENTER, self._timer.name)
+        self._renderer.write_text(TEXT_CENTER, self._countdown_timer.label)
 
-        timer = self._timer
+        timer = self._countdown_timer
         total = timer.total_sec
         expected_cleared = timer.elapsed_sec * RING_SEGMENTS // total if total > 0 else 0
         if expected_cleared > 0:
-            self._renderer.ring_clear_segments(expected_cleared)
+            self._renderer.clear_ring_segments(expected_cleared)
 
     def _draw_running(self) -> None:
         self._restore_ring_progress()
         self._update_display()
 
     def _draw_paused(self) -> None:
-        self._renderer.text_write(TEXT_ABOVE_CENTER, "Paused")
+        self._renderer.write_text(TEXT_ABOVE_CENTER, "Paused")
         self._renderer.update()
 
     def _draw_paused_full(self) -> None:
         self._restore_ring_progress()
-        self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(self._timer.remaining_sec)}")
-        self._renderer.text_write(TEXT_ABOVE_CENTER, "Paused")
+        self._renderer.write_text(TEXT_BELOW_CENTER, f"-{_format_hms(self._countdown_timer.remaining_sec)}")
+        self._renderer.write_text(TEXT_ABOVE_CENTER, "Paused")
         self._renderer.update()
 
     def _draw_done(self) -> None:
         self._renderer.reset()
-        self._renderer.ring_clear_segments(RING_SEGMENTS)
-        self._renderer.text_write(TEXT_CENTER, self._timer.name)
-        self._renderer.text_write(TEXT_ABOVE_CENTER, "Done!")
-        self._renderer.text_write(TEXT_BELOW_CENTER, "-00:00:00")
+        self._renderer.clear_ring_segments(RING_SEGMENTS)
+        self._renderer.write_text(TEXT_CENTER, self._countdown_timer.label)
+        self._renderer.write_text(TEXT_ABOVE_CENTER, "Done!")
+        self._renderer.write_text(TEXT_BELOW_CENTER, "-00:00:00")
         self._renderer.update()
 
     def _update_display(self) -> None:
-        timer = self._timer
+        timer = self._countdown_timer
         state = timer.state
         if state == DONE:
             if self._renderer.segments_cleared < RING_SEGMENTS:
@@ -138,10 +138,10 @@ class Display(_Display):
         if total > 0:
             expected = elapsed * RING_SEGMENTS // total
             if expected > self._renderer.segments_cleared:
-                self._renderer.ring_clear_segments(expected)
+                self._renderer.clear_ring_segments(expected)
 
-        self._renderer.text_write(TEXT_ABOVE_CENTER, _fmt_time(elapsed))
-        self._renderer.text_write(TEXT_BELOW_CENTER, f"-{_fmt_time(timer.remaining_sec)}")
+        self._renderer.write_text(TEXT_ABOVE_CENTER, _format_hms(elapsed))
+        self._renderer.write_text(TEXT_BELOW_CENTER, f"-{_format_hms(timer.remaining_sec)}")
         self._renderer.update()
 
     def render(self) -> None:
@@ -152,7 +152,7 @@ class Display(_Display):
             return
         self._active = True
 
-        state = self._timer.state
+        state = self._countdown_timer.state
         if state == RUNNING:
             self._draw_running()
         elif state == PAUSED:

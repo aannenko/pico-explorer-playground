@@ -13,7 +13,7 @@ class _FakeTimeService:
 
 def test_build_stream_yields_work_rest_weekend_events():
     stream = work_week.build_stream(_FakeTimeService())
-    names = {next(stream.events_iter).name for _ in range(6)}
+    names = {next(stream.events_iter).label for _ in range(6)}
     assert names <= {"work", "rest", "weekend"}
 
 

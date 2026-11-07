@@ -9,7 +9,7 @@ DONE = const(3)
 
 
 class CountdownTimer:
-    """Named, pausable countdown measured in seconds."""
+    """Pausable countdown with a label, measured in seconds."""
 
     def __init__(
         self,
@@ -23,7 +23,7 @@ class CountdownTimer:
         self._get_time = get_time
 
         self._state = INITIAL
-        self._name = ""
+        self._label = ""
         self._total_sec = 0
         self._start_timestamp = 0
         self._end_timestamp = 0
@@ -38,8 +38,8 @@ class CountdownTimer:
         return self._state
 
     @property
-    def name(self) -> str:
-        return self._name
+    def label(self) -> str:
+        return self._label
 
     @property
     def total_sec(self) -> int:
@@ -65,11 +65,11 @@ class CountdownTimer:
             return self._remaining_sec
         return 0
 
-    def configure(self, name: str, total_sec: int) -> None:
+    def configure(self, label: str, total_sec: int) -> None:
         """Set up a new countdown, discarding any progress."""
         self._on_configure_action()
         self._state = INITIAL
-        self._name = name
+        self._label = label
         self._total_sec = total_sec
         self._start_timestamp = 0
         self._end_timestamp = 0
@@ -106,7 +106,7 @@ class CountdownTimer:
 
     def reset(self) -> None:
         """Discard progress, keeping the label and duration."""
-        self.configure(self._name, self._total_sec)
+        self.configure(self._label, self._total_sec)
 
     def _tick(self) -> None:
         if self._state == RUNNING and self._get_time() >= self._end_timestamp:

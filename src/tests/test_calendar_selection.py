@@ -127,6 +127,6 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     assert manager._current == 2
     assert panel.updates == updates_before + 1
     assert panel.presented[0] == "2026-10-14 09:00"
-    assert len(calendar._streams) == 5
-    assert len(calendar._streams[-1]._buffer) == 8
+    assert len(calendar._event_windows) == 5
+    assert len(calendar._event_windows[-1]._buffer) == 8
     assert produced == 9

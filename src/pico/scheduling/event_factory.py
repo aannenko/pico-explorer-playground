@@ -117,17 +117,17 @@ def work_week_loop(
         offset = current_event_index * _STRUCT_SIZE
         event_duration_sec, event_type = struct.unpack_from(_STRUCT_FORMAT, buffer, offset)
 
-        event_name: str
+        label: str
         if event_type == _WORK:
-            event_name = "work"
+            label = "work"
         elif event_type == _REST:
-            event_name = "rest"
+            label = "rest"
         else:
-            event_name = "weekend"
+            label = "weekend"
 
         real_dur = time_service.real_duration_sec(current_event_start_timestamp, event_duration_sec)
 
-        yield Event(event_name, current_event_start_timestamp, event_duration_sec, real_dur)
+        yield Event(label, current_event_start_timestamp, event_duration_sec, real_dur)
 
         current_event_start_timestamp += event_duration_sec
         current_event_index = (current_event_index + 1) % num_events

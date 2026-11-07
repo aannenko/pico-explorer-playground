@@ -28,7 +28,7 @@ def _mk_engine(**overrides):
 def test_initial_state() -> None:
     e, *_ = _mk_engine()
     assert e.state == INITIAL
-    assert e.name == ""
+    assert e.label == ""
     assert e.total_sec == 0
     assert e.elapsed_sec == 0
     assert e.remaining_sec == 0
@@ -37,11 +37,11 @@ def test_initial_state() -> None:
 # ── configure ──────────────────────────────────────────────────────────
 
 
-def test_configure_sets_name_and_total_sec() -> None:
+def test_configure_sets_label_and_total_sec() -> None:
     e, *_ = _mk_engine()
     e.configure("5 min", 300)
     assert e.state == INITIAL
-    assert e.name == "5 min"
+    assert e.label == "5 min"
     assert e.total_sec == 300
 
 
@@ -53,7 +53,7 @@ def test_configure_from_running_resets_to_initial() -> None:
 
     e.configure("10 min", 600)
     assert e.state == INITIAL
-    assert e.name == "10 min"
+    assert e.label == "10 min"
     assert e.total_sec == 600
 
 
@@ -177,7 +177,7 @@ def test_reset_from_running() -> None:
     e.reset()
 
     assert e.state == INITIAL
-    assert e.name == "5 min"
+    assert e.label == "5 min"
     assert e.total_sec == 300
     assert e.elapsed_sec == 0
     assert e.remaining_sec == 0
@@ -191,7 +191,7 @@ def test_reset_from_paused() -> None:
     e.reset()
 
     assert e.state == INITIAL
-    assert e.name == "5 min"
+    assert e.label == "5 min"
 
 
 def test_reset_from_done() -> None:
@@ -207,7 +207,7 @@ def test_reset_from_done() -> None:
     e.reset()
 
     assert e.state == INITIAL
-    assert e.name == "5 min"
+    assert e.label == "5 min"
     assert len(on_configure_calls) == 1
 
 
@@ -216,7 +216,7 @@ def test_reset_from_initial_is_noop_equivalent() -> None:
     e.configure("5 min", 300)
     e.reset()
     assert e.state == INITIAL
-    assert e.name == "5 min"
+    assert e.label == "5 min"
 
 
 # ── tick ──────────────────────────────────────────────────────────────

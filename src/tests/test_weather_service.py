@@ -129,7 +129,7 @@ def test_single_qualifying_hour_emits_one_event():
 
     assert len(events) == 1
     ev = events[0]
-    assert ev.name == "RAIN"
+    assert ev.label == "RAIN"
     assert ev.start_timestamp == _EPOCH0
     assert ev.wall_clock_duration_sec == _HOUR
     assert ev.color_index == STREAM_GREEN
@@ -159,7 +159,7 @@ def test_intensity_band_change_splits_run():
 
 def test_type_change_splits_run_even_at_same_intensity():
     events = _be(_payload((_T0, 80, 1.0, 61), (_T1, 80, 1.0, 71)))
-    assert [e.name for e in events] == ["RAIN", "SNOW"]
+    assert [e.label for e in events] == ["RAIN", "SNOW"]
 
 
 def test_gap_hour_breaks_the_run():
@@ -188,7 +188,7 @@ def test_uv_renders_when_no_precip():
     # Low precip probability, high UV -> a UV bar.
     events = _be(_payload((_T0, 0, 0.0, 0), uv=[7]))
     assert len(events) == 1
-    assert events[0].name == "UV"
+    assert events[0].label == "UV"
     assert events[0].color_index == STREAM_YELLOW  # warning
 
 
@@ -199,20 +199,20 @@ def test_severe_uv_maps_to_red():
 def test_severe_uv_beats_light_precip():
     # Green drizzle (rank 1) collides with severe UV (level 2) -> UV wins.
     events = _be(_payload((_T0, 80, 1.0, 61), uv=[9]))
-    assert events[0].name == "UV"
+    assert events[0].label == "UV"
     assert events[0].color_index == STREAM_RED
 
 
 def test_precip_wins_tie_over_warning_uv():
     # Green drizzle (rank 1) vs warning UV (level 1) -> tie -> precip first.
     events = _be(_payload((_T0, 80, 1.0, 61), uv=[7]))
-    assert events[0].name == "RAIN"
+    assert events[0].label == "RAIN"
 
 
 def test_heavier_precip_wins_over_severe_uv():
     # Moderate rain (rank 2) ties severe UV (level 2) -> precip first wins.
     events = _be(_payload((_T0, 80, 5.0, 61), uv=[9]))
-    assert events[0].name == "RAIN"
+    assert events[0].label == "RAIN"
     assert events[0].color_index == STREAM_YELLOW
 
 
@@ -225,14 +225,14 @@ def test_malformed_uv_index_precip_still_renders():
     payload = _payload((_T0, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = None
     events = _be(payload)
-    assert [e.name for e in events] == ["RAIN"]
+    assert [e.label for e in events] == ["RAIN"]
 
 
 def test_short_uv_index_precip_still_renders():
     payload = _payload((_T0, 80, 1.0, 61), (_T1, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = [9]  # wrong length -> UV suppressed
     events = _be(payload)
-    assert all(e.name == "RAIN" for e in events)
+    assert all(e.label == "RAIN" for e in events)
 
 
 def test_non_list_uv_index_precip_still_renders():
@@ -241,7 +241,7 @@ def test_non_list_uv_index_precip_still_renders():
     payload = _payload((_T0, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = "9"
     events = _be(payload)
-    assert [e.name for e in events] == ["RAIN"]
+    assert [e.label for e in events] == ["RAIN"]
 
 
 def test_uv_index_with_non_numeric_element_precip_still_renders():
@@ -251,7 +251,7 @@ def test_uv_index_with_non_numeric_element_precip_still_renders():
     payload = _payload((_T0, 80, 1.0, 61))
     payload["hourly"]["uv_index"] = ["oops"]
     events = _be(payload)
-    assert [e.name for e in events] == ["RAIN"]
+    assert [e.label for e in events] == ["RAIN"]
 
 
 def test_emitted_color_indices_are_valid_palette_indices():
@@ -330,7 +330,7 @@ class _Harness:
         self.clock_val += ms
 
     def visible_names(self) -> list[str]:
-        return [e.name for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
+        return [e.label for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
 
 
 def test_disabled_when_coordinates_unset():

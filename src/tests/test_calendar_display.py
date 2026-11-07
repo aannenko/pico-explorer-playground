@@ -15,9 +15,9 @@ from conftest import RecordingRenderer
 # Fakes / helpers
 # ---------------------------------------------------------------------------
 
-def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> Event:
+def _make_event(label: str, start: int, duration: int, color_index: int = 0) -> Event:
     return Event(
-        name=name,
+        label=label,
         start_timestamp=start,
         wall_clock_duration_sec=duration,
         color_index=color_index,
@@ -31,12 +31,12 @@ def _make_stream(*specs, palette=None) -> EventWindow:
     )
 
 
-def _mk_display(streams=None, now: int = 0):
+def _mk_display(event_windows=None, now: int = 0):
     """Build a calendar.Display with a RecordingRenderer and a fixed-now clock."""
     renderer = RecordingRenderer()
     d = calendar.Display(
         renderer=renderer,
-        streams=streams if streams is not None else [],
+        event_windows=event_windows if event_windows is not None else [],
         get_time=lambda: now,
     )
     return d, renderer
@@ -55,7 +55,7 @@ def _patch_header(monkeypatch):
 class TestDisplayLifecycle:
     def test_initialize_renders_and_calls_update(self):
         stream = _make_stream(("work", 0, 100_000))
-        d, renderer = _mk_display(streams=[stream], now=50_000)
+        d, renderer = _mk_display(event_windows=[stream], now=50_000)
 
         d.initialize()
 
@@ -63,7 +63,7 @@ class TestDisplayLifecycle:
         call_names = [c[0] for c in renderer.calls]
         assert "reset" in call_names
         assert "draw_static_overlay" in call_names
-        assert "header_write" in call_names
+        assert "write_header" in call_names
         assert "draw_rows" in call_names
         assert "draw_time_axis" in call_names
         assert "draw_now_line" not in call_names
@@ -111,7 +111,7 @@ class TestRender:
         d.render()
 
         assert renderer.update_calls == 1
-        assert ("header_write", ("HDR:100000",), {}) in renderer.calls
+        assert ("write_header", ("HDR:100000",), {}) in renderer.calls
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ class TestWindowCalculation:
     def test_window_passes_correct_range(self):
         now_val = 100_000
         d, renderer = _mk_display(
-            streams=[_make_stream(("work", 0, 200_000))],
+            event_windows=[_make_stream(("work", 0, 200_000))],
             now=now_val,
         )
 
@@ -154,29 +154,29 @@ class TestHeaderFormatting:
         d.initialize()
 
         assert captured == [now_val]
-        header_calls = [c for c in renderer.calls if c[0] == "header_write"]
+        header_calls = [c for c in renderer.calls if c[0] == "write_header"]
         assert header_calls[0][1] == (f"T:{now_val}",)
 
 
 # ---------------------------------------------------------------------------
-# _fmt_remaining helper
+# _format_remaining helper
 # ---------------------------------------------------------------------------
 
 class TestFmtRemaining:
     def test_zero(self):
-        assert calendar._fmt_remaining(0) == "-00:00"
+        assert calendar._format_remaining(0) == "-00:00"
 
     def test_minutes_only(self):
-        assert calendar._fmt_remaining(30 * 60) == "-00:30"
+        assert calendar._format_remaining(30 * 60) == "-00:30"
 
     def test_hours_and_minutes(self):
-        assert calendar._fmt_remaining(2 * 3600 + 15 * 60) == "-02:15"
+        assert calendar._format_remaining(2 * 3600 + 15 * 60) == "-02:15"
 
     def test_large_hours(self):
-        assert calendar._fmt_remaining(25 * 3600) == "-25:00"
+        assert calendar._format_remaining(25 * 3600) == "-25:00"
 
     def test_seconds_are_truncated(self):
-        assert calendar._fmt_remaining(3661) == "-01:01"
+        assert calendar._format_remaining(3661) == "-01:01"
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +558,7 @@ class TestTickMarks:
 
         renderer.draw_time_axis(window_start, window_end)
 
-        baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
+        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
         tick_bottom = baseline_y + calendar._TICK_MARK_HEIGHT_PX
 
         # 2h window at quarter-aligned start → marks at 0:00, 0:15, ..., 1:45 = 8 marks
@@ -575,7 +575,7 @@ class TestTickMarks:
 
         renderer.draw_time_axis(window_start, window_end)
 
-        baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
+        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
         tick_bottom = baseline_y + 4
 
         tick_lines = [c for c in gfx.line_calls if c[1] == baseline_y and c[3] == tick_bottom]

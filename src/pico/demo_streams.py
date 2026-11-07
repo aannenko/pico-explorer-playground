@@ -5,13 +5,13 @@ from scheduling.event import Event
 from scheduling.stream import Stream
 from services.time_service import TimeService
 
-_WEATHER_NAMES = ("sun", "rain", "snow", "fog")
+_WEATHER_LABELS = ("sun", "rain", "snow", "fog")
 _WEATHER_DURATIONS = (15 * 60, 30 * 60, 60 * 60, 120 * 60, 150 * 60)
 _WEATHER_GAP_PCT = 20
 
 
 def _random_event_loop(
-    names: tuple,
+    labels: tuple,
     durations: tuple,
     gap_pct: int,
     start_timestamp: int,
@@ -19,7 +19,7 @@ def _random_event_loop(
     color_index: int,
     window_past_sec: int,
 ):  # Iterator[Event]
-    """Yield random events from ``names`` and ``durations`` forever, with occasional gaps."""
+    """Yield random events from ``labels`` and ``durations`` forever, with occasional gaps."""
     cursor = start_timestamp
 
     while True:
@@ -33,9 +33,9 @@ def _random_event_loop(
             cursor += dur
             continue
 
-        name = random.choice(names)
+        label = random.choice(labels)
         real_dur = time_service.real_duration_sec(cursor, dur)
-        yield Event(name, cursor, dur, real_dur, color_index=color_index)
+        yield Event(label, cursor, dur, real_dur, color_index=color_index)
         cursor += dur
 
 
@@ -47,7 +47,7 @@ def build_demo_streams(
 
     iterators = [
         _random_event_loop(
-            names=_WEATHER_NAMES,
+            labels=_WEATHER_LABELS,
             durations=_WEATHER_DURATIONS,
             gap_pct=_WEATHER_GAP_PCT,
             start_timestamp=start,
@@ -56,7 +56,7 @@ def build_demo_streams(
             window_past_sec=window_past_sec,
         ),
         _random_event_loop(
-            names=("code", "review", "deploy", "test", "debug"),
+            labels=("code", "review", "deploy", "test", "debug"),
             durations=(15 * 60, 30 * 60, 45 * 60, 60 * 60),
             gap_pct=15,
             start_timestamp=start,
@@ -65,7 +65,7 @@ def build_demo_streams(
             window_past_sec=window_past_sec,
         ),
         _random_event_loop(
-            names=("call", "standup", "retro", "chat"),
+            labels=("call", "standup", "retro", "chat"),
             durations=(15 * 60, 30 * 60, 60 * 60),
             gap_pct=40,
             start_timestamp=start,
@@ -74,7 +74,7 @@ def build_demo_streams(
             window_past_sec=window_past_sec,
         ),
         _random_event_loop(
-            names=("run", "walk", "gym", "yoga", "rest"),
+            labels=("run", "walk", "gym", "yoga", "rest"),
             durations=(20 * 60, 30 * 60, 45 * 60, 60 * 60, 90 * 60),
             gap_pct=25,
             start_timestamp=start,

@@ -70,9 +70,9 @@ class EventWindow:
         sf = self._status_fn
         return sf() if sf is not None else None
 
-    def replace(self, event_iter) -> None:  # event_iter: Iterator[Event]
+    def replace(self, events_iter) -> None:  # events_iter: Iterator[Event]
         """Restart from a fresh event iterator."""
-        self._events = event_iter
+        self._events = events_iter
         self._buffer = []
         self._next = None
         self._exhausted = False

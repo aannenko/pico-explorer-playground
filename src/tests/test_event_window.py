@@ -5,9 +5,9 @@ from scheduling.event_window import EventWindow, build_event_windows
 from scheduling.stream import ERROR, FRESH, STALE, Stream
 
 
-def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> Event:
+def _make_event(label: str, start: int, duration: int, color_index: int = 0) -> Event:
     return Event(
-        name=name,
+        label=label,
         start_timestamp=start,
         wall_clock_duration_sec=duration,
         color_index=color_index,
@@ -15,12 +15,12 @@ def _make_event(name: str, start: int, duration: int, color_index: int = 0) -> E
 
 
 def _make_events(*specs):
-    """Return a list of events from (name, start, duration[, color_index]) tuples."""
+    """Return a list of events from (label, start, duration[, color_index]) tuples."""
     return [_make_event(*spec) for spec in specs]
 
 
 def _iter_events(*specs):
-    """Return an iterator over events from (name, start, duration[, color_index]) tuples."""
+    """Return an iterator over events from (label, start, duration[, color_index]) tuples."""
     return iter(_make_events(*specs))
 
 
@@ -50,7 +50,7 @@ class TestGetVisible:
 
         visible = ew.get_visible(250, 550)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["A", "B", "C"]
 
     def test_excludes_events_fully_before_window(self):
@@ -63,7 +63,7 @@ class TestGetVisible:
 
         visible = ew.get_visible(300, 500)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["C"]
 
     def test_includes_event_that_started_before_and_spans_into_window(self):
@@ -75,7 +75,7 @@ class TestGetVisible:
         visible = ew.get_visible(200, 400)
 
         assert len(visible) == 1
-        assert visible[0][0].name == "A"
+        assert visible[0][0].label == "A"
 
     def test_prunes_on_successive_calls(self):
         events = _iter_events(
@@ -89,7 +89,7 @@ class TestGetVisible:
         assert len(ew._buffer) == 3
 
         visible = ew.get_visible(200, 400)
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["C"]
 
     def test_empty_iterator_returns_empty(self):
@@ -144,7 +144,7 @@ class TestGetVisible:
 
         visible = ew.get_visible(later, later + 7200)
 
-        assert [event.name for event, _ in visible] == ["current"]
+        assert [event.label for event, _ in visible] == ["current"]
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ class TestColorResolution:
         ew.get_visible(0, 300)
         visible = ew.get_visible(100, 300)  # prune A away
 
-        pens = [(e.name, pen) for e, pen in visible]
+        pens = [(e.label, pen) for e, pen in visible]
         assert pens == [("B", 10), ("C", 10)]
 
 
@@ -247,7 +247,7 @@ class TestBoundaryConditions:
 
         visible = ew.get_visible(100, 300)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["B"]
 
     def test_event_starting_exactly_at_window_end_is_excluded(self):
@@ -260,7 +260,7 @@ class TestBoundaryConditions:
         # Window [0, 100) — B starts at 100, should not appear
         visible = ew.get_visible(0, 100)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["A"]
 
     def test_zero_duration_event(self):
@@ -274,7 +274,7 @@ class TestBoundaryConditions:
 
         # Zero-duration event A ends at 100, overlaps [50, 300) only if end > start
         # start + duration = 100 > 50, so A is included
-        assert any(e.name == "A" for e, _ in visible)
+        assert any(e.label == "A" for e, _ in visible)
 
     def test_single_long_event_spanning_entire_window(self):
         events = _iter_events(("A", 0, 10000),)
@@ -283,7 +283,7 @@ class TestBoundaryConditions:
         visible = ew.get_visible(1000, 2000)
 
         assert len(visible) == 1
-        assert visible[0][0].name == "A"
+        assert visible[0][0].label == "A"
 
     def test_event_after_gap_beyond_window_is_excluded(self):
         events = _iter_events(
@@ -325,7 +325,7 @@ class TestReplace:
         assert ew._exhausted is False  # reset by replace, before any fill
 
         visible = ew.get_visible(200, 400)
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["B"]
 
     def test_replace_discards_stale_buffered_events(self):
@@ -334,12 +334,12 @@ class TestReplace:
             palette=[1],
         )
         ew.get_visible(0, 300)
-        assert [e.name for e, _ in ew._buffer] == ["A", "B", "C"]
+        assert [e.label for e, _ in ew._buffer] == ["A", "B", "C"]
 
         ew.replace(_iter_events(("X", 0, 100), ("Y", 100, 100)))
         visible = ew.get_visible(0, 300)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["X", "Y"]
 
     def test_replace_with_empty_iter_yields_empty(self):
@@ -360,7 +360,7 @@ class TestReplace:
         ew.replace(_iter_events(("C", 0, 100)))
         visible = ew.get_visible(0, 200)
 
-        names = [e.name for e, _ in visible]
+        names = [e.label for e, _ in visible]
         assert names == ["C"]  # the stale peeked B does not resurface
 
 
@@ -422,8 +422,8 @@ class TestBuildEventWindows:
 
         windows = build_event_windows(self._PALETTE, streams)
 
-        assert windows[0].get_visible(0, 200)[0][0].name == "first"
-        assert windows[1].get_visible(0, 200)[0][0].name == "second"
+        assert windows[0].get_visible(0, 200)[0][0].label == "first"
+        assert windows[1].get_visible(0, 200)[0][0].label == "second"
 
     def test_color_index_indexes_the_shared_palette(self):
         # An event's color_index selects globally into the shared palette.
@@ -451,7 +451,7 @@ class TestOverlapFill:
 
         visible = ew.get_visible(0, 500)
 
-        assert [e.name for e, _ in visible] == ["A", "B"]
+        assert [e.label for e, _ in visible] == ["A", "B"]
 
     def test_multiple_events_overlapping_one_long_event(self):
         ew = EventWindow(
@@ -461,17 +461,17 @@ class TestOverlapFill:
 
         visible = ew.get_visible(0, 500)
 
-        assert [e.name for e, _ in visible] == ["A", "B", "C"]
+        assert [e.label for e, _ in visible] == ["A", "B", "C"]
 
     def test_long_event_then_exhausts_finite_iterator(self):
         ew = EventWindow(_iter_events(("A", 0, 10000)), palette=[1])
 
         visible = ew.get_visible(1000, 2000)
 
-        assert [e.name for e, _ in visible] == ["A"]
+        assert [e.label for e, _ in visible] == ["A"]
         assert ew._exhausted is True  # pulled A, then hit StopIteration
         # A stays visible on a repeat call without raising.
-        assert [e.name for e, _ in ew.get_visible(1000, 2000)] == ["A"]
+        assert [e.label for e, _ in ew.get_visible(1000, 2000)] == ["A"]
 
 
 # ---------------------------------------------------------------------------
@@ -528,12 +528,12 @@ class TestGenerationRefresh:
         src = _FakeSource([("A", 0, 100)], generation=0)
         ew = src._window()
 
-        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
+        assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
 
         src.specs = [("B", 0, 100)]
         src.generation = 1
 
-        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["B"]
+        assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["B"]
 
     def test_no_refresh_when_generation_unchanged(self):
         src = _FakeSource([("A", 0, 100)], generation=5)
@@ -551,8 +551,8 @@ class TestGenerationRefresh:
         # No generation_fn → the initial iterator is used forever.
         ew = EventWindow(_iter_events(("A", 0, 100)), palette=[1])
 
-        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
-        assert [e.name for e, _ in ew.get_visible(0, 1000)] == ["A"]
+        assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
+        assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
 
 
 class TestBuildEventWindowsThreading:
@@ -568,8 +568,8 @@ class TestBuildEventWindowsThreading:
         window = build_event_windows([1], [stream])[0]
 
         assert window.status() == STALE
-        assert [e.name for e, _ in window.get_visible(0, 1000)] == ["A"]
+        assert [e.label for e, _ in window.get_visible(0, 1000)] == ["A"]
 
         src.specs = [("B", 0, 100)]
         src.generation = 1
-        assert [e.name for e, _ in window.get_visible(0, 1000)] == ["B"]
+        assert [e.label for e, _ in window.get_visible(0, 1000)] == ["B"]

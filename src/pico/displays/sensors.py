@@ -30,7 +30,7 @@ _ICON_INK_LIFT_PX = const(2)
 # Its width is the budget every value string must fit: 63 px at bitmap8 scale 3.
 # "-99.9", the widest _format_value emits, also measures 63; its integer limits "9999"
 # and "-999" measure 57 and 54.
-_WIDEST_GRAPH_VALUE = "-88.8"
+_WIDEST_VALUE_TEXT = "-88.8"
 
 
 def _largest_divisor_of(n: int, max_val: int) -> int:
@@ -78,7 +78,7 @@ class Geometry:
         text_scale: int,
         tick_period_ms: int,
     ) -> None:
-        self.graphics = pico_graphics
+        self.pico_graphics = pico_graphics
 
         self.width, self.height = pico_graphics.get_bounds()
 
@@ -92,7 +92,7 @@ class Geometry:
 
         self.values_top_y = self.text_height + self.line_spacing
 
-        self.line_y = (
+        self.row_y = (
             self.values_top_y,
             self.values_top_y * 2,
             self.values_top_y * 3,
@@ -125,7 +125,7 @@ class Geometry:
         self.value_x = self.unit_x + self.unit_size_px + 6
 
         value_max_text_width = pico_graphics.measure_text(
-            _WIDEST_GRAPH_VALUE, scale=text_scale
+            _WIDEST_VALUE_TEXT, scale=text_scale
         )
         self.graph_x = self.value_x + value_max_text_width + _VALUE_GRAPH_GAP_PX
         available = self.width - self.graph_x - _GRAPH_RIGHT_MARGIN_PX
@@ -144,22 +144,22 @@ class Geometry:
 
 
 class Renderer:
-    """Line-based drawing: each line holds an icon, a unit, a value and a history graph."""
+    """Row-based drawing: each row holds an icon, a unit, a value and a history graph."""
 
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
-        self._gfx = geometry.graphics
+        self._gfx = geometry.pico_graphics
         self._colors = colors
 
         self._last_header = ""
-        self._last_lines = ["", "", "", "", "", ""]
+        self._last_row_texts = ["", "", "", "", "", ""]
         self._update_needed = False
 
     def reset(self) -> None:
-        """Clear the screen and forget the drawn header and lines."""
+        """Clear the screen and forget the drawn header and rows."""
         self._last_header = ""
-        for i in range(len(self._last_lines)):
-            self._last_lines[i] = ""
+        for i in range(len(self._last_row_texts)):
+            self._last_row_texts[i] = ""
         self._gfx.set_font(self._geom.font)
         self._gfx.set_pen(self._colors.background)
         self._gfx.clear()
@@ -167,20 +167,20 @@ class Renderer:
 
     def draw_left_column(
         self,
-        line_idx: int,
+        row_index: int,
         icon: tuple,
         unit: tuple,
     ) -> None:
-        """Draw a line's ``icon`` and ``unit``; their area must already be clear."""
-        if line_idx < 0 or line_idx >= len(self._last_lines):
+        """Draw a row's ``icon`` and ``unit``; their area must already be clear."""
+        if row_index < 0 or row_index >= len(self._last_row_texts):
             return
         self._update_needed = True
-        g = self._geom
-        y = g.line_y[line_idx]
-        icons_p4.draw_icon(self._gfx, icon, g.icon_x, y - g.icon_y_offset, g.icon_scale)
-        icons_p4.draw_icon(self._gfx, unit, g.unit_x, y, g.unit_scale)
+        geom = self._geom
+        y = geom.row_y[row_index]
+        icons_p4.draw_icon(self._gfx, icon, geom.icon_x, y - geom.icon_y_offset, geom.icon_scale)
+        icons_p4.draw_icon(self._gfx, unit, geom.unit_x, y, geom.unit_scale)
 
-    def header_write(self, text: str) -> None:
+    def write_header(self, text: str) -> None:
         """Draw ``text`` in the header strip unless it is already shown."""
         if text == self._last_header:
             return
@@ -197,75 +197,75 @@ class Renderer:
         self._gfx.set_pen(self._colors.header_text)
         self._gfx.text(text, 0, self._geom.header_y, scale=self._geom.text_scale)
 
-    def line_write(self, line_idx: int, text: str, *, pen: int) -> None:
-        """Draw ``text`` in a line's value cell unless it is already shown."""
-        if line_idx < 0 or line_idx >= len(self._last_lines):
+    def write_cell(self, row_index: int, text: str, *, pen: int) -> None:
+        """Draw ``text`` in a row's value cell unless it is already shown."""
+        if row_index < 0 or row_index >= len(self._last_row_texts):
             return
-        if text == self._last_lines[line_idx]:
+        if text == self._last_row_texts[row_index]:
             return
 
         self._update_needed = True
-        g = self._geom
+        geom = self._geom
         self._gfx.set_pen(self._colors.background)
-        self._gfx.rectangle(g.value_x, g.line_y[line_idx], g.value_clear_width, g.value_rect_height)
+        self._gfx.rectangle(geom.value_x, geom.row_y[row_index], geom.value_clear_width, geom.value_rect_height)
 
         if text:
             self._gfx.set_pen(pen)
-            self._gfx.text(text, g.value_x, g.line_y[line_idx], scale=g.text_scale)
+            self._gfx.text(text, geom.value_x, geom.row_y[row_index], scale=geom.text_scale)
 
-        self._last_lines[line_idx] = text
+        self._last_row_texts[row_index] = text
 
-    def redraw_row_icon(self, line_idx: int, icon: tuple) -> None:
-        """Replace a line's icon, erasing the old one."""
-        if line_idx < 0 or line_idx >= len(self._last_lines):
+    def replace_row_icon(self, row_index: int, icon: tuple) -> None:
+        """Replace a row's icon, erasing the old one."""
+        if row_index < 0 or row_index >= len(self._last_row_texts):
             return
         self._update_needed = True
-        g = self._geom
-        icon_y = g.line_y[line_idx] - g.icon_y_offset
+        geom = self._geom
+        icon_y = geom.row_y[row_index] - geom.icon_y_offset
         self._gfx.set_pen(self._colors.background)
-        self._gfx.rectangle(g.icon_x, icon_y, g.icon_size_px, g.icon_size_px)
-        icons_p4.draw_icon(self._gfx, icon, g.icon_x, icon_y, g.icon_scale)
+        self._gfx.rectangle(geom.icon_x, icon_y, geom.icon_size_px, geom.icon_size_px)
+        icons_p4.draw_icon(self._gfx, icon, geom.icon_x, icon_y, geom.icon_scale)
 
-    def value_write(self, line_idx: int, text: str) -> None:
-        self.line_write(line_idx, text, pen=self._colors.value_text)
+    def write_value(self, row_index: int, text: str) -> None:
+        self.write_cell(row_index, text, pen=self._colors.value_text)
 
-    def secondary_write(self, line_idx: int, text: str) -> None:
-        """Draw ``text`` in a line's value cell as secondary text."""
-        self.line_write(line_idx, text, pen=self._colors.secondary_text)
+    def write_secondary(self, row_index: int, text: str) -> None:
+        """Draw ``text`` in a row's value cell as secondary text."""
+        self.write_cell(row_index, text, pen=self._colors.secondary_text)
 
-    def draw_graph_clear(self, line_idx: int) -> None:
-        if line_idx < 0 or line_idx >= len(self._last_lines):
+    def clear_graph(self, row_index: int) -> None:
+        if row_index < 0 or row_index >= len(self._last_row_texts):
             return
         self._update_needed = True
-        g = self._geom
+        geom = self._geom
         self._gfx.set_pen(self._colors.background)
-        self._gfx.rectangle(g.graph_x, g.line_y[line_idx], g.graph_width, g.graph_height)
+        self._gfx.rectangle(geom.graph_x, geom.row_y[row_index], geom.graph_width, geom.graph_height)
 
     @micropython.native
     def draw_graph_column(
         self,
-        line_idx: int,
+        row_index: int,
         col: int,
         fill_pen: int,
         marker_pen: int | None,
-        value_y: int | None,
+        marker_y: int | None,
     ) -> None:
         """Draw one full-height graph column, optionally with a marker pixel.
 
-        ``col`` is graph-local (0..graph_width-1) and ``value_y`` row-local (0 is top);
-        the marker is drawn only when ``marker_pen`` and ``value_y`` are both set.
+        ``col`` is graph-local (0..graph_width-1) and ``marker_y`` row-local (0 is top);
+        the marker is drawn only when ``marker_pen`` and ``marker_y`` are both set.
         """
-        if line_idx < 0 or line_idx >= len(self._last_lines):
+        if row_index < 0 or row_index >= len(self._last_row_texts):
             return
         self._update_needed = True
-        g = self._geom
-        x = g.graph_x + col
-        y = g.line_y[line_idx]
+        geom = self._geom
+        x = geom.graph_x + col
+        y = geom.row_y[row_index]
         self._gfx.set_pen(fill_pen)
-        self._gfx.rectangle(x, y, 1, g.graph_height)
-        if marker_pen is not None and value_y is not None:
+        self._gfx.rectangle(x, y, 1, geom.graph_height)
+        if marker_pen is not None and marker_y is not None:
             self._gfx.set_pen(marker_pen)
-            self._gfx.pixel(x, y + value_y)
+            self._gfx.pixel(x, y + marker_y)
 
     def update(self) -> None:
         """Push the framebuffer to the panel if drawn to since the last push."""
@@ -410,7 +410,7 @@ class Display(_Display):
         the nearest integer, clamped to -999..9999.
 
         ``decimals`` must be at most 1, or an in-range value can exceed the
-        ``_WIDEST_GRAPH_VALUE`` budget: ``PicoGraphics.text()`` doesn't clip
+        ``_WIDEST_VALUE_TEXT`` budget: ``PicoGraphics.text()`` doesn't clip
         to the value cell, so an overflow would overdraw the history graph.
         """
         # Range-check the rounded value: -99.99 formats as "-100.0", which overdraws.
@@ -423,10 +423,10 @@ class Display(_Display):
             return "-999"
         return str(i)
 
-    def _maybe_swap_icon(self, line_idx: int, new_icon: tuple) -> None:
-        if new_icon != self._row_icons[line_idx]:
-            self._renderer.redraw_row_icon(line_idx, new_icon)
-            self._row_icons[line_idx] = new_icon
+    def _maybe_swap_icon(self, row_index: int, new_icon: tuple) -> None:
+        if new_icon != self._row_icons[row_index]:
+            self._renderer.replace_row_icon(row_index, new_icon)
+            self._row_icons[row_index] = new_icon
 
     @micropython.native
     def _redraw_graphs(self, gas_stable_now: bool) -> None:
@@ -445,10 +445,10 @@ class Display(_Display):
             if metric_idx == gas_row:
                 if not gas_stable_now:
                     if self._gas_was_stable is True:
-                        renderer.draw_graph_clear(gas_row)
+                        renderer.clear_graph(gas_row)
                     continue
 
-            renderer.draw_graph_clear(metric_idx)
+            renderer.clear_graph(metric_idx)
             graph_height = self._graph_height
             pens_row = band_pens[metric_idx]
             for i in range(history.filled(metric_idx)):
@@ -457,14 +457,14 @@ class Display(_Display):
                     continue
                 band = self._band_index(value, edges)
                 fill_pen, marker_pen = pens_row[band]
-                y = self._marker_y(value, edges, graph_height)
+                marker_y = self._marker_y(value, edges, graph_height)
                 col = capacity - 1 - i
                 renderer.draw_graph_column(
                     metric_idx,
                     col,
                     fill_pen,
-                    marker_pen if y is not None else None,
-                    y,
+                    marker_pen if marker_y is not None else None,
+                    marker_y,
                 )
 
     def _update_display(self) -> None:
@@ -475,7 +475,7 @@ class Display(_Display):
             minute = now // 60
             if minute != self._last_header_minute:
                 self._last_header_minute = minute
-                self._renderer.header_write(format_header_time(now))
+                self._renderer.write_header(format_header_time(now))
             # No slack: an early read just recomputes a ~1 s deadline, while slack
             # can delay catching the minute rollover by a render.
             self._next_header_check_ms = time.ticks_add(now_ms, (60 - now % 60) * 1000)
@@ -489,13 +489,13 @@ class Display(_Display):
         # must precede the redraw block, which updates _gas_was_stable.
         if gas_stable_now and self._gas_was_stable is not True:
             self._history.update_latest(self._GAS_ROW, reading[3])
-        commit_now = self._history.commit_count
+        commit_count = self._history.commit_count
         if (
-            commit_now != self._last_commit
+            commit_count != self._last_commit
             or gas_stable_now != self._gas_was_stable
         ):
             self._redraw_graphs(gas_stable_now)
-            self._last_commit = commit_now
+            self._last_commit = commit_count
             self._gas_was_stable = gas_stable_now
 
         if reading is not self._last_rendered_reading:
@@ -509,13 +509,13 @@ class Display(_Display):
                 _unit, edges, cells = self._rows[i]
                 self._maybe_swap_icon(i, cells[self._band_index(reading[i], edges)][0])
 
-            self._renderer.value_write(0, self._format_value(temp, 1))  # "22.4", "-99.9", "100"
-            self._renderer.value_write(1, self._format_value(press, 0))  # "1013"
-            self._renderer.value_write(2, self._format_value(hum, 1))  # "50.5", "100"
+            self._renderer.write_value(0, self._format_value(temp, 1))  # "22.4", "-99.9", "100"
+            self._renderer.write_value(1, self._format_value(press, 0))  # "1013"
+            self._renderer.write_value(2, self._format_value(hum, 1))  # "50.5", "100"
             if status == "Stable":
-                self._renderer.value_write(3, self._format_value(gas_r, 1))  # "75.3", "251", "1000"
+                self._renderer.write_value(3, self._format_value(gas_r, 1))  # "75.3", "251", "1000"
             else:
-                self._renderer.value_write(3, "warming...")
+                self._renderer.write_value(3, "warming...")
 
         self._renderer.update()
 

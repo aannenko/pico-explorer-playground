@@ -67,7 +67,7 @@ def test_merge_runs_single_hour():
 
     assert len(events) == 1
     ev = events[0]
-    assert ev.name == "RAIN"
+    assert ev.label == "RAIN"
     assert ev.start_timestamp == _E0
     assert ev.wall_clock_duration_sec == _HOUR
     assert ev.color_index == 7
@@ -88,7 +88,7 @@ def test_merge_runs_contiguous_equal_merge():
 def test_merge_runs_label_change_splits():
     events = merge_runs([(_E0, "RAIN", 7), (_E0 + _HOUR, "SNOW", 7)])
 
-    assert [e.name for e in events] == ["RAIN", "SNOW"]
+    assert [e.label for e in events] == ["RAIN", "SNOW"]
     assert all(e.wall_clock_duration_sec == _HOUR for e in events)
 
 

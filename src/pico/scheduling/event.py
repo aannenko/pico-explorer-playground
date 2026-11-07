@@ -1,20 +1,20 @@
 class Event:
     """Scheduled event with both wall-clock and DST-corrected real durations.
 
-    ``name`` must be non-empty.  ``real_duration_sec`` defaults to
+    ``label`` must be non-empty.  ``real_duration_sec`` defaults to
     ``wall_clock_duration_sec``.
     """
 
     def __init__(
         self,
-        name: str,
+        label: str,
         start_timestamp: int,
         wall_clock_duration_sec: int,
         real_duration_sec: int = -1,
         color_index: int = 0,  # index into displays.palette.STREAM_COLORS
     ) -> None:
-        if not name:
-            raise ValueError("Event name cannot be empty")
+        if not label:
+            raise ValueError("Event label cannot be empty")
 
         if start_timestamp < 0:
             raise ValueError("Event start timestamp cannot be negative")
@@ -25,7 +25,7 @@ class Event:
         if color_index < 0:
             raise ValueError("Event color_index cannot be negative")
 
-        self.name = name
+        self.label = label
         self.start_timestamp = start_timestamp
         self.wall_clock_duration_sec = wall_clock_duration_sec
         self.real_duration_sec = real_duration_sec if real_duration_sec >= 0 else wall_clock_duration_sec
@@ -33,7 +33,7 @@ class Event:
 
     def __repr__(self) -> str:
         return (
-            f"Event(name={self.name}, "
+            f"Event(label={self.label}, "
             f"start_timestamp={self.start_timestamp}, "
             f"wall_clock_duration_sec={self.wall_clock_duration_sec}, "
             f"real_duration_sec={self.real_duration_sec}, "

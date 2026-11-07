@@ -9,7 +9,7 @@ from _fakes import FakePicoGraphics
 
 @dataclass
 class FakeGeometry:
-    graphics: FakePicoGraphics
+    pico_graphics: FakePicoGraphics
     font: str = "bitmap8"
     text_scale: int = 3
     width: int = 240
@@ -18,7 +18,7 @@ class FakeGeometry:
     header_rect: tuple[int, int, int, int] = (0, 0, 240, 24)
     text_height: int = 24
     value_rect_height: int = 24
-    line_y: tuple[int, ...] = (32, 64, 96, 128, 160, 192)
+    row_y: tuple[int, ...] = (32, 64, 96, 128, 160, 192)
     icon_x: int = 0
     icon_scale: int = 2
     icon_size_px: int = 32
@@ -29,7 +29,7 @@ class FakeGeometry:
     value_x: int = 66
     # New layout fields (R2.6 / R2.7).  Defaults mirror the real Geometry
     # against the device-observed bitmap8/scale=3 measurements: with
-    # ``_WIDEST_GRAPH_VALUE = "-88.8"`` measuring 63 px, _VALUE_GRAPH_GAP_PX=3 and
+    # ``_WIDEST_VALUE_TEXT = "-88.8"`` measuring 63 px, _VALUE_GRAPH_GAP_PX=3 and
     # _GRAPH_RIGHT_MARGIN_PX=0 → graph_x=132, available=108, graph_width=108,
     # value_clear_width=66, ticks_per_commit=1600.
     value_clear_width: int = 66
@@ -41,7 +41,7 @@ class FakeGeometry:
 
 def _mk() -> tuple[Renderer, FakePicoGraphics, FakeGeometry]:
     gfx = FakePicoGraphics()
-    geom = FakeGeometry(graphics=gfx)
+    geom = FakeGeometry(pico_graphics=gfx)
     colors = Colors(
         background=1,
         header_text=2,
@@ -67,64 +67,64 @@ def test_reset_clears_dirty_tracking_so_next_writes_are_drawn() -> None:
     r, gfx, _ = _mk()
 
     # Prime the dirty-state cache, then reset, then redraw the same content.
-    r.header_write("hello")
-    r.value_write(0, "v")
+    r.write_header("hello")
+    r.write_value(0, "v")
     r.reset()
     gfx.calls.clear()
 
-    r.header_write("hello")
-    r.value_write(0, "v")
+    r.write_header("hello")
+    r.write_value(0, "v")
 
     # Both writes should hit the GFX again (cache was cleared by reset).
     assert any(c[0] == "text" and c[1][0] == "hello" for c in gfx.calls)
     assert any(c[0] == "text" and c[1][0] == "v" for c in gfx.calls)
 
 
-def test_header_write_skips_when_unchanged() -> None:
+def test_write_header_skips_when_unchanged() -> None:
     r, gfx, _ = _mk()
 
-    r.header_write("same")
+    r.write_header("same")
     gfx.calls.clear()
 
-    r.header_write("same")
+    r.write_header("same")
 
     assert gfx.calls == []
 
 
-def test_value_write_uses_value_text_pen_and_renders_in_value_column() -> None:
+def test_write_value_uses_value_text_pen_and_renders_in_value_column() -> None:
     r, gfx, geom = _mk()
 
-    r.value_write(0, "23.4")
+    r.write_value(0, "23.4")
 
     assert ("set_pen", (3,), {}) in gfx.calls  # value_text
-    assert ("text", ("23.4", geom.value_x, geom.line_y[0]), {"scale": geom.text_scale}) in gfx.calls
+    assert ("text", ("23.4", geom.value_x, geom.row_y[0]), {"scale": geom.text_scale}) in gfx.calls
 
 
-def test_secondary_write_uses_secondary_pen() -> None:
+def test_write_secondary_uses_secondary_pen() -> None:
     r, gfx, _ = _mk()
 
-    r.secondary_write(1, "42")
+    r.write_secondary(1, "42")
 
     assert ("set_pen", (4,), {}) in gfx.calls  # secondary_text
 
 
-def test_line_write_out_of_range_is_noop() -> None:
+def test_write_cell_out_of_range_is_noop() -> None:
     r, gfx, _ = _mk()
 
-    r.line_write(99, "ignored", pen=3)
-    r.line_write(-1, "ignored", pen=3)
+    r.write_cell(99, "ignored", pen=3)
+    r.write_cell(-1, "ignored", pen=3)
 
     assert gfx.calls == []
 
 
-def test_line_write_clears_only_value_column_not_icons() -> None:
+def test_write_cell_clears_only_value_column_not_icons() -> None:
     r, gfx, geom = _mk()
 
-    r.line_write(2, "99", pen=3)
+    r.write_cell(2, "99", pen=3)
 
     # Clearing rect should be confined to the value column — icons stay,
     # and the graph region (x >= graph_x) is never touched.
-    assert ("rectangle", (geom.value_x, geom.line_y[2], geom.value_clear_width, geom.value_rect_height), {}) in gfx.calls
+    assert ("rectangle", (geom.value_x, geom.row_y[2], geom.value_clear_width, geom.value_rect_height), {}) in gfx.calls
     # No full-width clear of the left column.
     for name, args, _kw in gfx.calls:
         if name == "rectangle":
@@ -132,7 +132,7 @@ def test_line_write_clears_only_value_column_not_icons() -> None:
             assert (x, w) != (0, geom.width)
             # Regression for R2.1/R2.6: clear must not extend into the graph rect.
             assert x + w <= geom.graph_x, (
-                "line_write rectangle (x={}, w={}) extended past graph_x={}".format(
+                "write_cell rectangle (x={}, w={}) extended past graph_x={}".format(
                     x, w, geom.graph_x
                 )
             )
@@ -146,12 +146,12 @@ def test_draw_left_column_blits_icon_then_unit() -> None:
     unit = (1, 1, bytes([0x20]))  # one pixel, slot 2
     r.draw_left_column(1, icon, unit)
 
-    icon_y = geom.line_y[1] - geom.icon_y_offset
+    icon_y = geom.row_y[1] - geom.icon_y_offset
     assert gfx.calls == [
         ("set_pen", (4,), {}),
         ("rectangle", (geom.icon_x, icon_y, geom.icon_scale, geom.icon_scale), {}),
         ("set_pen", (2,), {}),
-        ("rectangle", (geom.unit_x, geom.line_y[1], geom.unit_scale, geom.unit_scale), {}),
+        ("rectangle", (geom.unit_x, geom.row_y[1], geom.unit_scale, geom.unit_scale), {}),
     ]
 
 
@@ -163,7 +163,7 @@ def test_draw_left_column_skips_transparent_pixels() -> None:
     unit = (1, 1, bytes([0x00]))  # fully transparent unit → nothing drawn
     r.draw_left_column(0, icon, unit)
 
-    icon_y = geom.line_y[0] - geom.icon_y_offset
+    icon_y = geom.row_y[0] - geom.icon_y_offset
     s = geom.icon_scale
     assert gfx.calls == [
         ("set_pen", (4,), {}),
@@ -183,13 +183,13 @@ def test_draw_left_column_out_of_range_is_noop() -> None:
     assert gfx.calls == []
 
 
-def test_redraw_row_icon_clears_icon_rect_then_blits_new_icon() -> None:
+def test_replace_row_icon_clears_icon_rect_then_blits_new_icon() -> None:
     r, gfx, geom = _mk()
 
     icon = (1, 1, bytes([0x40]))  # one pixel, slot 4
-    r.redraw_row_icon(0, icon)
+    r.replace_row_icon(0, icon)
 
-    icon_y = geom.line_y[0] - geom.icon_y_offset
+    icon_y = geom.row_y[0] - geom.icon_y_offset
     assert gfx.calls == [
         ("set_pen", (1,), {}),  # background pen
         ("rectangle", (geom.icon_x, icon_y, geom.icon_size_px, geom.icon_size_px), {}),
@@ -198,78 +198,78 @@ def test_redraw_row_icon_clears_icon_rect_then_blits_new_icon() -> None:
     ]
     # Value-column rect must NOT be cleared — only the icon footprint.
     assert not any(
-        c[0] == "rectangle" and c[1] == (geom.value_x, geom.line_y[0], geom.value_clear_width, geom.value_rect_height)
+        c[0] == "rectangle" and c[1] == (geom.value_x, geom.row_y[0], geom.value_clear_width, geom.value_rect_height)
         for c in gfx.calls
     )
 
 
-def test_redraw_row_icon_out_of_range_is_noop() -> None:
+def test_replace_row_icon_out_of_range_is_noop() -> None:
     r, gfx, _ = _mk()
 
     icon = (1, 1, bytes([0x40]))
-    r.redraw_row_icon(99, icon)
-    r.redraw_row_icon(-1, icon)
+    r.replace_row_icon(99, icon)
+    r.replace_row_icon(-1, icon)
 
     assert gfx.calls == []
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Graph rendering: draw_graph_clear / draw_graph_column
+# Graph rendering: clear_graph / draw_graph_column
 # ─────────────────────────────────────────────────────────────────────
 
 
-def test_draw_graph_clear_paints_full_graph_rect_with_background_pen() -> None:
+def test_clear_graph_paints_full_graph_rect_with_background_pen() -> None:
     r, gfx, geom = _mk()
-    r.draw_graph_clear(0)
+    r.clear_graph(0)
 
-    # Background pen set, then the row's graph rect cleared (graph_x, line_y,
+    # Background pen set, then the row's graph rect cleared (graph_x, row_y,
     # graph_width, graph_height).
     assert ("set_pen", (1,), {}) in gfx.calls  # background
     assert (
         "rectangle",
-        (geom.graph_x, geom.line_y[0], geom.graph_width, geom.graph_height),
+        (geom.graph_x, geom.row_y[0], geom.graph_width, geom.graph_height),
         {},
     ) in gfx.calls
 
 
-def test_draw_graph_clear_out_of_range_is_noop() -> None:
+def test_clear_graph_out_of_range_is_noop() -> None:
     r, gfx, _ = _mk()
-    r.draw_graph_clear(99)
-    r.draw_graph_clear(-1)
+    r.clear_graph(99)
+    r.clear_graph(-1)
     assert gfx.calls == []
 
 
 def test_draw_graph_column_with_value_draws_fill_rect_and_marker_pixel() -> None:
     r, gfx, geom = _mk()
 
-    r.draw_graph_column(line_idx=1, col=5, fill_pen=10, marker_pen=20, value_y=7)
+    r.draw_graph_column(row_index=1, col=5, fill_pen=10, marker_pen=20, marker_y=7)
 
     x = geom.graph_x + 5
-    y = geom.line_y[1]
+    y = geom.row_y[1]
     assert ("set_pen", (10,), {}) in gfx.calls
     assert ("rectangle", (x, y, 1, geom.graph_height), {}) in gfx.calls
     assert ("set_pen", (20,), {}) in gfx.calls
     assert ("pixel", (x, y + 7), {}) in gfx.calls
 
 
-def test_draw_graph_column_skips_marker_when_value_y_is_none() -> None:
+def test_draw_graph_column_skips_marker_when_marker_y_is_none() -> None:
     """Out-of-cap: fill column only, no pixel call."""
     r, gfx, geom = _mk()
 
-    r.draw_graph_column(line_idx=2, col=0, fill_pen=10, marker_pen=20, value_y=None)
+    r.draw_graph_column(row_index=2, col=0, fill_pen=10, marker_pen=20, marker_y=None)
 
     assert ("set_pen", (10,), {}) in gfx.calls
-    assert ("rectangle", (geom.graph_x + 0, geom.line_y[2], 1, geom.graph_height), {}) in gfx.calls
+    assert ("rectangle", (geom.graph_x + 0, geom.row_y[2], 1, geom.graph_height), {}) in gfx.calls
     # No marker pen set, no pixel.
     assert ("set_pen", (20,), {}) not in gfx.calls
     assert not any(c[0] == "pixel" for c in gfx.calls)
 
 
 def test_draw_graph_column_skips_marker_when_pen_is_none() -> None:
-    """``marker_pen=None`` also suppresses the pixel call (parity with value_y=None)."""
+    """``marker_pen=None`` also suppresses the pixel call (parity with marker_y=None)."""
     r, gfx, _ = _mk()
 
-    r.draw_graph_column(line_idx=0, col=10, fill_pen=5, marker_pen=None, value_y=7)
+    r.draw_graph_column(row_index=0, col=10, fill_pen=5, marker_pen=None, marker_y=7)
     assert not any(c[0] == "pixel" for c in gfx.calls)
 
 
@@ -416,7 +416,7 @@ def test_update_skips_flush_when_nothing_was_drawn() -> None:
 def test_update_flushes_after_a_draw_then_skips_until_next_draw() -> None:
     r, gfx, _ = _mk()
 
-    r.value_write(0, "23.4")
+    r.write_value(0, "23.4")
     gfx.calls.clear()
 
     r.update()
@@ -431,16 +431,16 @@ def test_update_skips_when_all_writes_short_circuit() -> None:
     r, gfx, _ = _mk()
 
     # Prime the per-line/header caches and flush them.
-    r.header_write("2026-06-22 12:00")
-    r.value_write(0, "23.4")
+    r.write_header("2026-06-22 12:00")
+    r.write_value(0, "23.4")
     r.update()
     gfx.calls.clear()
 
-    # Same content → header_write / value_write both short-circuit (no draw),
+    # Same content → write_header / write_value both short-circuit (no draw),
     # so the frame stays clean and update() skips the SPI flush — this is the
     # steady-state no-op tick the optimization targets.
-    r.header_write("2026-06-22 12:00")
-    r.value_write(0, "23.4")
+    r.write_header("2026-06-22 12:00")
+    r.write_value(0, "23.4")
     r.update()
 
     assert gfx.calls == []
@@ -460,8 +460,8 @@ def test_reset_marks_frame_dirty_so_first_update_flushes() -> None:
 def test_out_of_range_writes_do_not_dirty_the_frame() -> None:
     r, gfx, _ = _mk()
 
-    r.value_write(99, "x")
-    r.draw_graph_clear(-1)
+    r.write_value(99, "x")
+    r.clear_graph(-1)
     r.draw_graph_column(99, 0, 1, 2, 3)
     r.update()
 

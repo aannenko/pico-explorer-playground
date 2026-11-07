@@ -45,7 +45,7 @@ class Geometry:
         font_height: int,
         text_scale: int,
     ) -> None:
-        self.graphics = pico_graphics
+        self.pico_graphics = pico_graphics
 
         self.width, self.height = pico_graphics.get_bounds()
         self.x_center = self.width // 2 + self.width % 2
@@ -104,7 +104,7 @@ class Renderer:
 
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
-        self._gfx = geometry.graphics
+        self._gfx = geometry.pico_graphics
         self._colors = colors
 
         self._segments_cleared = 0
@@ -136,7 +136,7 @@ class Renderer:
         """Ring segments cleared since ``reset``, 0..``RING_SEGMENTS``."""
         return self._segments_cleared
 
-    def ring_clear_segments(self, total_count: int) -> None:
+    def clear_ring_segments(self, total_count: int) -> None:
         """Clear segments clockwise from the top until ``total_count`` are cleared."""
         if total_count <= self._segments_cleared:
             return
@@ -152,9 +152,9 @@ class Renderer:
             self._last_text_center = ""
             self._last_text_above_center = ""
             self._last_text_below_center = ""
-            self.text_write(TEXT_CENTER, text_center_backup)
-            self.text_write(TEXT_ABOVE_CENTER, text_above_center_backup)
-            self.text_write(TEXT_BELOW_CENTER, text_below_center_backup)
+            self.write_text(TEXT_CENTER, text_center_backup)
+            self.write_text(TEXT_ABOVE_CENTER, text_above_center_backup)
+            self.write_text(TEXT_BELOW_CENTER, text_below_center_backup)
             return
 
         count = total_count - self._segments_cleared
@@ -185,7 +185,7 @@ class Renderer:
 
         self._segments_cleared += count
 
-    def text_clear(self, position: int) -> None:
+    def clear_text(self, position: int) -> None:
         if position == TEXT_CENTER:
             if not self._last_text_center:
                 return
@@ -213,7 +213,7 @@ class Renderer:
         self._gfx.set_pen(self._colors.background)
         self._gfx.rectangle(text_x, text_y, text_width, self._geom.text_height)
 
-    def text_write(self, position: int, text: str) -> None:
+    def write_text(self, position: int, text: str) -> None:
         """Draw ``text`` at ``position`` unless it is already shown.
 
         ``text`` must fit the position's ``Geometry`` box width.
@@ -230,7 +230,7 @@ class Renderer:
         if text == current_text:
             return
 
-        self.text_clear(position)
+        self.clear_text(position)
 
         if not text:
             return

@@ -61,7 +61,7 @@ def test_event_carries_label_color_index_and_duration():
 
     event = _take(waste.build_stream(_FakeTimeService(now), sched), 1)[0]
 
-    assert event.name == "PLAST"
+    assert event.label == "PLAST"
     assert event.color_index == 2
     assert event.wall_clock_duration_sec == 60 * 60
 
@@ -77,7 +77,7 @@ def test_multiple_entries_yield_in_start_order():
 
     starts = [e.start_timestamp for e in events]
     assert starts == sorted(starts)
-    assert [e.name for e in events] == ["BIO", "PAPER", "BIO", "PAPER"]
+    assert [e.label for e in events] == ["BIO", "PAPER", "BIO", "PAPER"]
 
 
 def test_fast_forwards_past_occurrences():

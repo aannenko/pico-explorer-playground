@@ -44,7 +44,7 @@ class FakePicoGraphics:
 
 @dataclass
 class FakeGeometry:
-    graphics: FakePicoGraphics
+    pico_graphics: FakePicoGraphics
 
     # Ring geometry
     x_center: int = 50
@@ -86,15 +86,15 @@ class FakeGeometry:
 
 def _mk_timergraphics() -> tuple[Renderer, FakePicoGraphics, FakeGeometry]:
     display = FakePicoGraphics()
-    geom = FakeGeometry(graphics=display)
+    geom = FakeGeometry(pico_graphics=display)
     colors = Colors(background=1, ring=2, primary_text=3, secondary_text=4)
     return Renderer(geom, colors), display, geom
 
 def test_reset_draws_ring_and_clears_state() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TEXT_CENTER, "X")
-    tg.ring_clear_segments(2)
+    tg.write_text(TEXT_CENTER, "X")
+    tg.clear_ring_segments(2)
     display.calls.clear()
 
     tg.reset()
@@ -110,21 +110,21 @@ def test_reset_draws_ring_and_clears_state() -> None:
     ]
 
 
-def test_ring_clear_segments_noop_when_not_advancing() -> None:
+def test_clear_ring_segments_noop_when_not_advancing() -> None:
     tg, display, _geom = _mk_timergraphics()
 
-    tg.ring_clear_segments(2)
+    tg.clear_ring_segments(2)
     display.calls.clear()
 
-    tg.ring_clear_segments(2)
+    tg.clear_ring_segments(2)
 
     assert display.calls == []
 
 
-def test_ring_clear_segments_draws_polygon_for_increment() -> None:
+def test_clear_ring_segments_draws_polygon_for_increment() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.ring_clear_segments(2)
+    tg.clear_ring_segments(2)
 
     # First call sets pen to background, then draws a polygon.
     assert display.calls[0] == ("set_pen", (1,), {})
@@ -146,10 +146,10 @@ def test_ring_clear_segments_draws_polygon_for_increment() -> None:
     assert points[5] == (geom.x_inner_vertices[0], geom.y_inner_vertices[0])
 
 
-def test_text_write_centers_and_uses_primary_color_for_center() -> None:
+def test_write_text_centers_and_uses_primary_color_for_center() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TEXT_CENTER, "Hi")
+    tg.write_text(TEXT_CENTER, "Hi")
 
     # measure_text should be called before text placement
     assert ("measure_text", ("Hi",), {"scale": geom.text_scale}) in display.calls
@@ -163,28 +163,28 @@ def test_text_write_centers_and_uses_primary_color_for_center() -> None:
     assert ("text", ("Hi", expected_x, geom.text_center_y), {"scale": geom.text_scale}) in display.calls
 
 
-def test_text_write_noop_if_same_text() -> None:
+def test_write_text_noop_if_same_text() -> None:
     tg, display, _geom = _mk_timergraphics()
 
-    tg.text_write(TEXT_ABOVE_CENTER, "A")
+    tg.write_text(TEXT_ABOVE_CENTER, "A")
     display.calls.clear()
 
-    tg.text_write(TEXT_ABOVE_CENTER, "A")
+    tg.write_text(TEXT_ABOVE_CENTER, "A")
 
     assert display.calls == []
 
 
-def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
+def test_clear_text_draws_background_rectangle_only_when_needed() -> None:
     tg, display, geom = _mk_timergraphics()
 
     # Clearing when empty is a noop.
-    tg.text_clear(TEXT_BELOW_CENTER)
+    tg.clear_text(TEXT_BELOW_CENTER)
     assert display.calls == []
 
-    tg.text_write(TEXT_BELOW_CENTER, "B")
+    tg.write_text(TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
-    tg.text_clear(TEXT_BELOW_CENTER)
+    tg.clear_text(TEXT_BELOW_CENTER)
 
     assert display.calls[0] == ("set_pen", (1,), {})
     assert display.calls[1] == (
@@ -194,15 +194,15 @@ def test_text_clear_draws_background_rectangle_only_when_needed() -> None:
     )
 
 
-def test_ring_clear_segments_full_clear_rewrites_existing_text() -> None:
+def test_clear_ring_segments_full_clear_rewrites_existing_text() -> None:
     tg, display, geom = _mk_timergraphics()
 
-    tg.text_write(TEXT_CENTER, "C")
-    tg.text_write(TEXT_ABOVE_CENTER, "A")
-    tg.text_write(TEXT_BELOW_CENTER, "B")
+    tg.write_text(TEXT_CENTER, "C")
+    tg.write_text(TEXT_ABOVE_CENTER, "A")
+    tg.write_text(TEXT_BELOW_CENTER, "B")
     display.calls.clear()
 
-    tg.ring_clear_segments(RING_SEGMENTS)
+    tg.clear_ring_segments(RING_SEGMENTS)
 
     # Full clear draws outer circle with background.
     assert display.calls[0] == ("set_pen", (1,), {})
@@ -217,7 +217,7 @@ def test_ring_clear_segments_full_clear_rewrites_existing_text() -> None:
 def test_invalid_text_position_is_ignored(position: int) -> None:
     tg, display, _geom = _mk_timergraphics()
 
-    tg.text_write(position, "X")
-    tg.text_clear(position)
+    tg.write_text(position, "X")
+    tg.clear_text(position)
 
     assert display.calls == []

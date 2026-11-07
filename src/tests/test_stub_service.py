@@ -95,7 +95,7 @@ class _Harness:
         self.service.tick()
 
     def visible_names(self) -> list[str]:
-        return [e.name for e, _ in self.window.get_visible(0, 10_000)]
+        return [e.label for e, _ in self.window.get_visible(0, 10_000)]
 
 
 def test_disabled_service_never_fetches_and_reports_disabled():

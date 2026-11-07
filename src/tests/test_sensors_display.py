@@ -104,14 +104,14 @@ def test_update_display_formats_header_and_sensor_lines(monkeypatch) -> None:
 
     d._update_display()
 
-    assert ("header_write", ("2026-01-04 13:05",), {}) in renderer.calls
+    assert ("write_header", ("2026-01-04 13:05",), {}) in renderer.calls
     # Values are bare numbers — unit and label live in the left column sprites.
-    assert ("value_write", (0, "22.4"), {}) in renderer.calls
-    assert ("value_write", (1, "963"), {}) in renderer.calls
-    assert ("value_write", (2, "25.7"), {}) in renderer.calls
-    assert ("value_write", (3, "65.7"), {}) in renderer.calls
+    assert ("write_value", (0, "22.4"), {}) in renderer.calls
+    assert ("write_value", (1, "963"), {}) in renderer.calls
+    assert ("write_value", (2, "25.7"), {}) in renderer.calls
+    assert ("write_value", (3, "65.7"), {}) in renderer.calls
     # No Stat: row — status is fused into the gas row.
-    assert not any(c[0] == "secondary_write" and c[1][0] == 4 for c in renderer.calls)
+    assert not any(c[0] == "write_secondary" and c[1][0] == 4 for c in renderer.calls)
     assert renderer.update_calls == 1
 
 
@@ -126,9 +126,9 @@ def test_gas_value_drops_decimal_at_or_above_100(monkeypatch) -> None:
     d._update_display()
 
     # Temperature / humidity below 100 keep their decimal; gas at 250.7 drops it.
-    assert ("value_write", (0, "22.4"), {}) in renderer.calls
-    assert ("value_write", (2, "25.7"), {}) in renderer.calls
-    assert ("value_write", (3, "251"), {}) in renderer.calls
+    assert ("write_value", (0, "22.4"), {}) in renderer.calls
+    assert ("write_value", (2, "25.7"), {}) in renderer.calls
+    assert ("write_value", (3, "251"), {}) in renderer.calls
 
 
 def test_gas_value_renders_as_integer_at_boundary_99_9(monkeypatch) -> None:
@@ -138,7 +138,7 @@ def test_gas_value_renders_as_integer_at_boundary_99_9(monkeypatch) -> None:
 
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((22.4, 1010.0, 50.0, 999.9, "Stable")))
     d._update_display()
-    assert ("value_write", (3, "1000"), {}) in renderer.calls
+    assert ("write_value", (3, "1000"), {}) in renderer.calls
 
 
 def test_humidity_drops_decimal_at_100(monkeypatch) -> None:
@@ -149,12 +149,12 @@ def test_humidity_drops_decimal_at_100(monkeypatch) -> None:
 
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((22.0, 1010.0, 100.0, 65.0, "Stable")))
     d._update_display()
-    assert ("value_write", (2, "100"), {}) in renderer.calls
+    assert ("write_value", (2, "100"), {}) in renderer.calls
 
     # 99.9 stays inside the window, keeps the decimal.
     d2 = _make_display(renderer=RecordingRenderer(), reader=FakeBME690Reader((22.0, 1010.0, 99.9, 65.0, "Stable")))
     d2._update_display()
-    assert any(c == ("value_write", (2, "99.9"), {}) for c in d2._renderer.calls)
+    assert any(c == ("write_value", (2, "99.9"), {}) for c in d2._renderer.calls)
 
 
 def test_negative_temperature_keeps_decimal_inside_range(monkeypatch) -> None:
@@ -165,17 +165,17 @@ def test_negative_temperature_keeps_decimal_inside_range(monkeypatch) -> None:
 
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((-12.3, 1010.0, 50.0, 65.0, "Stable")))
     d._update_display()
-    assert ("value_write", (0, "-12.3"), {}) in renderer.calls
+    assert ("write_value", (0, "-12.3"), {}) in renderer.calls
 
     # -99.9 stays inside the range (5 cells, 63 px, fits the budget).
     d2 = _make_display(renderer=RecordingRenderer(), reader=FakeBME690Reader((-99.9, 1010.0, 50.0, 65.0, "Stable")))
     d2._update_display()
-    assert any(c == ("value_write", (0, "-99.9"), {}) for c in d2._renderer.calls)
+    assert any(c == ("write_value", (0, "-99.9"), {}) for c in d2._renderer.calls)
 
     # -100.7 → integer branch → "-101" (4 cells).
     d3 = _make_display(renderer=RecordingRenderer(), reader=FakeBME690Reader((-100.7, 1010.0, 50.0, 65.0, "Stable")))
     d3._update_display()
-    assert any(c == ("value_write", (0, "-101"), {}) for c in d3._renderer.calls)
+    assert any(c == ("write_value", (0, "-101"), {}) for c in d3._renderer.calls)
 
 
 def test_extreme_gas_value_is_clamped_to_9999(monkeypatch) -> None:
@@ -187,7 +187,7 @@ def test_extreme_gas_value_is_clamped_to_9999(monkeypatch) -> None:
 
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((22.0, 1010.0, 50.0, 50000.0, "Stable")))
     d._update_display()
-    assert ("value_write", (3, "9999"), {}) in renderer.calls
+    assert ("write_value", (3, "9999"), {}) in renderer.calls
 
 
 def test_negative_clamp_at_minus_999(monkeypatch) -> None:
@@ -198,7 +198,7 @@ def test_negative_clamp_at_minus_999(monkeypatch) -> None:
 
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((-12000.0, 1010.0, 50.0, 65.0, "Stable")))
     d._update_display()
-    assert ("value_write", (0, "-999"), {}) in renderer.calls
+    assert ("write_value", (0, "-999"), {}) in renderer.calls
 
 
 def test_format_value_helper_boundary_cases() -> None:
@@ -237,7 +237,7 @@ def test_format_value_helper_boundary_cases() -> None:
     assert fn(1234.7, 1) == "1235"
 
     # Clamp: integer outputs are bounded so the rendered width can't exceed
-    # the 63 px budget set by ``_WIDEST_GRAPH_VALUE = "-88.8"``.
+    # the 63 px budget set by ``_WIDEST_VALUE_TEXT = "-88.8"``.
     assert fn(9999.0, 0) == "9999"
     assert fn(10000.0, 0) == "9999"
     assert fn(99999.0, 1) == "9999"
@@ -253,9 +253,9 @@ def test_gas_row_shows_warming_when_heater_unstable(monkeypatch) -> None:
     d = _make_display(renderer=renderer, reader=FakeBME690Reader((20.0, 1000.0, 50.0, 42.0, "Warming")))
     d._update_display()
 
-    assert ("value_write", (3, "warming..."), {}) in renderer.calls
+    assert ("write_value", (3, "warming..."), {}) in renderer.calls
     # No kOhm number when not stable.
-    assert not any(c[0] == "value_write" and c[1][0] == 3 and c[1][1] != "warming..." for c in renderer.calls)
+    assert not any(c[0] == "write_value" and c[1][0] == 3 and c[1][1] != "warming..." for c in renderer.calls)
 
 
 def test_band_index_classifies_each_metric() -> None:
@@ -350,48 +350,48 @@ def test_band_change_triggers_single_icon_repaint_per_metric(monkeypatch) -> Non
 
     # initialize() pre-set _row_icons to each row's MID_LOW-band icon, so
     # the first _update_display inside initialize() must NOT repaint any icon.
-    assert not any(c[0] == "redraw_row_icon" for c in renderer.calls)
+    assert not any(c[0] == "replace_row_icon" for c in renderer.calls)
 
     # Same bands on next tick — still no repaint.
     renderer.calls.clear()
     reader._reading = (21.5, 1010.0, 45.0, 80.0, "Stable")
     d._update_display()
-    assert not any(c[0] == "redraw_row_icon" for c in renderer.calls)
+    assert not any(c[0] == "replace_row_icon" for c in renderer.calls)
 
     # Crossing temperature into the warm (band 2) icon — exactly one repaint, row 0.
     renderer.calls.clear()
     reader._reading = (25.0, 1010.0, 45.0, 80.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (0, ics.ICON_THERMO_ORANGE), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (0, ics.ICON_THERMO_ORANGE), {})]
 
     # Crossing pressure into the top (band 3) gauge — exactly one repaint, row 1.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 45.0, 80.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (1, ics.ICON_GAUGE_MAX), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (1, ics.ICON_GAUGE_MAX), {})]
 
     # Crossing humidity into the top (band 3) drop — exactly one repaint, row 2.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 75.0, 80.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (2, ics.ICON_DROP_MAX), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (2, ics.ICON_DROP_MAX), {})]
 
     # Crossing gas into band 2 (green mask) — exactly one repaint, row 3.
     renderer.calls.clear()
     reader._reading = (25.0, 1030.0, 75.0, 150.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (3, ics.ICON_MASK_GREEN), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (3, ics.ICON_MASK_GREEN), {})]
 
     # Dropping temperature into the cold (band 0) icon — single row-0 repaint.
     renderer.calls.clear()
     reader._reading = (5.0, 1030.0, 75.0, 150.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (0, ics.ICON_THERMO_BLUE), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (0, ics.ICON_THERMO_BLUE), {})]
 
 
 def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
@@ -410,7 +410,7 @@ def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
     reader._reading = (20.0, 1005.0, 40.0, 250.0, "Warming")
     d._update_display()
     assert not any(
-        c[0] == "redraw_row_icon" and c[1][0] == 3 for c in renderer.calls
+        c[0] == "replace_row_icon" and c[1][0] == 3 for c in renderer.calls
     )
     assert d._row_icons[3] == ics.ICON_MASK_ORANGE
 
@@ -418,8 +418,8 @@ def test_gas_icon_stays_put_while_heater_warms(monkeypatch) -> None:
     renderer.calls.clear()
     reader._reading = (20.0, 1005.0, 40.0, 250.0, "Stable")
     d._update_display()
-    repaints = [c for c in renderer.calls if c[0] == "redraw_row_icon"]
-    assert repaints == [("redraw_row_icon", (3, ics.ICON_MASK_BLUE), {})]
+    repaints = [c for c in renderer.calls if c[0] == "replace_row_icon"]
+    assert repaints == [("replace_row_icon", (3, ics.ICON_MASK_BLUE), {})]
 
 
 def test_initialize_paints_left_column_and_is_idempotent(monkeypatch) -> None:
@@ -464,17 +464,17 @@ def test_update_display_skips_value_writes_when_reading_unchanged(monkeypatch) -
     d = _make_display(renderer=renderer, reader=reader)
 
     d._update_display()
-    first_value_writes = sum(1 for c in renderer.calls if c[0] == "value_write")
+    first_value_writes = sum(1 for c in renderer.calls if c[0] == "write_value")
     assert first_value_writes == 4
 
-    # Second tick with the exact same tuple object returned — value_write
+    # Second tick with the exact same tuple object returned — write_value
     # should be skipped entirely (identity compare).
     renderer.calls.clear()
     d._update_display()
-    assert not any(c[0] == "value_write" for c in renderer.calls)
+    assert not any(c[0] == "write_value" for c in renderer.calls)
     # Header is gated on the minute stamp: now() is constant here, so the same
-    # minute means header_write is skipped too (no per-tick clock rebuild).
-    assert not any(c[0] == "header_write" for c in renderer.calls)
+    # minute means write_header is skipped too (no per-tick clock rebuild).
+    assert not any(c[0] == "write_header" for c in renderer.calls)
 
 
 def test_header_rewrites_only_on_minute_change(monkeypatch, fake_ticks) -> None:
@@ -490,7 +490,7 @@ def test_header_rewrites_only_on_minute_change(monkeypatch, fake_ticks) -> None:
 
     # First render: deadline starts "due" → reads the clock, draws the header.
     d._update_display()
-    assert any(c[0] == "header_write" for c in renderer.calls)
+    assert any(c[0] == "write_header" for c in renderer.calls)
 
     # Within the gate (deadline ~60 s out): clock not re-read despite wall time
     # advancing → header skipped.
@@ -498,21 +498,21 @@ def test_header_rewrites_only_on_minute_change(monkeypatch, fake_ticks) -> None:
     fake_ticks[0] = 30_000
     renderer.calls.clear()
     d._update_display()
-    assert not any(c[0] == "header_write" for c in renderer.calls)
+    assert not any(c[0] == "write_header" for c in renderer.calls)
 
     # Past the deadline but same minute → re-reads clock, header still skipped.
     clock[0] = 30
     fake_ticks[0] = 61_000
     renderer.calls.clear()
     d._update_display()
-    assert not any(c[0] == "header_write" for c in renderer.calls)
+    assert not any(c[0] == "write_header" for c in renderer.calls)
 
     # Past the deadline AND a new minute → header rewritten.
     clock[0] = 90
     fake_ticks[0] = 122_000
     renderer.calls.clear()
     d._update_display()
-    assert any(c[0] == "header_write" for c in renderer.calls)
+    assert any(c[0] == "write_header" for c in renderer.calls)
 
 
 def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch) -> None:
@@ -529,7 +529,7 @@ def test_update_display_repaints_values_when_reading_tuple_replaced(monkeypatch)
     reader._reading = tuple([22.4, 963.11, 25.7, 65.674, "Stable"])
     renderer.calls.clear()
     d._update_display()
-    assert sum(1 for c in renderer.calls if c[0] == "value_write") == 4
+    assert sum(1 for c in renderer.calls if c[0] == "write_value") == 4
 
 
 def test_reinitialize_repaints_values_even_if_reader_returns_same_tuple(monkeypatch) -> None:
@@ -544,7 +544,7 @@ def test_reinitialize_repaints_values_even_if_reader_returns_same_tuple(monkeypa
     d.initialize()
     # Even though reader returns the same tuple object, re-entry must paint
     # values (reset() blanked the screen).
-    assert sum(1 for c in renderer.calls if c[0] == "value_write") == 4
+    assert sum(1 for c in renderer.calls if c[0] == "write_value") == 4
 
 
 def test_reinitialize_repaints_left_column(monkeypatch) -> None:
@@ -614,7 +614,7 @@ def test_bands_validation_rejects_non_ascending() -> None:
 
 def _graph_calls(renderer: RecordingRenderer) -> list[tuple]:
     """Filter renderer calls down to graph-related ones for readable assertions."""
-    return [c for c in renderer.calls if c[0] in ("draw_graph_clear", "draw_graph_column")]
+    return [c for c in renderer.calls if c[0] in ("clear_graph", "draw_graph_column")]
 
 
 def test_marker_y_boundary_values() -> None:
@@ -644,8 +644,8 @@ def test_first_render_after_commit_triggers_graph_redraw_for_all_metrics(monkeyp
     d = _make_display(renderer=renderer, history=history)
     d._update_display()
 
-    # 4 metrics × 1 draw_graph_clear (gas is stable so it's painted too).
-    clears = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_clear"]
+    # 4 metrics × 1 clear_graph (gas is stable so it's painted too).
+    clears = [c for c in _graph_calls(renderer) if c[0] == "clear_graph"]
     assert {c[1][0] for c in clears} == {0, 1, 2, 3}
     # One draw_graph_column per metric (1 sample each).
     cols = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column"]
@@ -684,9 +684,9 @@ def test_graph_redraws_when_commit_count_bumps_even_if_reading_identity_unchange
     history.set_samples(0, [22.5, 22.0])
     d._update_display()
 
-    # draw_graph_clear + at least one draw_graph_column for metric 0.
+    # clear_graph + at least one draw_graph_column for metric 0.
     graph_calls = _graph_calls(renderer)
-    assert any(c[0] == "draw_graph_clear" and c[1][0] == 0 for c in graph_calls)
+    assert any(c[0] == "clear_graph" and c[1][0] == 0 for c in graph_calls)
     assert any(c[0] == "draw_graph_column" and c[1][0] == 0 for c in graph_calls)
 
 
@@ -734,8 +734,8 @@ def test_warming_to_stable_transition_triggers_gas_redraw(monkeypatch) -> None:
     d._update_display()
 
     gas_calls = [c for c in _graph_calls(renderer) if c[1][0] == 3]
-    # Expect one draw_graph_clear and at least one draw_graph_column.
-    assert any(c[0] == "draw_graph_clear" for c in gas_calls)
+    # Expect one clear_graph and at least one draw_graph_column.
+    assert any(c[0] == "clear_graph" for c in gas_calls)
     assert any(c[0] == "draw_graph_column" for c in gas_calls)
 
 
@@ -784,7 +784,7 @@ def test_stable_to_warming_transition_clears_gas_row_once(monkeypatch) -> None:
     d._update_display()
 
     gas_calls = [c for c in _graph_calls(renderer) if c[1][0] == 3]
-    assert [c[0] for c in gas_calls] == ["draw_graph_clear"]
+    assert [c[0] for c in gas_calls] == ["clear_graph"]
 
 
 def test_subsequent_warming_ticks_do_nothing_to_gas_row(monkeypatch) -> None:
@@ -807,7 +807,7 @@ def test_subsequent_warming_ticks_do_nothing_to_gas_row(monkeypatch) -> None:
 
 
 def test_out_of_cap_value_renders_fill_only(monkeypatch) -> None:
-    """Out-of-cap: marker_pen is None and value_y is None in the draw call."""
+    """Out-of-cap: marker_pen is None and marker_y is None in the draw call."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -821,15 +821,15 @@ def test_out_of_cap_value_renders_fill_only(monkeypatch) -> None:
     col_calls = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
-    line_idx, col, fill_pen, marker_pen, value_y = args
+    row_index, col, fill_pen, marker_pen, marker_y = args
     # Fill pen present (band 3 for above-cap), marker suppressed.
     assert fill_pen == d._band_pens[0][3][0]
     assert marker_pen is None
-    assert value_y is None
+    assert marker_y is None
 
 
 def test_in_cap_value_renders_fill_and_marker(monkeypatch) -> None:
-    """In-cap: both fill and marker pens present; value_y is a valid int."""
+    """In-cap: both fill and marker pens present; marker_y is a valid int."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -842,17 +842,17 @@ def test_in_cap_value_renders_fill_and_marker(monkeypatch) -> None:
     col_calls = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
-    _line, _col, fill_pen, marker_pen, value_y = args
+    _line, _col, fill_pen, marker_pen, marker_y = args
     assert fill_pen == d._band_pens[0][2][0]
     assert marker_pen == d._band_pens[0][2][1]
-    # value_y matches the documented _marker_y formula for graph_height=24.
+    # marker_y matches the documented _marker_y formula for graph_height=24.
     expected = sensors.Display._marker_y(25.0, _TEST_BAND_KWARGS["temp_bands"], _FAKE_GRAPH_HEIGHT)
-    assert value_y == expected
+    assert marker_y == expected
 
 
 def test_nan_value_skips_the_column_entirely(monkeypatch) -> None:
     """R2.4 regression: NaN → no draw_graph_column for that index; column
-    shows row background after the per-row draw_graph_clear."""
+    shows row background after the per-row clear_graph."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -893,7 +893,7 @@ def test_partial_fill_draws_only_rightmost_filled_columns(monkeypatch) -> None:
     assert sorted(cols) == [7, 8, 9]
 
 
-def test_line_write_clear_rect_never_extends_into_graph(monkeypatch) -> None:
+def test_write_cell_clear_rect_never_extends_into_graph(monkeypatch) -> None:
     """B1 regression: a value update must not clear any pixels at x >= graph_x."""
     # This test uses the real Geometry + real Renderer to exercise the actual
     # value_clear_width derivation.
@@ -916,13 +916,13 @@ def test_line_write_clear_rect_never_extends_into_graph(monkeypatch) -> None:
                                  ("22.1", "1011", "50.6", "66.0"),
                                  ("22.2", "1012", "50.7", "67.0"))):
         for i, v in enumerate(vals):
-            r.value_write(i, v)
+            r.write_value(i, v)
 
     for name, args, _kw in gfx.calls:
         if name == "rectangle":
             x, _y, w, _h = args
             assert x + w <= geom.graph_x, (
-                "line_write rectangle (x={}, w={}) leaks into graph rect (graph_x={})".format(
+                "write_cell rectangle (x={}, w={}) leaks into graph rect (graph_x={})".format(
                     x, w, geom.graph_x
                 )
             )
@@ -955,7 +955,7 @@ def test_reentry_with_intervening_commit_redraws_all_graphs(monkeypatch) -> None
     d.initialize()              # re-enter
 
     # All 4 graphs paint on re-entry (reset() cleared the screen).
-    clears = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_clear"]
+    clears = [c for c in _graph_calls(renderer) if c[0] == "clear_graph"]
     assert sorted(c[1][0] for c in clears) == [0, 1, 2, 3]
     # And the temperature row picked up the new (2-sample) history.
     cols = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]

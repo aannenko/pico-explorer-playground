@@ -54,7 +54,7 @@ def test_demo_streams_returns_four_rows():
 def test_random_event_loop_stamps_color_index_on_every_event():
     ts = _FakeTimeService()
     gen = demo_streams._random_event_loop(
-        names=("a", "b"),
+        labels=("a", "b"),
         durations=(60, 120),
         gap_pct=0,  # no gaps → deterministic yields
         start_timestamp=0,

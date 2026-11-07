@@ -14,7 +14,7 @@ WINDOW_PAST_SEC = const(30 * 60)
 WINDOW_FUTURE_SEC = const(90 * 60)
 WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)
 
-_MAX_STREAMS = const(5)
+_MAX_ROWS = const(5)
 _HEADER_MARGIN_PX = const(6)
 _AXIS_MARGIN_PX = const(3)
 _BAR_TEXT_MARGIN_PX = const(2)
@@ -27,7 +27,7 @@ _TICK_MARK_HEIGHT_PX = const(4)
 _STATUS_GLYPH_PX = const(4)
 
 
-def _fmt_remaining(sec: int) -> str:
+def _format_remaining(sec: int) -> str:
     h = sec // 3600
     m = sec % 3600 // 60
     return f"-{h:02}:{m:02}"
@@ -52,7 +52,7 @@ class Colors:
 
 
 class Geometry:
-    """Pixel layout of the Calendar view: a header, ``_MAX_STREAMS`` rows and a time axis.
+    """Pixel layout of the Calendar view: a header, ``_MAX_ROWS`` rows and a time axis.
 
     Raises ``RuntimeError`` if the header doesn't fit the panel width.
     """
@@ -67,7 +67,7 @@ class Geometry:
         bar_font_height: int,
         bar_text_scale: int,
     ) -> None:
-        self.graphics = pico_graphics
+        self.pico_graphics = pico_graphics
         self.width, self.height = pico_graphics.get_bounds()
 
         self.header_font = header_font
@@ -91,17 +91,17 @@ class Geometry:
         body_bottom = self.axis_y - _AXIS_MARGIN_PX
         body_height = body_bottom - body_top
 
-        cell_height = body_height // _MAX_STREAMS
+        cell_height = body_height // _MAX_ROWS
         gap = max(3, cell_height // 5)
         bar_height = cell_height - gap
 
-        self.num_rows = _MAX_STREAMS
+        self.row_count = _MAX_ROWS
         self.row_y: list[int] = []
-        self.row_height = bar_height
+        self.bar_height = bar_height
         self.gap_y: list[int] = []
         self.gap_height = gap
 
-        for i in range(_MAX_STREAMS):
+        for i in range(_MAX_ROWS):
             row_top = body_top + i * cell_height
             self.row_y.append(row_top)
             self.gap_y.append(row_top + bar_height)
@@ -114,7 +114,7 @@ class Renderer:
 
     def __init__(self, geometry: Geometry, colors: Colors) -> None:
         self._geom = geometry
-        self._gfx = geometry.graphics
+        self._gfx = geometry.pico_graphics
         self._colors = colors
         self._last_header = ""
 
@@ -128,10 +128,10 @@ class Renderer:
         gfx.clear()
 
         gfx.set_pen(self._colors.empty_row)
-        for row_idx in range(geom.num_rows):
-            gfx.rectangle(0, geom.row_y[row_idx], geom.width, geom.row_height)
+        for row_idx in range(geom.row_count):
+            gfx.rectangle(0, geom.row_y[row_idx], geom.width, geom.bar_height)
 
-    def header_write(self, text: str) -> None:
+    def write_header(self, text: str) -> None:
         """Draw ``text`` in the header strip unless it is already shown."""
         if text == self._last_header:
             return
@@ -151,7 +151,7 @@ class Renderer:
     @micropython.native
     def draw_rows(
         self,
-        streams: list[EventWindow],
+        event_windows: list[EventWindow],
         window_start: int,
         window_end: int,
     ) -> None:
@@ -162,15 +162,15 @@ class Renderer:
 
         gfx.set_font(geom.bar_font)
 
-        for row_idx in range(len(streams)):
+        for row_idx in range(len(event_windows)):
             row_top = geom.row_y[row_idx]
-            bar_h = geom.row_height
+            bar_h = geom.bar_height
 
             gfx.set_pen(self._colors.empty_row)
             gfx.rectangle(0, row_top, width, bar_h)
 
-            stream = streams[row_idx]
-            visible = stream.get_visible(window_start, window_end)
+            window = event_windows[row_idx]
+            visible = window.get_visible(window_start, window_end)
             n_visible = len(visible)
 
             for i in range(n_visible):
@@ -205,8 +205,8 @@ class Renderer:
                 label_right = x0
                 usable_px = bar_px - 2 * _BAR_TEXT_MARGIN_PX
 
-                if usable_px >= _MIN_LABEL_PX and event.name:
-                    label = event.name.upper()
+                if usable_px >= _MIN_LABEL_PX and event.label:
+                    label = event.label.upper()
                     text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
 
                     # Binary search for longest fitting prefix
@@ -229,14 +229,14 @@ class Renderer:
                 if ev_end > window_end:
                     remaining = ev_end - now
                     if remaining > 0:
-                        rem_text = _fmt_remaining(remaining)
+                        rem_text = _format_remaining(remaining)
                         rem_w = gfx.measure_text(rem_text, scale=geom.bar_text_scale)
                         rem_x = x1 - rem_w - _BAR_TEXT_MARGIN_PX
                         if rem_x > label_right + 1:
                             gfx.set_pen(LABEL_FOR_SLOT[pen])
                             gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
 
-            status = stream.status()
+            status = window.status()
             if status is not None and status != FRESH:
                 gfx.set_pen(self._colors.now_line)
                 gfx.rectangle(width - _STATUS_GLYPH_PX, row_top, _STATUS_GLYPH_PX, _STATUS_GLYPH_PX)
@@ -248,7 +248,7 @@ class Renderer:
         gfx = self._gfx
         width = geom.width
 
-        baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
+        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
         tick_bottom = baseline_y + _TICK_MARK_HEIGHT_PX
 
         gfx.set_pen(self._colors.background)
@@ -287,11 +287,11 @@ class Renderer:
         gfx.set_pen(self._colors.now_line)
         x = geom.now_x
 
-        for i in range(geom.num_rows):
+        for i in range(geom.row_count):
             gap_top = geom.gap_y[i]
             gfx.line(x, gap_top, x, gap_top + geom.gap_height - 1)
 
-        baseline_y = geom.gap_y[geom.num_rows - 1] + geom.gap_height - 1
+        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
         gfx.line(0, baseline_y, geom.width - 1, baseline_y)
 
     def update(self) -> None:
@@ -302,7 +302,7 @@ class Renderer:
 class Display(_Display):
     """Calendar view: a timeline of event rows that scrolls with the clock.
 
-    ``streams`` must hold at most ``_MAX_STREAMS`` rows, and ``get_time`` must
+    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, and ``get_time`` must
     return local epoch seconds.
     """
 
@@ -311,11 +311,11 @@ class Display(_Display):
     def __init__(
         self,
         renderer: Renderer,
-        streams: list[EventWindow],
+        event_windows: list[EventWindow],
         get_time,  # () -> int
     ) -> None:
         self._renderer = renderer
-        self._streams = streams
+        self._event_windows = event_windows
         self._get_time = get_time
         self._active = False
 
@@ -324,8 +324,8 @@ class Display(_Display):
         window_start = now - WINDOW_PAST_SEC
         window_end = now + WINDOW_FUTURE_SEC
 
-        self._renderer.header_write(format_header_time(now))
-        self._renderer.draw_rows(self._streams, window_start, window_end)
+        self._renderer.write_header(format_header_time(now))
+        self._renderer.draw_rows(self._event_windows, window_start, window_end)
         self._renderer.draw_time_axis(window_start, window_end)
         self._renderer.update()
 
