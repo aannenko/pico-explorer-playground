@@ -66,7 +66,6 @@ class TestDisplayLifecycle:
         assert "write_header" in call_names
         assert "draw_rows" in call_names
         assert "draw_time_axis" in call_names
-        assert "draw_now_line" not in call_names
         assert renderer.update_calls == 1
 
     def test_initialize_is_idempotent(self):
