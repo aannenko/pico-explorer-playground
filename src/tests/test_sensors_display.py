@@ -24,8 +24,11 @@ class _FakeRingHistory:
     """Allocation-lean stand-in for ``services.ring_history.RingHistory``.
 
     Stores explicit per-metric sample lists (newest first) so display tests can
-    set up partial-fill / wrap scenarios with no math.  ``commit_count`` is
-    mutable so tests can simulate a commit without actually pushing samples.
+    set up partial-fill / wrap scenarios with no math.  Like the real history it
+    reports one ``sample_count`` for every metric, the longest list's length; a
+    shorter list's missing samples read as NaN, which the display skips.
+    ``commit_count`` is mutable so tests can simulate a commit without actually
+    pushing samples.
     """
 
     def __init__(self, capacity: int = 108) -> None:
@@ -33,22 +36,24 @@ class _FakeRingHistory:
         self.commit_count = 0
         # Per-metric list of samples, newest first.  Empty == nothing to draw.
         self._samples: list[list[float]] = [[] for _ in range(4)]
-        # Records (metric_idx, value) backfills so tests can assert them.
+        # Records (metric_index, value) backfills so tests can assert them.
         self.update_latest_calls: list[tuple[int, float]] = []
 
-    def filled(self, metric_idx: int) -> int:
-        return min(len(self._samples[metric_idx]), self.capacity)
+    @property
+    def sample_count(self) -> int:
+        return min(max(len(s) for s in self._samples), self.capacity)
 
-    def value_at(self, metric_idx: int, value_idx: int) -> float:
-        return self._samples[metric_idx][value_idx]
+    def value_at(self, metric_index: int, age: int) -> float:
+        samples = self._samples[metric_index]
+        return samples[age] if age < len(samples) else float("nan")
 
-    def set_samples(self, metric_idx: int, samples_newest_first: list[float]) -> None:
-        self._samples[metric_idx] = list(samples_newest_first)
+    def set_samples(self, metric_index: int, samples_newest_first: list[float]) -> None:
+        self._samples[metric_index] = list(samples_newest_first)
 
-    def update_latest(self, metric_idx: int, value: float) -> None:
-        self.update_latest_calls.append((metric_idx, value))
-        if self._samples[metric_idx]:
-            self._samples[metric_idx][0] = value
+    def update_latest(self, metric_index: int, value: float) -> None:
+        self.update_latest_calls.append((metric_index, value))
+        if self._samples[metric_index]:
+            self._samples[metric_index][0] = value
 
     def bump_commit(self) -> None:
         self.commit_count += 1
@@ -873,7 +878,7 @@ def test_nan_value_skips_the_column_entirely(monkeypatch) -> None:
 
 
 def test_partial_fill_draws_only_rightmost_filled_columns(monkeypatch) -> None:
-    """With ``filled(metric) < capacity``, only the rightmost ``filled`` columns
+    """With ``sample_count < capacity``, only the rightmost ``sample_count`` columns
     receive a draw_graph_column call; the rest stay as cleared background."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))

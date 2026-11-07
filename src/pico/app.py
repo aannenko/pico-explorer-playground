@@ -237,11 +237,11 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
     )
     sensor_history = RingHistory(
         bme690_reader.read,
-        num_metrics=4,
+        metric_count=4,
         capacity=sensors_geometry.graph_width,
         ticks_per_commit=sensors_geometry.ticks_per_commit,
     )
-    tick_scheduler.register(sensor_history._tick_ref)
+    tick_scheduler.register(sensor_history.tick)
 
     wifi_client = WifiClient()
     network_service = NetworkService(

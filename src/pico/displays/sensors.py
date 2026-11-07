@@ -439,20 +439,20 @@ class Display(_Display):
         capacity = history.capacity
         gas_row = self._GAS_ROW
 
-        for metric_idx in range(len(self._rows)):
-            _unit, edges, _cells = self._rows[metric_idx]
+        for metric_index in range(len(self._rows)):
+            _unit, edges, _cells = self._rows[metric_index]
 
-            if metric_idx == gas_row:
+            if metric_index == gas_row:
                 if not gas_stable_now:
                     if self._gas_was_stable is True:
                         renderer.clear_graph(gas_row)
                     continue
 
-            renderer.clear_graph(metric_idx)
+            renderer.clear_graph(metric_index)
             graph_height = self._graph_height
-            pens_row = band_pens[metric_idx]
-            for i in range(history.filled(metric_idx)):
-                value = history.value_at(metric_idx, i)
+            pens_row = band_pens[metric_index]
+            for i in range(history.sample_count):
+                value = history.value_at(metric_index, i)
                 if value != value:  # NaN
                     continue
                 band = self._band_index(value, edges)
@@ -460,7 +460,7 @@ class Display(_Display):
                 marker_y = self._marker_y(value, edges, graph_height)
                 col = capacity - 1 - i
                 renderer.draw_graph_column(
-                    metric_idx,
+                    metric_index,
                     col,
                     fill_pen,
                     marker_pen if marker_y is not None else None,
@@ -547,7 +547,7 @@ class Display(_Display):
 
 
 def build_sensor_band_pens():
-    """Return each band's ``(fill, marker)`` pens, indexed ``pens[metric_idx][band_idx]``.
+    """Return each band's ``(fill, marker)`` pens, indexed ``pens[metric_index][band_index]``.
 
     The marker is the fill's auto-contrast, precomputed so the render loop does no
     palette lookups.

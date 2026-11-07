@@ -6,12 +6,12 @@ import micropython
 class RingHistory:
     """Rolling history of the last ``capacity`` samples per metric.
 
-    ``sampler()`` must return an indexable sequence whose first ``num_metrics``
+    ``sampler()`` must return an indexable sequence whose first ``metric_count``
     entries are floats; any further entries are ignored.  Construction commits
     once, so ``sampler`` must return valid data by then.  Raises ``ValueError``
-    if ``num_metrics``, ``capacity`` or ``ticks_per_commit`` is below 1.
+    if ``metric_count``, ``capacity`` or ``ticks_per_commit`` is below 1.
 
-    Owns no timer: ``_tick_ref`` must be called periodically.  Each commit
+    Owns no timer: ``tick()`` must be called periodically.  Each commit
     increments ``commit_count``.
     """
 
@@ -20,12 +20,12 @@ class RingHistory:
         self,
         sampler,  # () -> Sequence
         *,
-        num_metrics: int,
+        metric_count: int,
         capacity: int,
         ticks_per_commit: int,
     ) -> None:
-        if num_metrics < 1:
-            raise ValueError("RingHistory num_metrics must be >= 1")
+        if metric_count < 1:
+            raise ValueError("RingHistory metric_count must be >= 1")
         if capacity < 1:
             raise ValueError("RingHistory capacity must be >= 1")
         if ticks_per_commit < 1:
@@ -36,56 +36,55 @@ class RingHistory:
         self._ticks_per_commit = ticks_per_commit
 
         self._buffers = tuple(
-            array("f", [0.0] * capacity) for _ in range(num_metrics)
+            array("f", [0.0] * capacity) for _ in range(metric_count)
         )
 
-        self._head = 0
-        self._filled = 0
-        self._tick_counter = 0
+        self._next_slot = 0
+        self._sample_count = 0
+        self._ticks_since_commit = 0
         self.commit_count = 0
 
-        self._tick_ref = self._tick
-
-        self._commit_now()
+        self._commit()
 
     @property
     def capacity(self) -> int:
         return self._capacity
 
-    def filled(self, metric_idx: int) -> int:
-        """Number of stored samples, 0..capacity."""
-        return self._filled
+    @property
+    def sample_count(self) -> int:
+        """Samples stored for each metric, 0..capacity."""
+        return self._sample_count
 
     @micropython.native
-    def value_at(self, metric_idx: int, value_idx: int) -> float:
-        """Return the sample ``value_idx`` slots back from the newest.
+    def value_at(self, metric_index: int, age: int) -> float:
+        """Return the sample ``age`` slots back from the newest.
 
-        Requires ``0 <= value_idx < filled(metric_idx)``.
+        Requires ``0 <= age < sample_count``.
         """
-        i = self._head - 1 - value_idx
+        i = self._next_slot - 1 - age
         if i < 0:
             i += self._capacity
-        return self._buffers[metric_idx][i]
+        return self._buffers[metric_index][i]
 
-    def update_latest(self, metric_idx: int, value: float) -> None:
+    def update_latest(self, metric_index: int, value: float) -> None:
         """Overwrite the newest sample of one metric without advancing the ring."""
-        if self._filled == 0:
+        if self._sample_count == 0:
             return
-        i = self._head - 1
+        i = self._next_slot - 1
         if i < 0:
             i += self._capacity
-        self._buffers[metric_idx][i] = value
+        self._buffers[metric_index][i] = value
 
-    def _tick(self) -> None:
-        self._tick_counter += 1
-        if self._tick_counter >= self._ticks_per_commit:
-            self._tick_counter = 0
-            self._commit_now()
+    def tick(self) -> None:
+        self._ticks_since_commit += 1
+        if self._ticks_since_commit >= self._ticks_per_commit:
+            self._ticks_since_commit = 0
+            self._commit()
 
     @micropython.native
-    def _commit_now(self) -> None:
+    def _commit(self) -> None:
         reading = self._sampler()
-        head = self._head
+        head = self._next_slot
         buffers = self._buffers
         for i in range(len(buffers)):
             buffers[i][head] = reading[i]
@@ -93,9 +92,9 @@ class RingHistory:
         head += 1
         if head >= self._capacity:
             head = 0
-        self._head = head
+        self._next_slot = head
 
-        if self._filled < self._capacity:
-            self._filled += 1
+        if self._sample_count < self._capacity:
+            self._sample_count += 1
 
         self.commit_count += 1

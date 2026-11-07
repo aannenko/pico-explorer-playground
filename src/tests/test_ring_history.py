@@ -28,13 +28,13 @@ class _FakeReader:
 def _make(
     reader=None,
     *,
-    num_metrics: int = 4,
+    metric_count: int = 4,
     capacity: int = 8,
     ticks_per_commit: int = 10,
 ) -> RingHistory:
     return RingHistory(
         (reader or _FakeReader()).read,
-        num_metrics=num_metrics,
+        metric_count=metric_count,
         capacity=capacity,
         ticks_per_commit=ticks_per_commit,
     )
@@ -44,27 +44,26 @@ def test_constructor_does_one_immediate_commit() -> None:
     reader = _FakeReader((22.4, 963.1, 45.6, 75.7, "Stable"))
     h = _make(reader)
     assert h.commit_count == 1
-    for metric in range(4):
-        assert h.filled(metric) == 1
+    assert h.sample_count == 1
     assert h.value_at(0, 0) == pytest.approx(22.4)
     assert h.value_at(1, 0) == pytest.approx(963.1)
     assert h.value_at(2, 0) == pytest.approx(45.6)
     assert h.value_at(3, 0) == pytest.approx(75.7)
 
 
-def test_constructor_rejects_zero_num_metrics() -> None:
-    with pytest.raises(ValueError, match="num_metrics must be >= 1"):
-        RingHistory(_FakeReader().read, num_metrics=0, capacity=8, ticks_per_commit=10)
+def test_constructor_rejects_zero_metric_count() -> None:
+    with pytest.raises(ValueError, match="metric_count must be >= 1"):
+        RingHistory(_FakeReader().read, metric_count=0, capacity=8, ticks_per_commit=10)
 
 
 def test_constructor_rejects_zero_capacity() -> None:
     with pytest.raises(ValueError, match="capacity must be >= 1"):
-        RingHistory(_FakeReader().read, num_metrics=4, capacity=0, ticks_per_commit=10)
+        RingHistory(_FakeReader().read, metric_count=4, capacity=0, ticks_per_commit=10)
 
 
 def test_constructor_rejects_zero_ticks_per_commit() -> None:
     with pytest.raises(ValueError, match="ticks_per_commit must be >= 1"):
-        RingHistory(_FakeReader().read, num_metrics=4, capacity=8, ticks_per_commit=0)
+        RingHistory(_FakeReader().read, metric_count=4, capacity=8, ticks_per_commit=0)
 
 
 def test_tick_counter_commits_every_ticks_per_commit() -> None:
@@ -73,14 +72,14 @@ def test_tick_counter_commits_every_ticks_per_commit() -> None:
     assert h.commit_count == 1  # construct-time commit
 
     for _ in range(4):
-        h._tick_ref()
+        h.tick()
     assert h.commit_count == 1
-    assert h.filled(0) == 1
+    assert h.sample_count == 1
 
     reader.set((11.0, 1001.0, 31.0, 51.0, "Stable"))
-    h._tick_ref()
+    h.tick()
     assert h.commit_count == 2
-    assert h.filled(0) == 2
+    assert h.sample_count == 2
     assert h.value_at(0, 0) == pytest.approx(11.0)
     assert h.value_at(0, 1) == pytest.approx(10.0)
 
@@ -89,22 +88,22 @@ def test_tick_counter_resets_after_commit() -> None:
     reader = _FakeReader()
     h = _make(reader, capacity=8, ticks_per_commit=3)
     for _ in range(3):
-        h._tick_ref()
+        h.tick()
     assert h.commit_count == 2
     for _ in range(3):
-        h._tick_ref()
+        h.tick()
     assert h.commit_count == 3
 
 
-def test_filled_clamps_at_capacity() -> None:
+def test_sample_count_clamps_at_capacity() -> None:
     reader = _FakeReader()
     h = _make(reader, capacity=4, ticks_per_commit=1)
-    # 1 construct-time commit + 10 ticks → 11 commits, but filled clamps at 4.
+    # 1 construct-time commit + 10 ticks → 11 commits, but sample_count clamps at 4.
     for i in range(10):
         reader.set((float(i), 0.0, 0.0, 0.0, "Stable"))
-        h._tick_ref()
+        h.tick()
     assert h.commit_count == 11
-    assert h.filled(0) == 4
+    assert h.sample_count == 4
 
 
 def test_value_at_returns_newest_first() -> None:
@@ -112,7 +111,7 @@ def test_value_at_returns_newest_first() -> None:
     h = _make(reader, capacity=4, ticks_per_commit=1)
     for v in (2.0, 3.0, 4.0):
         reader.set((v, 0.0, 0.0, 0.0, "Stable"))
-        h._tick_ref()
+        h.tick()
     assert h.value_at(0, 0) == pytest.approx(4.0)
     assert h.value_at(0, 1) == pytest.approx(3.0)
     assert h.value_at(0, 2) == pytest.approx(2.0)
@@ -127,9 +126,9 @@ def test_value_at_after_ring_wrap_preserves_order() -> None:
     # 8 more samples wraps the 4-slot ring twice.
     for v in (2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0):
         reader.set((v, 0.0, 0.0, 0.0, "Stable"))
-        h._tick_ref()
+        h.tick()
     assert h.commit_count == 9
-    assert h.filled(0) == 4
+    assert h.sample_count == 4
     # 9, 8, 7, 6 — all later than the original 1.0.
     assert [h.value_at(0, i) for i in range(4)] == [
         pytest.approx(9.0),
@@ -142,10 +141,10 @@ def test_value_at_after_ring_wrap_preserves_order() -> None:
 def test_partial_fill_only_advertises_committed_samples() -> None:
     reader = _FakeReader()
     h = _make(reader, capacity=10, ticks_per_commit=1)
-    # 1 commit from construct + 2 from ticks = 3 filled.
+    # 1 commit from construct + 2 from ticks = 3 samples.
     for _ in range(2):
-        h._tick_ref()
-    assert h.filled(0) == 3
+        h.tick()
+    assert h.sample_count == 3
 
 
 def test_capacity_property() -> None:
@@ -153,21 +152,11 @@ def test_capacity_property() -> None:
     assert h.capacity == 42
 
 
-def test_tick_ref_is_cached_bound_method() -> None:
-    h = _make(ticks_per_commit=1)
-    ref_a = h._tick_ref
-    ref_b = h._tick_ref
-    assert ref_a is ref_b
-    before = h.commit_count
-    ref_a()
-    assert h.commit_count == before + 1
-
-
 def test_tick_is_zero_arg() -> None:
-    """TickScheduler invokes subscribers as ``callback()`` — _tick must
+    """TickScheduler invokes subscribers as ``callback()`` — tick must
     accept no positional args."""
     h = _make()
-    h._tick()
+    h.tick()
 
 
 def test_each_metric_stored_in_own_buffer() -> None:
@@ -175,7 +164,7 @@ def test_each_metric_stored_in_own_buffer() -> None:
     reader = _FakeReader((10.0, 100.0, 50.0, 200.0, "Stable"))
     h = _make(reader, capacity=2, ticks_per_commit=1)
     reader.set((11.0, 101.0, 51.0, 201.0, "Stable"))
-    h._tick_ref()
+    h.tick()
     assert h.value_at(0, 0) == pytest.approx(11.0)
     assert h.value_at(0, 1) == pytest.approx(10.0)
     assert h.value_at(1, 0) == pytest.approx(101.0)
@@ -201,20 +190,20 @@ def test_update_latest_overwrites_newest_without_advancing() -> None:
     reader = _FakeReader((1.0, 2.0, 3.0, float("nan"), "Unstable"))
     h = _make(reader)  # boot commit → newest gas is NaN
     assert math.isnan(h.value_at(3, 0))
-    filled_before = h.filled(3)
+    count_before = h.sample_count
 
     h.update_latest(3, 99.0)
 
     assert h.value_at(3, 0) == 99.0       # gas (metric 3) backfilled
     assert h.value_at(0, 0) == 1.0        # other metrics untouched
-    assert h.filled(3) == filled_before   # no new sample added
+    assert h.sample_count == count_before   # no new sample added
 
 
 def test_update_latest_targets_the_most_recent_sample() -> None:
     reader = _FakeReader((0.0, 0.0, 0.0, 10.0, "Stable"))
     h = _make(reader, ticks_per_commit=1)  # boot commit: gas=10
     reader.set((0.0, 0.0, 0.0, 20.0, "Stable"))
-    h._tick()  # second commit: gas=20 is now newest
+    h.tick()  # second commit: gas=20 is now newest
 
     h.update_latest(3, 99.0)
 
@@ -234,32 +223,32 @@ def test_constructor_does_not_register_on_tick_scheduler() -> None:
 
 def test_sampler_can_be_a_plain_callable_returning_a_tuple() -> None:
     """Sampler contract is just ``() -> sequence[float]`` — any callable
-    whose result is indexable by 0..num_metrics-1 works."""
+    whose result is indexable by 0..metric_count-1 works."""
     counter = {"n": 0}
 
     def sampler():
         counter["n"] += 1
         return (counter["n"] * 1.0, counter["n"] * 10.0)
 
-    h = RingHistory(sampler, num_metrics=2, capacity=4, ticks_per_commit=1)
+    h = RingHistory(sampler, metric_count=2, capacity=4, ticks_per_commit=1)
     assert h.value_at(0, 0) == pytest.approx(1.0)
     assert h.value_at(1, 0) == pytest.approx(10.0)
-    h._tick_ref()
+    h.tick()
     assert h.value_at(0, 0) == pytest.approx(2.0)
     assert h.value_at(1, 0) == pytest.approx(20.0)
 
 
-def test_num_metrics_smaller_than_reading_length_ignores_extras() -> None:
-    """Only the leading ``num_metrics`` entries are captured — extras
+def test_metric_count_smaller_than_reading_length_ignores_extras() -> None:
+    """Only the leading ``metric_count`` entries are captured — extras
     (e.g. BME690's trailing status string) are silently ignored."""
     reader = _FakeReader((1.0, 2.0, 3.0, 4.0, "Stable"))
-    h = RingHistory(reader.read, num_metrics=3, capacity=2, ticks_per_commit=1)
+    h = RingHistory(reader.read, metric_count=3, capacity=2, ticks_per_commit=1)
     assert h.value_at(0, 0) == pytest.approx(1.0)
     assert h.value_at(1, 0) == pytest.approx(2.0)
     assert h.value_at(2, 0) == pytest.approx(3.0)
 
 
-def test_num_metrics_one_works() -> None:
+def test_metric_count_one_works() -> None:
     """Degenerate case: a single-metric history is valid."""
     counter = {"n": 0}
 
@@ -267,9 +256,9 @@ def test_num_metrics_one_works() -> None:
         counter["n"] += 1
         return (counter["n"] * 1.0,)
 
-    h = RingHistory(sampler, num_metrics=1, capacity=3, ticks_per_commit=1)
-    h._tick_ref()
-    h._tick_ref()
+    h = RingHistory(sampler, metric_count=1, capacity=3, ticks_per_commit=1)
+    h.tick()
+    h.tick()
     assert h.commit_count == 3
     assert [h.value_at(0, i) for i in range(3)] == [
         pytest.approx(3.0),
