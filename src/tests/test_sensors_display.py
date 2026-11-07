@@ -770,6 +770,33 @@ def test_gas_column_backfilled_when_heater_becomes_stable(monkeypatch) -> None:
     assert history.update_latest_calls == []
 
 
+def test_entering_while_stable_keeps_committed_gas_sample() -> None:
+    history = _FakeRingHistory()
+    history.set_samples(3, [180.0, 170.0])
+    reader = FakeBME690Reader((20.0, 1005.0, 40.0, 250.0, "Stable"))
+    d = _make_display(reader=reader, history=history)
+
+    d.initialize()
+    d.deinitialize()
+    d.initialize()
+
+    assert history.value_at(3, 0) == 180.0
+
+
+def test_reentry_after_heater_stabilised_elsewhere_backfills_nan_gas_sample() -> None:
+    history = _FakeRingHistory()
+    history.set_samples(3, [float("nan")])
+    reader = FakeBME690Reader((20.0, 1005.0, 40.0, 250.0, "Warming"))
+    d = _make_display(reader=reader, history=history)
+    d.initialize()
+    d.deinitialize()
+
+    reader._reading = (20.0, 1005.0, 40.0, 250.0, "Stable")
+    d.initialize()
+
+    assert history.value_at(3, 0) == 250.0
+
+
 def test_stable_to_warming_transition_clears_gas_row_once(monkeypatch) -> None:
     """R2.3 regression: Stable→Warming clears the gas row once to wipe stale
     columns from the prior Stable state; no draw_graph_column for gas."""

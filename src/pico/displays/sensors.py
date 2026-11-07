@@ -486,9 +486,13 @@ class Display(_Display):
         # history commit observed on a "reading unchanged" tick still fires.
         gas_stable_now = (reading[4] == "Stable")
         # Backfill the newest gas sample once valid rather than at the next commit;
-        # must precede the redraw block, which updates _gas_was_stable.
+        # must precede the redraw block, which updates _gas_was_stable.  Entering the
+        # view also gets here (initialize() resets _gas_was_stable) and must leave a
+        # valid sample as committed.
         if gas_stable_now and self._gas_was_stable is not True:
-            self._history.update_latest(self._GAS_ROW, reading[3])
+            newest_gas = self._history.value_at(self._GAS_ROW, 0)
+            if newest_gas != newest_gas:  # NaN
+                self._history.update_latest(self._GAS_ROW, reading[3])
         commit_count = self._history.commit_count
         if (
             commit_count != self._last_commit
