@@ -31,13 +31,14 @@ def _make_stream(*specs, stream_colors=None) -> EventWindow:
     )
 
 
-def _mk_display(event_windows=None, now: int = 0):
+def _mk_display(event_windows=None, now: int = 0, real_remaining_sec=None):  # real_remaining_sec: (int) -> int
     """Build a calendar.Display with a RecordingRenderer and a fixed-now clock."""
     renderer = RecordingRenderer()
     d = calendar.Display(
         renderer=renderer,
         event_windows=event_windows if event_windows is not None else [],
         get_local_time=lambda: now,
+        real_remaining_sec=real_remaining_sec or (lambda local_epoch: local_epoch - now),
     )
     return d, renderer
 
@@ -131,9 +132,20 @@ class TestWindowCalculation:
         draw_rows_calls = [c for c in renderer.calls if c[0] == "draw_rows"]
         assert len(draw_rows_calls) == 1
 
-        _, (streams, window_start, window_end), _ = draw_rows_calls[0]
+        _, (streams, window_start, window_end, _real_remaining_sec), _ = draw_rows_calls[0]
         assert window_start == now_val - 1800  # 30 min past
         assert window_end == now_val + 5400    # 90 min future
+
+    def test_rows_get_the_injected_real_remaining_sec(self):
+        def real_remaining_sec(local_epoch: int) -> int:
+            return 0
+
+        d, renderer = _mk_display(real_remaining_sec=real_remaining_sec)
+
+        d.initialize()
+
+        (draw_rows_call,) = [c for c in renderer.calls if c[0] == "draw_rows"]
+        assert draw_rows_call[1][3] is real_remaining_sec
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +253,12 @@ def _make_renderer(gfx: FakeGfx | None = None) -> tuple[calendar.Renderer, FakeG
     return calendar.Renderer(geom, colors), gfx
 
 
+def _wall_clock_remaining(window_start: int):  # -> (int) -> int
+    """Stand-in for ``TimeService.real_remaining_sec`` with no DST transition ahead."""
+    now = window_start + calendar.WINDOW_PAST_SEC
+    return lambda local_epoch: local_epoch - now
+
+
 class TestHeaderGuard:
     def test_shipped_font_and_scale_build_cleanly(self):
         """bitmap8/scale 3 is 219 px on the 240 px panel — must not trip."""
@@ -292,13 +310,30 @@ class TestRemainingTime:
         stream = _make_stream(("work", now - 600, ev_duration), stream_colors=[10])
         stream.get_visible(window_start, window_end)  # prime the buffer
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         # Should find a text call with the remaining time format.
         # Event started 10 min ago, lasts 3 h → remaining = 2 h 50 min.
         expected_text = "-02:50"
         rem_texts = [t for t, *_ in gfx.text_calls if t == expected_text]
         assert len(rem_texts) == 1
+
+    def test_remaining_counts_real_seconds_to_the_bar_end(self):
+        renderer, gfx = _make_renderer()
+        now = 100_000
+        window_start, window_end = now - 1800, now + 5400
+        stream = _make_stream(("work", now - 600, 3 * 3600), stream_colors=[10])
+        stream.get_visible(window_start, window_end)
+        asked: list[int] = []
+
+        def real_remaining_sec(local_epoch: int) -> int:
+            asked.append(local_epoch)
+            return local_epoch - now + 3600  # a fall-back lies ahead
+
+        renderer.draw_rows([stream], window_start, window_end, real_remaining_sec)
+
+        assert asked == [now - 600 + 3 * 3600]
+        assert "-03:50" in [t for t, *_ in gfx.text_calls]
 
     def test_remaining_not_shown_when_event_ends_within_window(self):
         renderer, gfx = _make_renderer()
@@ -310,7 +345,7 @@ class TestRemainingTime:
         stream = _make_stream(("short", now - 600, 1800), stream_colors=[10])
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         # No remaining-time text (only the name label if any)
         rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
@@ -328,7 +363,7 @@ class TestRemainingTime:
         )
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
         assert len(rem_texts) == 0
@@ -367,7 +402,7 @@ class TestBarColors:
         )
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         assert self._bar_pens(gfx) == [10, 8]
 
@@ -383,7 +418,7 @@ class TestBarColors:
         )
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         assert self._bar_pens(gfx) == [10, 10]
 
@@ -396,7 +431,7 @@ class TestBarColors:
         )
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         assert self._bar_pens(gfx) == [8]  # last stream_colors entry (clamped)
 
@@ -426,7 +461,7 @@ class TestBarSeams:
         stream = EventWindow(iter([_make_event("a", 0, 1800)]), stream_colors=[10])
         stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200)
+        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
 
         assert self._seam_xs(gfx) == [59]
 
@@ -439,7 +474,7 @@ class TestBarSeams:
         )
         stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200)
+        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
 
         # a → seam 59 (x1-1); b → seam 59 (x0-1, coincides) + seam 119 (x1-1).
         assert set(self._seam_xs(gfx)) == {59, 119}
@@ -467,7 +502,7 @@ class TestBarTruncation:
         )
         stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200)
+        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
 
         # A (pen 10) clips to B's start: 1800 s → 60 px, not its full 3600 s.
         assert self._rects_for_pen(gfx, 10) == [(0, 60)]
@@ -490,7 +525,7 @@ class TestBarTruncation:
         if prime:
             stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 1800, 9000)
+        renderer.draw_rows([stream], 1800, 9000, _wall_clock_remaining(1800))
 
         assert self._rects_for_pen(gfx, 10) == []
         assert self._rects_for_pen(gfx, 11) == []
@@ -504,7 +539,7 @@ class TestBarTruncation:
         )
         stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200)
+        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
 
         # next_start == A's end → no truncation; A keeps its full 60 px.
         assert self._rects_for_pen(gfx, 10) == [(0, 60)]
@@ -517,7 +552,7 @@ class TestBarTruncation:
         )
         stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200)
+        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
 
         assert self._rects_for_pen(gfx, 10) == []        # A clipped to 0 width
         assert len(self._rects_for_pen(gfx, 11)) == 1    # B (later) wins
@@ -536,7 +571,7 @@ class TestBarTruncation:
         )
         stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end)
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
 
         rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
         assert rem_texts == []  # truncated by B → no -HH:MM
@@ -611,7 +646,7 @@ class TestStatusGlyph:
         renderer, gfx = _make_renderer()
         ew = self._window(calendar.FRESH, specs=[("a", 0, 1800)])
 
-        renderer.draw_rows([ew], 0, 7200)
+        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
 
         assert self._glyphs(gfx) == []
 
@@ -619,7 +654,7 @@ class TestStatusGlyph:
         renderer, gfx = _make_renderer()
         ew = self._window(None, specs=[("a", 0, 1800)])
 
-        renderer.draw_rows([ew], 0, 7200)
+        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
 
         assert self._glyphs(gfx) == []
 
@@ -628,7 +663,7 @@ class TestStatusGlyph:
         renderer, gfx = _make_renderer()
         ew = self._window(status, specs=[("a", 0, 1800)])
 
-        renderer.draw_rows([ew], 0, 7200)
+        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
 
         glyphs = self._glyphs(gfx)
         assert len(glyphs) == 1
@@ -638,6 +673,6 @@ class TestStatusGlyph:
         renderer, gfx = _make_renderer()
         ew = self._window(ERROR, specs=[])  # an error row with no events
 
-        renderer.draw_rows([ew], 0, 7200)
+        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
 
         assert len(self._glyphs(gfx)) == 1

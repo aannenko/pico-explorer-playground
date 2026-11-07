@@ -1,8 +1,8 @@
 class Event:
-    """Scheduled event with both wall-clock and DST-corrected real durations.
+    """Scheduled event; ``start_timestamp`` is local epoch.
 
-    ``label`` must be non-empty.  ``real_duration_sec`` defaults to
-    ``wall_clock_duration_sec``.
+    ``label`` must be non-empty, and ``start_timestamp``,
+    ``wall_clock_duration_sec`` and ``color_index`` non-negative.
     """
 
     def __init__(
@@ -10,7 +10,6 @@ class Event:
         label: str,
         start_timestamp: int,
         wall_clock_duration_sec: int,
-        real_duration_sec: int = -1,
         color_index: int = 0,  # index into displays.palette.STREAM_COLORS
     ) -> None:
         if not label:
@@ -28,7 +27,6 @@ class Event:
         self.label = label
         self.start_timestamp = start_timestamp
         self.wall_clock_duration_sec = wall_clock_duration_sec
-        self.real_duration_sec = real_duration_sec if real_duration_sec >= 0 else wall_clock_duration_sec
         self.color_index = color_index
 
     def __repr__(self) -> str:
@@ -36,6 +34,5 @@ class Event:
             f"Event(label={self.label}, "
             f"start_timestamp={self.start_timestamp}, "
             f"wall_clock_duration_sec={self.wall_clock_duration_sec}, "
-            f"real_duration_sec={self.real_duration_sec}, "
             f"color_index={self.color_index})"
         )

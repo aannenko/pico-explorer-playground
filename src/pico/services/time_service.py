@@ -43,7 +43,8 @@ def _mday_of_nth_weekday(year: int, month: int, week: int, weekday: int) -> int:
 def _transition_utc(year: int, rule: tuple, offset_sec: int) -> int:
     """Return the UTC epoch of ``rule``'s transition in ``year``.
 
-    ``offset_sec`` is the UTC offset the rule's hour is expressed in.
+    ``offset_sec`` is the UTC offset the rule's hour is expressed in.  Near the
+    new year the result can fall in the UTC year before or after ``year``.
     """
     month, week, weekday, hour = rule
     mday = _mday_of_nth_weekday(year, month, week, weekday)
@@ -58,12 +59,18 @@ def _is_dst(
     dst_end_rule: tuple,
 ) -> bool:
     year = time.gmtime(utc_epoch)[0]
-    start = _transition_utc(year, dst_start_rule, tz_offset_sec)
-    end = _transition_utc(year, dst_end_rule, tz_offset_sec + dst_offset_sec)
-    if start < end:
-        return start <= utc_epoch < end
-    # Southern hemisphere: DST wraps around the new year
-    return utc_epoch >= start or utc_epoch < end
+    latest_utc = -1
+    is_dst = False
+    for y in range(year - 1, year + 2):
+        start = _transition_utc(y, dst_start_rule, tz_offset_sec)
+        if latest_utc < start <= utc_epoch:
+            latest_utc = start
+            is_dst = True
+        end = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
+        if latest_utc < end <= utc_epoch:
+            latest_utc = end
+            is_dst = False
+    return is_dst
 
 
 def _next_transition_utc(
@@ -78,7 +85,7 @@ def _next_transition_utc(
     """
     year = time.gmtime(utc_epoch)[0]
     result = 0
-    for y in (year, year + 1):
+    for y in range(year - 1, year + 2):
         s = _transition_utc(y, dst_start_rule, tz_offset_sec)
         e = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
         if s > utc_epoch and (result == 0 or s < result):
@@ -136,9 +143,6 @@ class TimeService:
         """Return the current local-epoch time in seconds."""
         return self._get_time() + self._offset_sec
 
-    def utc_now(self) -> int:
-        return self._get_time()
-
     def utc_offset_sec(self, utc_epoch: int) -> int:
         """Time-zone offset, plus the DST offset when DST is active at ``utc_epoch``."""
         if self._dst_start_rule is None or self._dst_end_rule is None:
@@ -154,23 +158,43 @@ class TimeService:
         return self._tz_offset_sec
 
     def to_utc(self, local_epoch: int) -> int:
-        """Convert local-epoch to UTC epoch.
+        """Convert a local-epoch time to UTC epoch.
 
-        During fall-back overlap (an ambiguous local time), prefers the DST
-        (earlier UTC) interpretation — correct for forward-progressing events.
+        Near a DST change a local time can occur twice or not at all.  Either way
+        this returns the moment the clock first reaches it, which is when an event
+        starting or ending at that time happens:
+        - twice, when clocks fall back (e.g. 03:00 CEST to 02:00 CET repeats
+          02:00-02:59): the earlier occurrence;
+        - never, when clocks spring forward (e.g. 02:00 CET to 03:00 CEST skips
+          02:00-02:59): the instant of the jump.
+        So a later local time never maps to an earlier UTC instant.
         """
         # Estimating with the max offset never overshoots a fall-back boundary.
         max_offset_sec = self._tz_offset_sec + self._dst_offset_sec
         utc_estimate = local_epoch - max_offset_sec
-        return local_epoch - self.utc_offset_sec(utc_estimate)
+        offset_sec = self.utc_offset_sec(utc_estimate)
+        utc = local_epoch - offset_sec
+        if self.utc_offset_sec(utc) == offset_sec:
+            return utc
+        # The clock never shows local_epoch, so a spring-forward jump skips it, and
+        # that jump is the first transition after the estimate.
+        return _next_transition_utc(
+            utc_estimate,
+            self._tz_offset_sec,
+            self._dst_offset_sec,
+            self._dst_start_rule,
+            self._dst_end_rule,
+        )
 
-    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
-        """Real seconds in a wall-clock span; DST transitions lengthen or shorten it.
+    def real_remaining_sec(self, local_epoch: int) -> int:
+        """Return the real seconds from now until the clock first reaches local time ``local_epoch``.
 
-        Exact for any event length and any number of DST transitions, provided
-        neither endpoint falls in a spring-forward gap (a nonexistent local time).
+        A DST change in between counts, as on a stopwatch; negative once that
+        moment has passed.
         """
-        return self.to_utc(local_start + wall_clock_duration_sec) - self.to_utc(local_start)
+        # Measured from the true current instant: in a repeated hour now() doesn't
+        # say which pass it is, so to_utc(now()) would be off by the DST offset.
+        return self.to_utc(local_epoch) - self._get_time()
 
     def _tick(self) -> None:
         now_ms = time.ticks_ms()

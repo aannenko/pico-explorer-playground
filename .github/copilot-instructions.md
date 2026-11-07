@@ -56,7 +56,7 @@ graph TD
     SensorsDisplay --> RingHistory
     RingHistory -- "sampler = bme690.read" --> PimoroniBME690
     SensorsDisplay -- "time_service.now()" --> TimeService
-    CalendarDisplay -- "get_local_time" --> TimeService
+    CalendarDisplay -- "get_local_time, real_remaining_sec" --> TimeService
     CalendarDisplay --> EventWindow --> scheduling["scheduling/event + event_runs + event_factory + stream"]
 
     NetworkService -- "on_progress (bootstrap only)" --> StatusDisplay

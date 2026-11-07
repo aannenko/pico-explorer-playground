@@ -28,19 +28,8 @@ def test_event_repr_is_stable() -> None:
     e = Event("rest", 10, 20)
     assert repr(e) == (
         "Event(label=rest, start_timestamp=10, wall_clock_duration_sec=20, "
-        "real_duration_sec=20, color_index=0)"
+        "color_index=0)"
     )
-
-
-def test_event_real_duration_defaults_to_duration() -> None:
-    e = Event("work", 100, 3600)
-    assert e.real_duration_sec == 3600
-
-
-def test_event_real_duration_explicit() -> None:
-    e = Event("rest", 100, 3600, real_duration_sec=3000)
-    assert e.real_duration_sec == 3000
-    assert e.wall_clock_duration_sec == 3600
 
 
 def test_event_color_index_defaults_to_zero() -> None:
@@ -57,5 +46,5 @@ def test_event_rejects_negative_color_index() -> None:
 
 
 def test_event_repr_includes_explicit_color_index() -> None:
-    e = Event("rain", 5, 600, real_duration_sec=600, color_index=2)
+    e = Event("rain", 5, 600, color_index=2)
     assert "color_index=2" in repr(e)

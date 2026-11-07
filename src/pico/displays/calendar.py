@@ -154,11 +154,11 @@ class Renderer:
         event_windows: list[EventWindow],
         window_start: int,
         window_end: int,
+        real_remaining_sec,  # (int) -> int
     ) -> None:
         geom = self._geom
         gfx = self._gfx
         width = geom.width
-        now = window_start + WINDOW_PAST_SEC
 
         gfx.set_font(geom.bar_font)
 
@@ -227,7 +227,7 @@ class Renderer:
                         label_right = x0 + _BAR_TEXT_MARGIN_PX + text_w
 
                 if ev_end > window_end:
-                    remaining = ev_end - now
+                    remaining = real_remaining_sec(ev_end)
                     if remaining > 0:
                         rem_text = _format_remaining(remaining)
                         rem_w = gfx.measure_text(rem_text, scale=geom.bar_text_scale)
@@ -302,8 +302,9 @@ class Renderer:
 class Display(_Display):
     """Calendar view: a timeline of event rows that scrolls with the clock.
 
-    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, and ``get_local_time``
-    must return epoch seconds.
+    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, ``get_local_time``
+    must return epoch seconds, and ``real_remaining_sec(local_epoch)`` the real
+    seconds from now until ``local_epoch``.
     """
 
     refresh_period_ms = 60_000
@@ -313,10 +314,12 @@ class Display(_Display):
         renderer: Renderer,
         event_windows: list[EventWindow],
         get_local_time,  # () -> int
+        real_remaining_sec,  # (int) -> int
     ) -> None:
         self._renderer = renderer
         self._event_windows = event_windows
         self._get_local_time = get_local_time
+        self._real_remaining_sec = real_remaining_sec
         self._active = False
 
     def _redraw(self) -> None:
@@ -325,7 +328,7 @@ class Display(_Display):
         window_end = now + WINDOW_FUTURE_SEC
 
         self._renderer.write_header(format_header_time(now))
-        self._renderer.draw_rows(self._event_windows, window_start, window_end)
+        self._renderer.draw_rows(self._event_windows, window_start, window_end, self._real_remaining_sec)
         self._renderer.draw_time_axis(window_start, window_end)
         self._renderer.update()
 

@@ -34,8 +34,7 @@ def _random_event_loop(
             continue
 
         label = random.choice(labels)
-        real_dur = time_service.real_duration_sec(cursor, dur)
-        yield Event(label, cursor, dur, real_dur, color_index=color_index)
+        yield Event(label, cursor, dur, color_index=color_index)
         cursor += dur
 
 

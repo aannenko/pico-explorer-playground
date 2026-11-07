@@ -12,33 +12,24 @@ from conftest import (
     utc_epoch as _utc_epoch,
 )
 
-_CET_OFFSET = 1
-_CEST_EXTRA = 1
 _WORK_DAYS = {0, 1, 2, 3, 4}
 
 
 class _FakeTimeService:
     """Minimal TimeService stand-in for factory tests."""
 
-    def __init__(self, utc_epoch: int, tz_offset_hours: int = 1, dst_offset_hours: int = 1,
-                 dst_start=_DST_START, dst_end=_DST_END):
+    def __init__(self, utc_epoch: int) -> None:
         from services.time_service import TimeService
         self._svc = TimeService(
-            tz_offset_hours=tz_offset_hours,
-            dst_start_rule=dst_start,
-            dst_end_rule=dst_end,
-            dst_offset_hours=dst_offset_hours,
+            tz_offset_hours=1,
+            dst_start_rule=_DST_START,
+            dst_end_rule=_DST_END,
+            dst_offset_hours=1,
             get_time=lambda: utc_epoch,
         )
 
     def now(self) -> int:
         return self._svc.now()
-
-    def to_utc(self, local_epoch: int) -> int:
-        return self._svc.to_utc(local_epoch)
-
-    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
-        return self._svc.real_duration_sec(local_start, wall_clock_duration_sec)
 
 
 def _collect(gen, n: int) -> list:
@@ -128,85 +119,6 @@ def test_timestamps_are_local_epoch():
     assert t[3] == 8   # hour
     assert t[4] == 0   # minute
     assert t[6] == 0   # weekday: Monday
-
-
-# ── DST correction: no crossing ─────────────────────────────────────
-
-
-def test_no_dst_crossing_real_equals_wall():
-    """Summer week — no DST transition, real == wall-clock for all events."""
-    utc = _utc_epoch(2026, 6, 15, 7, 0, 0)
-    ts = _FakeTimeService(utc)
-    gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
-    events = _collect(gen, 10)
-    for e in events:
-        assert e.real_duration_sec == e.wall_clock_duration_sec, \
-            f"{e.label}: real={e.real_duration_sec} != wall={e.wall_clock_duration_sec}"
-
-
-# ── DST correction: spring forward ──────────────────────────────────
-
-
-def test_spring_forward_rest_shorter():
-    """Rest spanning spring-forward is 1h shorter in real seconds."""
-    # Sat 2026-03-28 12:00 CET (winter) = 11:00 UTC
-    utc = _utc_epoch(2026, 3, 28, 11, 0, 0)
-    ts = _FakeTimeService(utc)
-    gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
-    # Current event should be weekend (Fri 17:00 CET → Mon 08:00 CEST)
-    events = _collect(gen, 10)
-
-    # Find events crossing the spring-forward (Sun 2026-03-29 02:00 CET → 03:00 CEST)
-    spring_utc = _utc_epoch(2026, 3, 29, 1, 0, 0)
-    for e in events:
-        utc_start = ts.to_utc(e.start_timestamp)
-        utc_end = utc_start + e.real_duration_sec
-        if utc_start < spring_utc < utc_end:
-            # This event crosses spring-forward
-            assert e.real_duration_sec == e.wall_clock_duration_sec - 3600, \
-                f"{e.label}: expected real = wall - 3600, " \
-                f"got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
-            break
-    else:
-        pytest.fail("No event found crossing spring-forward transition")
-
-
-# ── DST correction: fall back ───────────────────────────────────────
-
-
-def test_fall_back_weekend_longer():
-    """Weekend spanning fall-back is 1h longer in real seconds."""
-    # Sat 2026-10-24 12:00 CEST (summer) = 10:00 UTC
-    utc = _utc_epoch(2026, 10, 24, 10, 0, 0)
-    ts = _FakeTimeService(utc)
-    gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
-    events = _collect(gen, 10)
-
-    # Find event crossing fall-back (Sun 2026-10-25 01:00 UTC)
-    fall_utc = _utc_epoch(2026, 10, 25, 1, 0, 0)
-    for e in events:
-        utc_start = ts.to_utc(e.start_timestamp)
-        utc_end = utc_start + e.real_duration_sec
-        if utc_start < fall_utc < utc_end:
-            assert e.real_duration_sec == e.wall_clock_duration_sec + 3600, \
-                f"{e.label}: expected real = wall + 3600, " \
-                f"got real={e.real_duration_sec}, wall={e.wall_clock_duration_sec}"
-            break
-    else:
-        pytest.fail("No event found crossing fall-back transition")
-
-
-# ── no DST config ───────────────────────────────────────────────────
-
-
-def test_no_dst_config_real_equals_wall():
-    """Without DST config, real always equals wall-clock."""
-    utc = _utc_epoch(2026, 6, 15, 7, 0, 0)
-    ts = _FakeTimeService(utc, tz_offset_hours=5, dst_offset_hours=0, dst_start=None, dst_end=None)
-    gen = event_factory.work_week_loop(_WORK_DAYS, (8, 0), (17, 0), ts)
-    events = _collect(gen, 10)
-    for e in events:
-        assert e.real_duration_sec == e.wall_clock_duration_sec
 
 
 # ── validation ──────────────────────────────────────────────────────

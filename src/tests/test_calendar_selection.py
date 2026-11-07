@@ -130,3 +130,22 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     assert len(calendar._event_windows) == 5
     assert len(calendar._event_windows[-1]._buffer) == 8
     assert produced == 9
+
+
+def test_weekend_bar_shows_real_time_left_across_the_fall_back(app_module) -> None:
+    # Sat 2026-10-24 12:00 CEST: the weekend ends Mon 09:00 CET, 45 h away on the
+    # clock and 46 h in real time.
+    utc = utc_epoch(2026, 10, 24, 10, 0, 0)
+    time_service = TimeService(
+        tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
+        dst_start_rule=config_defaults.DST_START_RULE,
+        dst_end_rule=config_defaults.DST_END_RULE,
+        dst_offset_hours=config_defaults.DST_OFFSET_HOURS,
+        get_time=lambda: utc,
+    )
+    panel = _Panel()
+    calendar = app_module._build_calendar_display(panel, time_service, [])
+
+    calendar.initialize()
+
+    assert "-46:00" in panel.presented

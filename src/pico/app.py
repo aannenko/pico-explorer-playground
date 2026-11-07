@@ -196,6 +196,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
         ),
         event_windows=windows,
         get_local_time=time_service.now,
+        real_remaining_sec=time_service.real_remaining_sec,
     )
 
 

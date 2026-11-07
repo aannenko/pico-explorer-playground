@@ -125,9 +125,7 @@ def work_week_loop(
         else:
             label = "weekend"
 
-        real_dur = time_service.real_duration_sec(current_event_start_timestamp, event_duration_sec)
-
-        yield Event(label, current_event_start_timestamp, event_duration_sec, real_dur)
+        yield Event(label, current_event_start_timestamp, event_duration_sec)
 
         current_event_start_timestamp += event_duration_sec
         current_event_index = (current_event_index + 1) % num_events

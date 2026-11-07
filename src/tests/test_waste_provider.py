@@ -17,9 +17,6 @@ class _FakeTimeService:
     def now(self) -> int:
         return self._now
 
-    def real_duration_sec(self, start: int, dur: int) -> int:
-        return dur
-
 
 def _epoch(y: int, m: int, d: int, hh: int = 6, mm: int = 0) -> int:
     return time.mktime((y, m, d, hh, mm, 0, 0, 0))
@@ -102,19 +99,6 @@ def test_wall_clock_hour_stable_across_periods():
 
     for event in events:
         assert time.gmtime(event.start_timestamp)[3] == 6  # hour stays 06:00
-
-
-def test_real_duration_is_applied():
-    class _SentinelTS(_FakeTimeService):
-        def real_duration_sec(self, start: int, dur: int) -> int:
-            return dur + 7
-
-    now = _epoch(2026, 6, 4) - _DAY
-    sched = [("BIO", 5, (2026, 6, 4), 6, 0, 60, 2)]
-
-    event = _take(waste.build_stream(_SentinelTS(now), sched), 1)[0]
-
-    assert event.real_duration_sec == 60 * 60 + 7
 
 
 def test_overlapping_entries_do_not_raise():

@@ -36,8 +36,7 @@ def _waste_loop(time_service: TimeService, pickups: list):  # Iterator[Event]
                 earliest = k
 
         start, label, color_index, dur_sec, period_sec = cursors[earliest]
-        real_dur = time_service.real_duration_sec(start, dur_sec)
-        yield Event(label, start, dur_sec, real_dur, color_index=color_index)
+        yield Event(label, start, dur_sec, color_index=color_index)
 
         if period_sec > 0:
             cursors[earliest][0] = start + period_sec

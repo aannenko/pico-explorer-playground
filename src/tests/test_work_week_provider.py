@@ -7,9 +7,6 @@ class _FakeTimeService:
     def now(self) -> int:
         return 1_000_000
 
-    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
-        return wall_clock_duration_sec
-
 
 def test_build_stream_yields_work_rest_weekend_events():
     stream = work_week.build_stream(_FakeTimeService())
