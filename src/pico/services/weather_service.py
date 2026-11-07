@@ -5,7 +5,7 @@ from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 
 _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
@@ -16,20 +16,18 @@ _HEAVY_MM = 7.6
 _UV_LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
-def _weather_type(code: int) -> str | None:
-    """Map a WMO weather code to a precipitation label.
-
-    Returns ``None`` for non-precipitation codes: probability alone must not
+def _precip_label(wmo_code: int) -> str | None:
+    """Return ``None`` for non-precipitation codes: probability alone must not
     draw a precipitation bar.
 
     WMO drizzle, rain, freezing rain and rain showers map to RAIN, snow and
     snow showers to SNOW, thunderstorms to STORM.
     """
-    if 51 <= code <= 67 or 80 <= code <= 82:
+    if 51 <= wmo_code <= 67 or 80 <= wmo_code <= 82:
         return "RAIN"
-    if 71 <= code <= 77 or code == 85 or code == 86:
+    if 71 <= wmo_code <= 77 or wmo_code == 85 or wmo_code == 86:
         return "SNOW"
-    if 95 <= code <= 99:
+    if 95 <= wmo_code <= 99:
         return "STORM"
     return None
 
@@ -75,7 +73,7 @@ def _build_events(payload: dict, prob_threshold_pct: int, uv_thresholds: tuple[i
     for i in range(len(times)):
         candidates = []
         prob = probs[i]
-        kind = None if (prob is None or prob < prob_threshold_pct) else _weather_type(codes[i])
+        kind = None if (prob is None or prob < prob_threshold_pct) else _precip_label(codes[i])
         if kind is not None:
             precip_mm = amounts[i] if amounts[i] is not None else 0.0
             rank, color = _precip_rank_and_color(precip_mm)

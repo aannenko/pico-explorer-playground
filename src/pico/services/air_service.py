@@ -5,13 +5,13 @@ from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 
 _LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
-def _pollen_winner(labels, values, warn, severe) -> tuple[int, str | None]:
-    """Return ``(level, label)`` of the dominant pollen in one hour.
+def _dominant_pollen(labels, values, warn, severe) -> tuple[int, str | None]:
+    """Return ``(level, label)`` for one hour.
 
     Highest severity wins; ties go to the highest raw count.  ``(0, None)`` when
     no species reaches warning.
@@ -52,7 +52,7 @@ def _build_events(aq_payload, species, aqi_thresholds, pollen_thresholds) -> lis
         aqi_lvl = event_runs.level(aqi_arr[i], aqi_warn, aqi_severe)
         if aqi_lvl:
             candidates.append((aqi_lvl, "AQI", _LEVEL_COLOR[aqi_lvl]))
-        pol_lvl, pol_label = _pollen_winner(
+        pol_lvl, pol_label = _dominant_pollen(
             pollen_labels, [arr[i] for arr in pollen_arrs], pollen_thresholds[0], pollen_thresholds[1]
         )
         if pol_lvl:

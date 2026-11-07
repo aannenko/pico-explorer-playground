@@ -2,17 +2,17 @@ from scheduling.event import Event
 
 
 def build_event_windows(
-    palette: list[int],
+    stream_colors: list[int],
     streams,  # Iterable[Stream]
 ) -> list[EventWindow]:
-    """Build one ``EventWindow`` per stream, all sharing ``palette``."""
+    """Build one ``EventWindow`` per stream, all sharing ``stream_colors``."""
     return [
         EventWindow(
             events_iter=s.events_iter,
-            palette=palette,
-            events_fn=s.events_fn,
-            generation_fn=s.generation_fn,
-            status_fn=s.status_fn,
+            stream_colors=stream_colors,
+            events_iter_factory=s.events_iter_factory,
+            get_generation=s.get_generation,
+            get_status=s.get_status,
         )
         for s in streams
     ]
@@ -23,31 +23,30 @@ class EventWindow:
 
     Requires events in nondecreasing start order.
 
-    ``palette`` must be nonempty; it is indexed by ``Event.color_index``.
+    ``stream_colors`` must be nonempty; it is indexed by ``Event.color_index``.
     """
 
     def __init__(
         self,
         events_iter,  # Iterator[Event]
-        palette: list[int],
-        events_fn=None,  # () -> Iterator[Event]
-        generation_fn=None,  # () -> int
-        status_fn=None,  # () -> int
+        stream_colors: list[int],
+        events_iter_factory=None,  # () -> Iterator[Event]
+        get_generation=None,  # () -> int
+        get_status=None,  # () -> int
     ) -> None:
         self._events = events_iter
-        self._palette = palette
+        self._stream_colors = stream_colors
         self._buffer: list[tuple[Event, int]] = []
         self._next: tuple[Event, int] | None = None
         self._exhausted = False
-        self._events_fn = events_fn
-        self._generation_fn = generation_fn
-        self._status_fn = status_fn
+        self._events_iter_factory = events_iter_factory
+        self._get_generation = get_generation
+        self._get_status = get_status
         self._generation = -1
 
     @property
-    def palette(self) -> list[int]:
-        """Pen slots the bars are colored from."""
-        return self._palette
+    def stream_colors(self) -> list[int]:
+        return self._stream_colors
 
     def get_visible(
         self,
@@ -67,7 +66,7 @@ class EventWindow:
 
     def status(self) -> int | None:
         """Return the freshness code, or None when no status hook is provided."""
-        sf = self._status_fn
+        sf = self._get_status
         return sf() if sf is not None else None
 
     def replace(self, events_iter) -> None:  # events_iter: Iterator[Event]
@@ -79,17 +78,17 @@ class EventWindow:
 
     def _resolve_pen(self, color_index: int) -> int:
         idx = color_index
-        if idx >= len(self._palette):
-            idx = len(self._palette) - 1
-        return self._palette[idx]
+        if idx >= len(self._stream_colors):
+            idx = len(self._stream_colors) - 1
+        return self._stream_colors[idx]
 
     def _refresh_if_changed(self) -> None:
-        if self._generation_fn is None or self._events_fn is None:
+        if self._get_generation is None or self._events_iter_factory is None:
             return
-        gen = self._generation_fn()
+        gen = self._get_generation()
         if gen != self._generation:
             self._generation = gen
-            self.replace(self._events_fn())
+            self.replace(self._events_iter_factory())
 
     def _fill_to(self, window_start: int, window_end: int) -> None:
         if self._exhausted:

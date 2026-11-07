@@ -315,7 +315,7 @@ def test_noop_button_press_does_not_reset_gate() -> None:
 def test_refresh_gate_fires_every_period_ticks() -> None:
     gate = RefreshGate(3)
 
-    fires = [gate.ready() for _ in range(7)]
+    fires = [gate.admit_tick() for _ in range(7)]
 
     # Pattern: F F T F F T F
     assert fires == [False, False, True, False, False, True, False]
@@ -324,23 +324,23 @@ def test_refresh_gate_fires_every_period_ticks() -> None:
 def test_refresh_gate_period_one_fires_every_call() -> None:
     gate = RefreshGate(1)
 
-    assert [gate.ready() for _ in range(3)] == [True, True, True]
+    assert [gate.admit_tick() for _ in range(3)] == [True, True, True]
 
 
 def test_refresh_gate_reset_restarts_count() -> None:
     gate = RefreshGate(3)
-    gate.ready()
-    gate.ready()  # count = 2/3
+    gate.admit_tick()
+    gate.admit_tick()  # count = 2/3
 
     gate.reset()
 
     # After reset, need 3 more calls to fire again.
-    assert [gate.ready() for _ in range(3)] == [False, False, True]
+    assert [gate.admit_tick() for _ in range(3)] == [False, False, True]
 
 
 def test_refresh_gate_clamps_zero_period_to_one() -> None:
     gate = RefreshGate(0)
 
     # Clamped to period=1 → fires every call.
-    assert gate.ready() is True
-    assert gate.ready() is True
+    assert gate.admit_tick() is True
+    assert gate.admit_tick() is True

@@ -31,10 +31,10 @@ class FakeWifiClient:
 
 
 def _mk_service(wifi=None, **kwargs):
-    status_calls: list[tuple[str, ...]] = []
+    progress_calls: list[tuple[str, ...]] = []
 
-    def status_fn(text: str, subtext: str = "") -> None:
-        status_calls.append((text, subtext))
+    def on_progress(text: str, subtext: str = "") -> None:
+        progress_calls.append((text, subtext))
 
     svc = NetworkService(
         ssid="TestSSID",
@@ -42,7 +42,7 @@ def _mk_service(wifi=None, **kwargs):
         wifi=wifi if wifi is not None else FakeWifiClient(),
         **kwargs,
     )
-    return svc, status_fn, status_calls
+    return svc, on_progress, progress_calls
 
 
 # --- connect_and_sync_initial ---
@@ -50,42 +50,42 @@ def _mk_service(wifi=None, **kwargs):
 def test_connect_and_sync_initial_success(monkeypatch):
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, status_fn, status_calls = _mk_service(
+    svc, on_progress, progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
     )
-    svc.connect_and_sync_initial(on_progress=status_fn)
+    svc.connect_and_sync_initial(on_progress=on_progress)
 
-    assert status_calls == [("wifi", ""), ("sync time", "")]
+    assert progress_calls == [("wifi", ""), ("sync time", "")]
 
 
 def test_connect_and_sync_initial_wifi_fail(monkeypatch):
-    svc, status_fn, status_calls = _mk_service(
+    svc, on_progress, progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.FAILED),
     )
 
     with pytest.raises(RuntimeError, match="Could not connect to WiFi"):
-        svc.connect_and_sync_initial(on_progress=status_fn)
+        svc.connect_and_sync_initial(on_progress=on_progress)
 
-    assert ("wifi fail", "") in status_calls
+    assert ("wifi fail", "") in progress_calls
 
 
 def test_connect_and_sync_initial_ntp_fail(monkeypatch):
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.FAILED)
 
-    svc, status_fn, status_calls = _mk_service(
+    svc, on_progress, progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
     )
 
     with pytest.raises(RuntimeError, match="Could not sync time"):
-        svc.connect_and_sync_initial(on_progress=status_fn)
+        svc.connect_and_sync_initial(on_progress=on_progress)
 
-    assert ("ntp fail", "") in status_calls
+    assert ("ntp fail", "") in progress_calls
 
 
-def test_connect_and_sync_initial_no_status_fn(monkeypatch):
+def test_connect_and_sync_initial_without_on_progress(monkeypatch):
     monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
 
-    svc, _status_fn, _status_calls = _mk_service(
+    svc, _on_progress, _progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
     )
     svc.connect_and_sync_initial()  # must not raise

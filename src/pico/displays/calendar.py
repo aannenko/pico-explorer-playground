@@ -302,8 +302,8 @@ class Renderer:
 class Display(_Display):
     """Calendar view: a timeline of event rows that scrolls with the clock.
 
-    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, and ``get_time`` must
-    return local epoch seconds.
+    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, and ``get_local_time``
+    must return epoch seconds.
     """
 
     refresh_period_ms = 60_000
@@ -312,15 +312,15 @@ class Display(_Display):
         self,
         renderer: Renderer,
         event_windows: list[EventWindow],
-        get_time,  # () -> int
+        get_local_time,  # () -> int
     ) -> None:
         self._renderer = renderer
         self._event_windows = event_windows
-        self._get_time = get_time
+        self._get_local_time = get_local_time
         self._active = False
 
     def _redraw(self) -> None:
-        now = self._get_time()
+        now = self._get_local_time()
         window_start = now - WINDOW_PAST_SEC
         window_end = now + WINDOW_FUTURE_SEC
 

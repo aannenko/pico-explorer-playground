@@ -7,12 +7,12 @@ import pytest
 from displays.palette import STREAM_COLORS, STREAM_RED, STREAM_YELLOW
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
 from services.air_service import (
     AirService,
     _build_events,
-    _pollen_winner,
+    _dominant_pollen,
 )
 
 _SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
@@ -39,25 +39,25 @@ def _events(aq):
 
 
 # ---------------------------------------------------------------------------
-# _pollen_winner (bespoke: tie by highest count, not list order)
+# _dominant_pollen (bespoke: tie by highest count, not list order)
 # ---------------------------------------------------------------------------
 
 
-def test_pollen_winner_all_below_returns_none_label():
-    assert _pollen_winner(("GRASS", "BIRCH"), [10, 20], 50, 100) == (0, None)
+def test_dominant_pollen_all_below_returns_none_label():
+    assert _dominant_pollen(("GRASS", "BIRCH"), [10, 20], 50, 100) == (0, None)
 
 
-def test_pollen_winner_highest_severity_wins():
-    assert _pollen_winner(("GRASS", "BIRCH"), [55, 120], 50, 100) == (2, "BIRCH")
+def test_dominant_pollen_highest_severity_wins():
+    assert _dominant_pollen(("GRASS", "BIRCH"), [55, 120], 50, 100) == (2, "BIRCH")
 
 
-def test_pollen_winner_tie_broken_by_count_not_order():
+def test_dominant_pollen_tie_broken_by_count_not_order():
     # Both warning-level; the higher raw count wins even though it is listed 2nd.
-    assert _pollen_winner(("GRASS", "MUGW"), [55, 70], 50, 100) == (1, "MUGW")
+    assert _dominant_pollen(("GRASS", "MUGW"), [55, 70], 50, 100) == (1, "MUGW")
 
 
-def test_pollen_winner_skips_none_values():
-    assert _pollen_winner(("GRASS", "BIRCH"), [None, 55], 50, 100) == (1, "BIRCH")
+def test_dominant_pollen_skips_none_values():
+    assert _dominant_pollen(("GRASS", "BIRCH"), [None, 55], 50, 100) == (1, "BIRCH")
 
 
 # ---------------------------------------------------------------------------
@@ -221,10 +221,10 @@ class _Harness:
             past_hours=1,
         )
         stream = Stream(
-            self.service.events_iter(),
-            events_fn=self.service.events_iter,
-            generation_fn=lambda: self.service.generation,
-            status_fn=lambda: self.service.status,
+            self.service.iter_events(),
+            events_iter_factory=self.service.iter_events,
+            get_generation=lambda: self.service.generation,
+            get_status=lambda: self.service.status,
         )
         self.window = build_event_windows(((1, 2),) * len(STREAM_COLORS), [stream])[0]
 

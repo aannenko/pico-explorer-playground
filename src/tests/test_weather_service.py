@@ -12,13 +12,13 @@ from displays.palette import (
 )
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
 from services.weather_service import (
     WeatherService,
     _build_events,
     _precip_rank_and_color,
-    _weather_type,
+    _precip_label,
 )
 
 _UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
@@ -30,7 +30,7 @@ _UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
 
 
 @pytest.mark.parametrize(
-    "code, expected",
+    "wmo_code, expected",
     [
         (51, "RAIN"), (61, "RAIN"), (67, "RAIN"), (80, "RAIN"),
         (71, "SNOW"), (75, "SNOW"), (85, "SNOW"), (86, "SNOW"),
@@ -38,8 +38,8 @@ _UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
         (0, None), (3, None), (45, None),
     ],
 )
-def test_weather_type_mapping(code, expected):
-    assert _weather_type(code) == expected
+def test_precip_label_mapping(wmo_code, expected):
+    assert _precip_label(wmo_code) == expected
 
 
 @pytest.mark.parametrize(
@@ -313,10 +313,10 @@ class _Harness:
             past_hours=1,
         )
         stream = Stream(
-            self.service.events_iter(),
-            events_fn=self.service.events_iter,
-            generation_fn=lambda: self.service.generation,
-            status_fn=lambda: self.service.status,
+            self.service.iter_events(),
+            events_iter_factory=self.service.iter_events,
+            get_generation=lambda: self.service.generation,
+            get_status=lambda: self.service.status,
         )
         self.window = build_event_windows(((1, 2),) * len(STREAM_COLORS), [stream])[0]
 

@@ -46,7 +46,7 @@ class TestGetVisible:
             ("B", 300, 200),   # 300..500
             ("C", 500, 200),   # 500..700
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(250, 550)
 
@@ -59,7 +59,7 @@ class TestGetVisible:
             ("B", 200, 100),   # 200..300
             ("C", 300, 100),   # 300..400
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(300, 500)
 
@@ -70,7 +70,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 500),   # 0..500 — spans into window
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(200, 400)
 
@@ -83,7 +83,7 @@ class TestGetVisible:
             ("B", 100, 100),   # 100..200
             ("C", 200, 100),   # 200..300
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         ew.get_visible(0, 300)
         assert len(ew._buffer) == 3
@@ -93,7 +93,7 @@ class TestGetVisible:
         assert names == ["C"]
 
     def test_empty_iterator_returns_empty(self):
-        ew = EventWindow(iter([]), palette=[1])
+        ew = EventWindow(iter([]), stream_colors=[1])
 
         visible = ew.get_visible(0, 1000)
 
@@ -103,7 +103,7 @@ class TestGetVisible:
         events = _iter_events(
             ("A", 0, 100),   # 0..100 — entirely before window
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(200, 400)
 
@@ -116,7 +116,7 @@ class TestGetVisible:
             _make_event("A", start, 900)
             for start in range(0, later + 9000, 900)
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
         buffer = _BudgetBuffer(capacity=8)
         ew._buffer = buffer
         if prime:
@@ -139,7 +139,7 @@ class TestGetVisible:
                 yield _make_event("interruption", start, 60)
             yield _make_event("current", later, 900)
 
-        ew = EventWindow(events(), palette=[1])
+        ew = EventWindow(events(), stream_colors=[1])
         ew._buffer = _BudgetBuffer(capacity=2)
 
         visible = ew.get_visible(later, later + 7200)
@@ -148,22 +148,22 @@ class TestGetVisible:
 
 
 # ---------------------------------------------------------------------------
-# Color resolution (flat palette: pen == palette[color_index])
+# Color resolution (pen == stream_colors[color_index])
 # ---------------------------------------------------------------------------
 
 class TestColorResolution:
-    """The window resolves each event's pen from its flat palette at fill
-    time (``palette[color_index]``), so the renderer stays pure geometry."""
+    """The window resolves each event's pen from its ``stream_colors`` at fill
+    time (``stream_colors[color_index]``), so the renderer stays pure geometry."""
 
-    def test_resolves_pen_from_palette_by_color_index(self):
-        # color_index 0,0,1,1 → palette[0], palette[0], palette[1], palette[1].
+    def test_resolves_pen_from_stream_colors_by_color_index(self):
+        # color_index 0,0,1,1 → stream_colors[0], stream_colors[0], stream_colors[1], stream_colors[1].
         events = _iter_events(
             ("a", 0, 100, 0),
             ("b", 100, 100, 0),
             ("c", 200, 100, 1),
             ("d", 300, 100, 1),
         )
-        ew = EventWindow(events, palette=[10, 30])
+        ew = EventWindow(events, stream_colors=[10, 30])
 
         visible = ew.get_visible(0, 500)
 
@@ -178,7 +178,7 @@ class TestColorResolution:
             ("c", 200, 100, 0),
             ("d", 300, 100, 1),
         )
-        ew = EventWindow(events, palette=[10, 30])
+        ew = EventWindow(events, stream_colors=[10, 30])
 
         visible = ew.get_visible(0, 500)
 
@@ -187,11 +187,11 @@ class TestColorResolution:
 
     def test_out_of_range_color_index_clamps_to_last_entry(self):
         events = _iter_events(("x", 0, 100, 99),)
-        ew = EventWindow(events, palette=[10, 20, 30])
+        ew = EventWindow(events, stream_colors=[10, 20, 30])
 
         visible = ew.get_visible(0, 200)
 
-        assert visible[0][1] == 30  # last palette entry
+        assert visible[0][1] == 30  # last stream_colors entry
 
     def test_pen_persists_after_prune(self):
         events = _iter_events(
@@ -199,7 +199,7 @@ class TestColorResolution:
             ("B", 100, 100),
             ("C", 200, 100),
         )
-        ew = EventWindow(events, palette=[10])
+        ew = EventWindow(events, stream_colors=[10])
 
         ew.get_visible(0, 300)
         visible = ew.get_visible(100, 300)  # prune A away
@@ -215,7 +215,7 @@ class TestColorResolution:
 class TestIteratorExhaustion:
     def test_does_not_raise_on_exhausted_iterator(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         ew.get_visible(0, 200)
         visible = ew.get_visible(200, 400)
@@ -224,7 +224,7 @@ class TestIteratorExhaustion:
 
     def test_successive_calls_after_exhaustion(self):
         events = _iter_events(("A", 0, 100),)
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -243,7 +243,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),     # ends at 100
             ("B", 100, 100),   # starts at 100
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(100, 300)
 
@@ -255,7 +255,7 @@ class TestBoundaryConditions:
             ("A", 0, 100),
             ("B", 100, 100),
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         # Window [0, 100) — B starts at 100, should not appear
         visible = ew.get_visible(0, 100)
@@ -268,7 +268,7 @@ class TestBoundaryConditions:
             ("A", 100, 0),
             ("B", 100, 200),
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(50, 300)
 
@@ -278,7 +278,7 @@ class TestBoundaryConditions:
 
     def test_single_long_event_spanning_entire_window(self):
         events = _iter_events(("A", 0, 10000),)
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(1000, 2000)
 
@@ -290,7 +290,7 @@ class TestBoundaryConditions:
             ("A", 0, 50),       # 0..50
             ("B", 1000, 100),   # 1000..1100 — far beyond window
         )
-        ew = EventWindow(events, palette=[1])
+        ew = EventWindow(events, stream_colors=[1])
 
         visible = ew.get_visible(100, 200)
 
@@ -303,7 +303,7 @@ class TestBoundaryConditions:
 
 class TestReplace:
     def test_clears_all_internal_state(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), stream_colors=[1])
         ew.get_visible(0, 300)
         # Buffer is now populated.
         assert ew._buffer
@@ -315,7 +315,7 @@ class TestReplace:
         assert ew._exhausted is False
 
     def test_replace_after_exhaustion_refills_from_new_event_iter(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 100)), stream_colors=[1])
         # Drive past the only event so the iterator exhausts and latches.
         ew.get_visible(0, 200)
         ew.get_visible(200, 400)
@@ -331,7 +331,7 @@ class TestReplace:
     def test_replace_discards_stale_buffered_events(self):
         ew = EventWindow(
             _iter_events(("A", 0, 100), ("B", 100, 100), ("C", 200, 100)),
-            palette=[1],
+            stream_colors=[1],
         )
         ew.get_visible(0, 300)
         assert [e.label for e, _ in ew._buffer] == ["A", "B", "C"]
@@ -343,7 +343,7 @@ class TestReplace:
         assert names == ["X", "Y"]
 
     def test_replace_with_empty_iter_yields_empty(self):
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 100, 100)), stream_colors=[1])
         ew.get_visible(0, 300)
 
         ew.replace(iter([]))
@@ -353,7 +353,7 @@ class TestReplace:
 
     def test_replace_clears_pending_peek_slot(self):
         # B starts beyond the window, so it is held in the peek slot.
-        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 500, 100)), stream_colors=[1])
         ew.get_visible(0, 200)
         assert ew._next is not None  # B is peeked
 
@@ -365,34 +365,34 @@ class TestReplace:
 
 
 # ---------------------------------------------------------------------------
-# Color palette
+# Stream colors
 # ---------------------------------------------------------------------------
 
-class TestPalette:
-    def test_palette_stored(self):
-        ew = EventWindow(iter([]), palette=[10, 12])
-        assert ew.palette == [10, 12]
+class TestStreamColors:
+    def test_stream_colors_stored(self):
+        ew = EventWindow(iter([]), stream_colors=[10, 12])
+        assert ew.stream_colors == [10, 12]
 
-    def test_palette_is_read_only(self):
-        ew = EventWindow(iter([]), palette=[10, 11])
+    def test_stream_colors_are_read_only(self):
+        ew = EventWindow(iter([]), stream_colors=[10, 11])
         with pytest.raises(AttributeError):
-            ew.palette = [1, 2]
+            ew.stream_colors = [1, 2]
 
-    def test_replace_preserves_palette(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[10, 12])
+    def test_replace_preserves_stream_colors(self):
+        ew = EventWindow(_iter_events(("A", 0, 100)), stream_colors=[10, 12])
         ew.get_visible(0, 200)
 
         ew.replace(_iter_events(("B", 0, 100)))
 
-        assert ew.palette == [10, 12]
+        assert ew.stream_colors == [10, 12]
 
 
 # ---------------------------------------------------------------------------
-# build_event_windows — shared-palette composition helper
+# build_event_windows — windows sharing one stream_colors list
 # ---------------------------------------------------------------------------
 
 class TestBuildEventWindows:
-    _PALETTE = [10, 20, 30]
+    _STREAM_COLORS = [10, 20, 30]
 
     def test_one_window_per_stream(self):
         streams = [
@@ -400,19 +400,19 @@ class TestBuildEventWindows:
             Stream(_iter_events(("B", 0, 100))),
         ]
 
-        windows = build_event_windows(self._PALETTE, streams)
+        windows = build_event_windows(self._STREAM_COLORS, streams)
 
         assert len(windows) == 2
         assert all(isinstance(w, EventWindow) for w in windows)
 
-    def test_all_windows_share_the_same_palette(self):
+    def test_all_windows_share_the_same_stream_colors(self):
         streams = [Stream(_iter_events(("A", 0, 100))) for _ in range(3)]
 
-        windows = build_event_windows(self._PALETTE, streams)
+        windows = build_event_windows(self._STREAM_COLORS, streams)
 
-        # The same palette object is handed to every row.
+        # The same stream_colors object is handed to every row.
         for w in windows:
-            assert w.palette is self._PALETTE
+            assert w.stream_colors is self._STREAM_COLORS
 
     def test_window_wraps_its_stream_iterator(self):
         streams = [
@@ -420,24 +420,24 @@ class TestBuildEventWindows:
             Stream(_iter_events(("second", 0, 100))),
         ]
 
-        windows = build_event_windows(self._PALETTE, streams)
+        windows = build_event_windows(self._STREAM_COLORS, streams)
 
         assert windows[0].get_visible(0, 200)[0][0].label == "first"
         assert windows[1].get_visible(0, 200)[0][0].label == "second"
 
-    def test_color_index_indexes_the_shared_palette(self):
-        # An event's color_index selects globally into the shared palette.
+    def test_color_index_indexes_the_shared_stream_colors(self):
+        # An event's color_index selects globally into the shared stream_colors.
         stream = Stream(iter([
             Event("x", 0, 100, color_index=2),
         ]))
 
-        windows = build_event_windows(self._PALETTE, [stream])
+        windows = build_event_windows(self._STREAM_COLORS, [stream])
         visible = windows[0].get_visible(0, 200)
 
-        assert visible[0][1] == 30  # palette[2]
+        assert visible[0][1] == 30  # stream_colors[2]
 
     def test_empty_stream_list_yields_no_windows(self):
-        assert build_event_windows(self._PALETTE, []) == []
+        assert build_event_windows(self._STREAM_COLORS, []) == []
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +447,7 @@ class TestBuildEventWindows:
 class TestOverlapFill:
     def test_later_event_overlapping_long_earlier_is_not_dropped(self):
         # A is long and ends past window_end; B starts inside the window.
-        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), stream_colors=[1])
 
         visible = ew.get_visible(0, 500)
 
@@ -456,7 +456,7 @@ class TestOverlapFill:
     def test_multiple_events_overlapping_one_long_event(self):
         ew = EventWindow(
             _iter_events(("A", 0, 1000), ("B", 100, 50), ("C", 200, 50)),
-            palette=[1],
+            stream_colors=[1],
         )
 
         visible = ew.get_visible(0, 500)
@@ -464,7 +464,7 @@ class TestOverlapFill:
         assert [e.label for e, _ in visible] == ["A", "B", "C"]
 
     def test_long_event_then_exhausts_finite_iterator(self):
-        ew = EventWindow(_iter_events(("A", 0, 10000)), palette=[1])
+        ew = EventWindow(_iter_events(("A", 0, 10000)), stream_colors=[1])
 
         visible = ew.get_visible(1000, 2000)
 
@@ -488,7 +488,7 @@ class _FakeSource:
         self.status = status
         self.iter_calls = 0
 
-    def events_iter(self):  # -> Iterator[Event]
+    def iter_events(self):  # -> Iterator[Event]
         self.iter_calls += 1
         return iter(_make_events(*self.specs))
 
@@ -498,25 +498,25 @@ class _FakeSource:
     def stat(self) -> int:
         return self.status
 
-    def _window(self, palette=None) -> EventWindow:
+    def _window(self, stream_colors=None) -> EventWindow:
         return EventWindow(
-            self.events_iter(),
-            palette=palette if palette is not None else [1],
-            events_fn=self.events_iter,
-            generation_fn=self.gen,
-            status_fn=self.stat,
+            self.iter_events(),
+            stream_colors=stream_colors if stream_colors is not None else [1],
+            events_iter_factory=self.iter_events,
+            get_generation=self.gen,
+            get_status=self.stat,
         )
 
 
 class TestStatus:
-    def test_status_none_without_status_fn(self):
-        ew = EventWindow(iter([]), palette=[1])
+    def test_status_none_without_get_status(self):
+        ew = EventWindow(iter([]), stream_colors=[1])
 
         assert ew.status() is None
 
-    def test_status_delegates_to_status_fn(self):
+    def test_status_delegates_to_get_status(self):
         box = {"v": FRESH}
-        ew = EventWindow(iter([]), palette=[1], status_fn=lambda: box["v"])
+        ew = EventWindow(iter([]), stream_colors=[1], get_status=lambda: box["v"])
 
         assert ew.status() == FRESH
         box["v"] = ERROR
@@ -544,12 +544,12 @@ class TestGenerationRefresh:
         ew.get_visible(0, 1000)
         ew.get_visible(0, 1000)
 
-        # events_fn was not invoked again while generation stayed at 5.
+        # events_iter_factory was not invoked again while generation stayed at 5.
         assert src.iter_calls == calls_after_first
 
     def test_static_window_never_refreshes(self):
-        # No generation_fn → the initial iterator is used forever.
-        ew = EventWindow(_iter_events(("A", 0, 100)), palette=[1])
+        # No get_generation → the initial iterator is used forever.
+        ew = EventWindow(_iter_events(("A", 0, 100)), stream_colors=[1])
 
         assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
         assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
@@ -559,10 +559,10 @@ class TestBuildEventWindowsThreading:
     def test_status_and_refresh_thread_from_stream(self):
         src = _FakeSource([("A", 0, 100)], generation=0, status=STALE)
         stream = Stream(
-            src.events_iter(),
-            events_fn=src.events_iter,
-            generation_fn=src.gen,
-            status_fn=src.stat,
+            src.iter_events(),
+            events_iter_factory=src.iter_events,
+            get_generation=src.gen,
+            get_status=src.stat,
         )
 
         window = build_event_windows([1], [stream])[0]

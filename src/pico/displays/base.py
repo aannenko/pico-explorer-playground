@@ -39,7 +39,7 @@ class RefreshGate:
     def reset(self) -> None:
         self._count = 0
 
-    def ready(self) -> bool:
+    def admit_tick(self) -> bool:
         """Count one tick; return True if it completes the period."""
         self._count += 1
         if self._count >= self._period:

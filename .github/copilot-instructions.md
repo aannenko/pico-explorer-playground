@@ -9,7 +9,7 @@ Everything under `src/pico/` is uploaded *verbatim* to the device (MicroPico, `"
 - Display: `PicoGraphics(display=DISPLAY_PICO_EXPLORER)`.
 - Avoid allocations in hot paths (render loop, timer callbacks). Reading `obj.method` as a value allocates a new bound method (calling `obj.method(...)` doesn't), so cache a ref passed repeatedly — on every `schedule(...)`, or to a timer's `init()` per activation — in `__init__` (`self._tick_ref = self._tick`). Bound methods compare and hash by `(self, method)`, not identity (verified on-device). A nested `def` or `lambda` allocates a function object each time it executes, so hot-path helpers live at module or class level, with their caller's emitter decorator (`@micropython.native`).
 - **Timer callbacks are soft** (verified on-device): `machine.Timer` defaults to `hard=False` and no timer here passes `hard=True`, so each firing is queued like a `micropython.schedule(...)` call (dropped silently when the queue is full) and runs on the main thread; it may allocate but should stay short. Firings queued behind a blocking callback (e.g. an HTTP fetch) run back-to-back once it returns, so where they should collapse rather than burst (`TickScheduler`, `PimoroniBME690`, `WifiClient`), the callback only schedules the work behind a `_pending` flag and returns early while it is set — keep that hop. It collapses a backlog; it doesn't space runs apart. `schedule()` raises `RuntimeError` when the queue is full: roll `_pending` back so one failure doesn't wedge the state machine.
-- **Single Python thread:** timer and scheduled callbacks and the main-loop button poll share one thread (no event loop, no background thread), so blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering *and* buttons until it returns. Network fetches use a tick-driven fetch machine (`services/_fetch_machine.py`, owned by `services/_event_stream_service.py`) with a short `config.HTTP_TIMEOUT_SEC` per socket operation (DNS lookup isn't covered), not `asyncio`/`_thread` (lwIP isn't multi-core-safe, and rp2 `_thread` runs on core 1 without a GIL, so shared state would race).
+- **Single Python thread:** timer and scheduled callbacks and the main-loop button poll share one thread (no event loop, no background thread), so blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering *and* buttons until it returns. Network fetches use a tick-driven fetch machine (`services/fetch_machine.py`, owned by `services/_event_stream_service.py`) with a short `config.HTTP_TIMEOUT_SEC` per socket operation (DNS lookup isn't covered), not `asyncio`/`_thread` (lwIP isn't multi-core-safe, and rp2 `_thread` runs on core 1 without a GIL, so shared state would race).
 - Prefer `const(...)`; keep math integer where possible.
 - **Swallowed exceptions:** print them with `utilities.log.log_exception(tag, exc)`, passing a preformatted `tag`.
 - **Allocation traps (verified on-device):** the build's `time` epoch is **1970**, so `time.time()` / `TimeService.now()` exceed the 2³⁰ small-int limit (2026 ≈ 1.78e9) and **heap-allocate a big int every call** — gate wall-clock reads in per-tick / per-render paths behind the alloc-free `time.ticks_ms()`. **Floats are boxed (~16 B)** and `array('f')` re-boxes on each read, so a tuple holding float objects beats an `array('f')` when the values are read more than once. `for … in range(n)` is alloc-free (a `range` object isn't); `enumerate(...)`, list literals, tuples of non-constant values, and float arithmetic each allocate. GC is mark-sweep (no refcounting), so even transient objects accumulate until `gc.collect()` (the steady-state sawtooth).
@@ -56,7 +56,7 @@ graph TD
     SensorsDisplay --> RingHistory
     RingHistory -- "sampler = bme690.read" --> PimoroniBME690
     SensorsDisplay -- "time_service.now()" --> TimeService
-    CalendarDisplay -- "get_time" --> TimeService
+    CalendarDisplay -- "get_local_time" --> TimeService
     CalendarDisplay --> EventWindow --> scheduling["scheduling/event + event_runs + event_factory + stream"]
 
     NetworkService -- "on_progress (bootstrap only)" --> StatusDisplay
@@ -64,7 +64,7 @@ graph TD
     NetworkService --> ntp["utilities/ntp"]
     WeatherService -- "precip + UV" --> WifiClient
     AirService -- "AQI + pollen" --> WifiClient
-    WeatherService --> EventStreamService["EventStreamService base (_fetch_machine: FetchMachine + FetchCoordinator)"]
+    WeatherService --> EventStreamService["EventStreamService base (fetch_machine: FetchMachine + FetchCoordinator)"]
     AirService --> EventStreamService
     WeatherService -- "Stream" --> CalendarDisplay
     AirService -- "Stream" --> CalendarDisplay

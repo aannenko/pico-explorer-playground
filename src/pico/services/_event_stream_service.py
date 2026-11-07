@@ -4,7 +4,7 @@ from micropython import const
 
 from scheduling.event import Event
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE
-from services._fetch_machine import FetchCoordinator, FetchMachine, FetchState
+from services.fetch_machine import FetchCoordinator, FetchMachine, FetchState
 from utilities.log import log_exception
 
 _DEFAULT_BACKOFF_BASE_MS = const(5_000)
@@ -114,7 +114,7 @@ class EventStreamService:
         delay = self._backoff_base_ms << shift
         return delay if delay < self._backoff_max_ms else self._backoff_max_ms
 
-    def events_iter(self):  # -> Iterator[Event]
+    def iter_events(self):  # -> Iterator[Event]
         """Return an iterator over the latest published events."""
         return iter(self._events)
 

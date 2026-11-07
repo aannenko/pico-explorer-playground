@@ -1,6 +1,6 @@
 from scheduling.event import Event
 from services._event_stream_service import EventStreamService
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 
 
 class StubService(EventStreamService):

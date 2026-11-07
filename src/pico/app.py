@@ -25,7 +25,7 @@ from hardware.explorer import (
 from scheduling.event_window import EventWindow, build_event_windows
 from scheduling.providers import waste, work_week
 from scheduling.stream import Stream
-from services._fetch_machine import FetchCoordinator
+from services.fetch_machine import FetchCoordinator
 from services.air_service import AirService
 from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
@@ -195,7 +195,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
             ),
         ),
         event_windows=windows,
-        get_time=time_service.now,
+        get_local_time=time_service.now,
     )
 
 
@@ -278,10 +278,10 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         tick_scheduler=tick_scheduler,
     )
     weather_stream = Stream(
-        weather_service.events_iter(),
-        events_fn=weather_service.events_iter,
-        generation_fn=lambda: weather_service.generation,
-        status_fn=lambda: weather_service.status,
+        weather_service.iter_events(),
+        events_iter_factory=weather_service.iter_events,
+        get_generation=lambda: weather_service.generation,
+        get_status=lambda: weather_service.status,
     )
 
     air_service = AirService(
@@ -300,10 +300,10 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         tick_scheduler=tick_scheduler,
     )
     air_stream = Stream(
-        air_service.events_iter(),
-        events_fn=air_service.events_iter,
-        generation_fn=lambda: air_service.generation,
-        status_fn=lambda: air_service.status,
+        air_service.iter_events(),
+        events_iter_factory=air_service.iter_events,
+        get_generation=lambda: air_service.generation,
+        get_status=lambda: air_service.status,
     )
 
     sensors_display = _build_sensors_display(

@@ -85,7 +85,7 @@ def test_delayed_first_entry_starts_at_current_past_window(
 def test_long_absence_rebases_without_replaying_history(short_events):
     ts = _FakeTimeService()
     stream = demo_streams.build_demo_streams(ts, _PAST_SEC)[0]
-    window = EventWindow(stream.events_iter, palette=[1])
+    window = EventWindow(stream.events_iter, stream_colors=[1])
     window.get_visible(ts.now() - _PAST_SEC, ts.now() + 5400)
     ts.current_time += 30 * 86400
     ts.duration_calls = 0
@@ -102,7 +102,7 @@ def test_long_absence_rebases_without_replaying_history(short_events):
 def test_normal_scroll_preserves_events_and_lookahead(short_events):
     ts = _FakeTimeService()
     stream = demo_streams.build_demo_streams(ts, _PAST_SEC)[0]
-    window = EventWindow(stream.events_iter, palette=[1])
+    window = EventWindow(stream.events_iter, stream_colors=[1])
     visible = window.get_visible(ts.now() - _PAST_SEC, ts.now() + 5400)
     original = [event for event, _ in visible]
     lookahead = window._next[0]

@@ -83,8 +83,8 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         panel,
         time_service,
         [
-            Stream(iter(()), status_fn=lambda: DISABLED),
-            Stream(iter(()), status_fn=lambda: DISABLED),
+            Stream(iter(()), get_status=lambda: DISABLED),
+            Stream(iter(()), get_status=lambda: DISABLED),
         ],
     )
     manager = DisplayManager(

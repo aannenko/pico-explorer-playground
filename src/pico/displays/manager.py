@@ -45,7 +45,7 @@ class DisplayManager:
 
     def tick(self) -> None:
         """Render the current view when due; call once per ``tick_period_ms``."""
-        if self._gate is None or self._gate.ready():
+        if self._gate is None or self._gate.admit_tick():
             self._displays[self._current].render()
 
     def _do_next(self, _: int) -> None:

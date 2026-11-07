@@ -14,7 +14,7 @@ import pytest
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
 from _stub_service import StubService
-from services._fetch_machine import FETCHING, INITIAL, FetchCoordinator
+from services.fetch_machine import FETCHING, INITIAL, FetchCoordinator
 from services.http_client import HttpConnectError
 
 
@@ -72,10 +72,10 @@ class _Harness:
             enabled=enabled,
         )
         stream = Stream(
-            self.service.events_iter(),
-            events_fn=self.service.events_iter,
-            generation_fn=lambda: self.service.generation,
-            status_fn=lambda: self.service.status,
+            self.service.iter_events(),
+            events_iter_factory=self.service.iter_events,
+            get_generation=lambda: self.service.generation,
+            get_status=lambda: self.service.status,
         )
         self.window = build_event_windows(((1, 2),), [stream])[0]
 

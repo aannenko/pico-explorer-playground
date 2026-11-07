@@ -24,10 +24,10 @@ def _make_event(label: str, start: int, duration: int, color_index: int = 0) -> 
     )
 
 
-def _make_stream(*specs, palette=None) -> EventWindow:
+def _make_stream(*specs, stream_colors=None) -> EventWindow:
     return EventWindow(
         iter([_make_event(*spec) for spec in specs]),
-        palette=palette if palette is not None else [1],
+        stream_colors=stream_colors if stream_colors is not None else [1],
     )
 
 
@@ -37,7 +37,7 @@ def _mk_display(event_windows=None, now: int = 0):
     d = calendar.Display(
         renderer=renderer,
         event_windows=event_windows if event_windows is not None else [],
-        get_time=lambda: now,
+        get_local_time=lambda: now,
     )
     return d, renderer
 
@@ -290,7 +290,7 @@ class TestRemainingTime:
 
         # Event: started 10 min ago, lasts 3 hours (end well beyond window)
         ev_duration = 3 * 3600
-        stream = _make_stream(("work", now - 600, ev_duration), palette=[10])
+        stream = _make_stream(("work", now - 600, ev_duration), stream_colors=[10])
         stream.get_visible(window_start, window_end)  # prime the buffer
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -308,7 +308,7 @@ class TestRemainingTime:
         window_end = now + 5400
 
         # Event: started 10 min ago, lasts 30 min (ends within window)
-        stream = _make_stream(("short", now - 600, 1800), palette=[10])
+        stream = _make_stream(("short", now - 600, 1800), stream_colors=[10])
         stream.get_visible(window_start, window_end)
 
         renderer.draw_rows([stream], window_start, window_end)
@@ -325,7 +325,7 @@ class TestRemainingTime:
 
         stream = _make_stream(
             ("AVERYLONGEVENTNAME", now + 4800, 7200),
-            palette=[10],
+            stream_colors=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -341,16 +341,16 @@ class TestRemainingTime:
 
 class TestBarColors:
     """``draw_rows`` is pure geometry: it paints each bar with the pen the
-    window resolved at fill time (``palette[color_index]``).
+    window resolved at fill time (``stream_colors[color_index]``).
 
-    The palette pens are distinct from the renderer's ``empty_row`` pen
-    (3), so filtering recorded rectangles to palette pens isolates the
+    The stream color pens are distinct from the renderer's ``empty_row`` pen
+    (3), so filtering recorded rectangles to stream color pens isolates the
     event bars from the per-row background fill.
     """
 
     # Two categories — in-range palette slots (pen == slot under PEN_P4, so the
     # bar pen also indexes LABEL_FOR_SLOT for the label colour).
-    _PALETTE = [10, 8]
+    _STREAM_COLORS = [10, 8]
     _PENS = (10, 8)
 
     def _bar_pens(self, gfx: FakeGfx) -> list[int]:
@@ -364,7 +364,7 @@ class TestBarColors:
                 _make_event("p", 0, 1800, color_index=0),       # -> 10
                 _make_event("q", 1800, 1800, color_index=1),    # -> 8
             ]),
-            palette=self._PALETTE,
+            stream_colors=self._STREAM_COLORS,
         )
         stream.get_visible(window_start, window_end)
 
@@ -380,7 +380,7 @@ class TestBarColors:
                 _make_event("r", 0, 1800),
                 _make_event("r", 1800, 1800),
             ]),
-            palette=[10],
+            stream_colors=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -393,13 +393,13 @@ class TestBarColors:
         window_start, window_end = 0, 7200
         stream = EventWindow(
             iter([_make_event("x", 0, 1800, color_index=99)]),
-            palette=self._PALETTE,
+            stream_colors=self._STREAM_COLORS,
         )
         stream.get_visible(window_start, window_end)
 
         renderer.draw_rows([stream], window_start, window_end)
 
-        assert self._bar_pens(gfx) == [8]  # last palette entry (clamped)
+        assert self._bar_pens(gfx) == [8]  # last stream_colors entry (clamped)
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +424,7 @@ class TestBarSeams:
         renderer, gfx = _make_renderer()
         # One event 0..1800 → x0=0, x1=60.  x0-1=-1 is off-screen (skipped),
         # x1-1=59 is drawn.
-        stream = EventWindow(iter([_make_event("a", 0, 1800)]), palette=[10])
+        stream = EventWindow(iter([_make_event("a", 0, 1800)]), stream_colors=[10])
         stream.get_visible(0, 7200)
 
         renderer.draw_rows([stream], 0, 7200)
@@ -436,7 +436,7 @@ class TestBarSeams:
         # a: 0..1800 (x0=0, x1=60); b: 1800..3600 (x0=60, x1=120).
         stream = EventWindow(
             iter([_make_event("a", 0, 1800, 0), _make_event("b", 1800, 1800, 1)]),
-            palette=[10, 11],
+            stream_colors=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -464,7 +464,7 @@ class TestBarTruncation:
         renderer, gfx = _make_renderer()
         stream = EventWindow(
             iter([_make_event("A", 0, 3600, 0), _make_event("B", 1800, 1800, 1)]),
-            palette=[10, 11],
+            stream_colors=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -486,7 +486,7 @@ class TestBarTruncation:
                 _make_event("interruption", 900, interruption_duration, 1),
                 _make_event("current", 2700, 900, 2),
             ]),
-            palette=[10, 11, 8],
+            stream_colors=[10, 11, 8],
         )
         if prime:
             stream.get_visible(0, 7200)
@@ -501,7 +501,7 @@ class TestBarTruncation:
         renderer, gfx = _make_renderer()
         stream = EventWindow(
             iter([_make_event("A", 0, 1800, 0), _make_event("B", 1800, 1800, 1)]),
-            palette=[10, 11],
+            stream_colors=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -514,7 +514,7 @@ class TestBarTruncation:
         renderer, gfx = _make_renderer()
         stream = EventWindow(
             iter([_make_event("A", 1800, 1800, 0), _make_event("B", 1800, 1800, 1)]),
-            palette=[10, 11],
+            stream_colors=[10, 11],
         )
         stream.get_visible(0, 7200)
 
@@ -533,7 +533,7 @@ class TestBarTruncation:
                 _make_event("A", now - 600, 3 * 3600),
                 _make_event("B", now + 600, 1800),
             ]),
-            palette=[10],
+            stream_colors=[10],
         )
         stream.get_visible(window_start, window_end)
 
@@ -591,7 +591,7 @@ class TestStatusGlyph:
     square) on rows whose status is not FRESH/None, so a stale or broken
     network row never looks like a silently-empty one.
 
-    With palette ``[1]`` the bar pen is 1 and the row background is pen 3,
+    With stream_colors ``[1]`` the bar pen is 1 and the row background is pen 3,
     so filtering rectangles by the now_line pen (4) isolates glyphs.
     """
 
@@ -604,8 +604,8 @@ class TestStatusGlyph:
     def _window(self, status, specs=()) -> EventWindow:
         return EventWindow(
             iter([_make_event(*s) for s in specs]),
-            palette=[1],
-            status_fn=(None if status is None else (lambda: status)),
+            stream_colors=[1],
+            get_status=(None if status is None else (lambda: status)),
         )
 
     def test_no_glyph_when_fresh(self):

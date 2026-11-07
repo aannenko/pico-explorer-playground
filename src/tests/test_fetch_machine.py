@@ -7,7 +7,7 @@ covered end-to-end in ``test_stub_service.py``; this file covers only the
 
 import pytest
 
-from services._fetch_machine import (
+from services.fetch_machine import (
     DONE,
     FAILED,
     FETCHING,
