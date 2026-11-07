@@ -9,7 +9,7 @@ from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
 RING_SEGMENTS = const(120)
-SEGMENT_ANGLE = const(360 // RING_SEGMENTS)
+SEGMENT_ANGLE_DEG = const(360 // RING_SEGMENTS)
 
 # Coordinates in the form of X,Y; 5,5 is center, 0,0 is top-left, 9,9 is bottom-right
 TEXT_CENTER = const(55)
@@ -69,7 +69,7 @@ class Geometry:
         inner_r = self.inner_poly_r
 
         for i in range(RING_SEGMENTS):
-            angle = math.radians(SEGMENT_ANGLE * i - 90)
+            angle = math.radians(SEGMENT_ANGLE_DEG * i - 90)
             cos = math.cos(angle)
             sin = math.sin(angle)
 

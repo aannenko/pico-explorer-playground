@@ -11,11 +11,11 @@ class StubService(EventStreamService):
         coordinator: FetchCoordinator,
         interval_ms: int,
         schedule,  # (callback, arg) -> None
-        clock,  # () -> int
+        get_ticks_ms,  # () -> int
         enabled: bool = True,
     ) -> None:
         self._fetcher = fetcher
-        super().__init__(wifi, coordinator, schedule, interval_ms, "stub", enabled, clock=clock)
+        super().__init__(wifi, coordinator, schedule, interval_ms, "stub", enabled, get_ticks_ms=get_ticks_ms)
 
     def _fetch_and_parse(self) -> list[Event]:
         # Fallible: an HTTP error or a malformed payload raises here, so the

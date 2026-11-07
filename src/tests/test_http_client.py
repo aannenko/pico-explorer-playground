@@ -10,7 +10,7 @@ from services.http_client import (
     HttpParseError,
     HttpProtocolError,
     HttpStatusError,
-    HttpTimeout,
+    HttpTimeoutError,
     get_json,
 )
 
@@ -41,14 +41,14 @@ def test_oserror_without_args_is_connect_error(fake_urequests):
 def test_timeout_errno_raises_timeout(fake_urequests):
     fake_urequests.raise_on_get = OSError(http_client._ETIMEDOUT, "timed out")
 
-    with pytest.raises(HttpTimeout):
+    with pytest.raises(HttpTimeoutError):
         get_json(_URL)
 
 
 def test_eagain_errno_raises_timeout(fake_urequests):
     fake_urequests.raise_on_get = OSError(http_client._EAGAIN, "again")
 
-    with pytest.raises(HttpTimeout):
+    with pytest.raises(HttpTimeoutError):
         get_json(_URL)
 
 
@@ -108,7 +108,7 @@ def test_malformed_response_raises_protocol_error(fake_urequests, exc):
 def test_body_read_oserror_classified_as_timeout(fake_urequests):
     fake_urequests.raise_on_json = OSError(http_client._ETIMEDOUT, "read timeout")
 
-    with pytest.raises(HttpTimeout):
+    with pytest.raises(HttpTimeoutError):
         get_json(_URL)
 
     assert fake_urequests.responses[-1].closed is True
@@ -171,7 +171,7 @@ def test_headers_none_sent_as_empty_dict(fake_urequests):
 
 
 def test_timeout_passed_through(fake_urequests):
-    get_json(_URL, timeout_s=5)
+    get_json(_URL, timeout_sec=5)
 
     assert fake_urequests.calls[0][2] == 5
 
@@ -184,7 +184,7 @@ def test_default_timeout_is_3s(fake_urequests):
 
 def test_typed_exceptions_subclass_http_error():
     for exc_type in (
-        HttpTimeout,
+        HttpTimeoutError,
         HttpConnectError,
         HttpStatusError,
         HttpParseError,

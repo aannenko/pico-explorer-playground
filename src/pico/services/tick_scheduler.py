@@ -10,12 +10,12 @@ _MIN_PERIOD_MS = const(100)
 class TickScheduler:
     """Fixed-period tick on one ``machine.Timer``, shared by registered callbacks.
 
-    A ``period_ms`` below ``_MIN_PERIOD_MS`` is raised to it.
+    A ``tick_period_ms`` below ``_MIN_PERIOD_MS`` is raised to it.
     """
 
     def __init__(
         self,
-        period_ms: int = 500,
+        tick_period_ms: int = 500,
         schedule=micropython.schedule,  # (callback, arg) -> None
         timer_factory=Timer,  # (int) -> Timer
     ) -> None:
@@ -24,18 +24,17 @@ class TickScheduler:
         self._tick_ref = self._tick
         self._schedule_tick_ref = self._schedule_tick
         self._timer = timer_factory(-1)
-        self._period_ms = period_ms if period_ms > _MIN_PERIOD_MS else _MIN_PERIOD_MS
+        self._tick_period_ms = tick_period_ms if tick_period_ms > _MIN_PERIOD_MS else _MIN_PERIOD_MS
         self._pending = False
 
     @property
-    def ms_per_tick(self) -> int:
-        """Effective tick period in milliseconds."""
-        return self._period_ms
+    def tick_period_ms(self) -> int:
+        return self._tick_period_ms
 
     def start(self) -> None:
         self._timer.init(
             mode=Timer.PERIODIC,
-            period=self._period_ms,
+            period=self._tick_period_ms,
             callback=self._schedule_tick_ref,
         )
 

@@ -10,7 +10,7 @@ def _mk_scheduler(**overrides):
 
     scheduled: list[tuple] = []
     defaults = dict(
-        period_ms=100,
+        tick_period_ms=100,
         schedule=lambda fn, arg: fn(arg),
         timer_factory=timer_factory,
     )
@@ -30,18 +30,18 @@ def test_start_initializes_periodic_timer() -> None:
     assert call["mode"] == machine.Timer.PERIODIC
 
 
-def test_ms_per_tick_exposes_period() -> None:
-    sched, _, _ = _mk_scheduler(period_ms=250)
-    assert sched.ms_per_tick == 250
+def test_tick_period_ms_exposes_period() -> None:
+    sched, _, _ = _mk_scheduler(tick_period_ms=250)
+    assert sched.tick_period_ms == 250
 
 
 def test_period_below_floor_is_clamped() -> None:
-    sched, _, _ = _mk_scheduler(period_ms=1)
+    sched, _, _ = _mk_scheduler(tick_period_ms=1)
     # Clamp protects against schedule-queue pressure from absurdly
     # short periods; see _MIN_PERIOD_MS in tick_scheduler.
-    assert sched.ms_per_tick >= 100
+    assert sched.tick_period_ms >= 100
     sched.start()
-    assert sched.ms_per_tick >= 100
+    assert sched.tick_period_ms >= 100
 
 
 def test_stop_deinits_timer() -> None:

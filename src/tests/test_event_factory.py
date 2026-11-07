@@ -25,8 +25,8 @@ class _FakeTimeService:
         from services.time_service import TimeService
         self._svc = TimeService(
             tz_offset_hours=tz_offset_hours,
-            dst_start=dst_start,
-            dst_end=dst_end,
+            dst_start_rule=dst_start,
+            dst_end_rule=dst_end,
             dst_offset_hours=dst_offset_hours,
             get_time=lambda: utc_epoch,
         )
@@ -37,8 +37,8 @@ class _FakeTimeService:
     def to_utc(self, local_epoch: int) -> int:
         return self._svc.to_utc(local_epoch)
 
-    def real_duration(self, local_start: int, wall_clock_sec: int) -> int:
-        return self._svc.real_duration(local_start, wall_clock_sec)
+    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
+        return self._svc.real_duration_sec(local_start, wall_clock_duration_sec)
 
 
 def _collect(gen, n: int) -> list:

@@ -54,12 +54,12 @@ def _is_dst(
     utc_epoch: int,
     tz_offset_sec: int,
     dst_offset_sec: int,
-    dst_start: tuple,
-    dst_end: tuple,
+    dst_start_rule: tuple,
+    dst_end_rule: tuple,
 ) -> bool:
     year = time.gmtime(utc_epoch)[0]
-    start = _transition_utc(year, dst_start, tz_offset_sec)
-    end = _transition_utc(year, dst_end, tz_offset_sec + dst_offset_sec)
+    start = _transition_utc(year, dst_start_rule, tz_offset_sec)
+    end = _transition_utc(year, dst_end_rule, tz_offset_sec + dst_offset_sec)
     if start < end:
         return start <= utc_epoch < end
     # Southern hemisphere: DST wraps around the new year
@@ -70,8 +70,8 @@ def _next_transition_utc(
     utc_epoch: int,
     tz_offset_sec: int,
     dst_offset_sec: int,
-    dst_start: tuple,
-    dst_end: tuple,
+    dst_start_rule: tuple,
+    dst_end_rule: tuple,
 ) -> int:
     """Returns 0 if no future transition is found (should not happen
     for valid rules within a reasonable year range).
@@ -79,8 +79,8 @@ def _next_transition_utc(
     year = time.gmtime(utc_epoch)[0]
     result = 0
     for y in (year, year + 1):
-        s = _transition_utc(y, dst_start, tz_offset_sec)
-        e = _transition_utc(y, dst_end, tz_offset_sec + dst_offset_sec)
+        s = _transition_utc(y, dst_start_rule, tz_offset_sec)
+        e = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
         if s > utc_epoch and (result == 0 or s < result):
             result = s
         if e > utc_epoch and (result == 0 or e < result):
@@ -94,7 +94,7 @@ class TimeService:
     The RTC stays UTC (set by NTP).  Its 1970-epoch times exceed the small-int
     range, so every read allocates: gate per-tick reads with ``time.ticks_ms()``.
 
-    ``dst_start`` and ``dst_end`` are ``(month, week, weekday, hour)`` rules:
+    ``dst_start_rule`` and ``dst_end_rule`` are ``(month, week, weekday, hour)``:
     ``week`` 1-5, or -1 for the last; ``weekday`` 0=Mon .. 6=Sun; ``hour`` in
     local standard time for the start and in local DST time for the end.
     ``None`` for either rule disables DST.
@@ -108,8 +108,8 @@ class TimeService:
     def __init__(
         self,
         tz_offset_hours: float,
-        dst_start: tuple[int, int, int, int] | None,
-        dst_end: tuple[int, int, int, int] | None,
+        dst_start_rule: tuple[int, int, int, int] | None,
+        dst_end_rule: tuple[int, int, int, int] | None,
         dst_offset_hours: float = 0.0,
         get_time=time.time,  # () -> int
         tick_scheduler=None,
@@ -118,13 +118,13 @@ class TimeService:
         # touches a float, which rp2's single-precision floats round to 128 s.
         self._tz_offset_sec = round(tz_offset_hours * _SEC_PER_HOUR)
         self._dst_offset_sec = round(dst_offset_hours * _SEC_PER_HOUR)
-        self._dst_start = dst_start
-        self._dst_end = dst_end
+        self._dst_start_rule = dst_start_rule
+        self._dst_end_rule = dst_end_rule
         self._get_time = get_time
 
         self._offset_sec = self._tz_offset_sec
         self._dst_active = False
-        self._next_transition = 0
+        self._next_transition_utc = 0
         self._next_dst_check_ms = time.ticks_ms()
 
         self._update_dst()
@@ -139,16 +139,16 @@ class TimeService:
     def utc_now(self) -> int:
         return self._get_time()
 
-    def total_offset(self, utc_timestamp: int) -> int:
-        """Total UTC offset in seconds at a given UTC timestamp (tz + DST if active)."""
-        if self._dst_start is None or self._dst_end is None:
+    def utc_offset_sec(self, utc_epoch: int) -> int:
+        """Time-zone offset, plus the DST offset when DST is active at ``utc_epoch``."""
+        if self._dst_start_rule is None or self._dst_end_rule is None:
             return self._tz_offset_sec
         if _is_dst(
-            utc_timestamp,
+            utc_epoch,
             self._tz_offset_sec,
             self._dst_offset_sec,
-            self._dst_start,
-            self._dst_end,
+            self._dst_start_rule,
+            self._dst_end_rule,
         ):
             return self._tz_offset_sec + self._dst_offset_sec
         return self._tz_offset_sec
@@ -160,37 +160,37 @@ class TimeService:
         (earlier UTC) interpretation — correct for forward-progressing events.
         """
         # Estimating with the max offset never overshoots a fall-back boundary.
-        max_offset = self._tz_offset_sec + self._dst_offset_sec
-        utc_est = local_epoch - max_offset
-        return local_epoch - self.total_offset(utc_est)
+        max_offset_sec = self._tz_offset_sec + self._dst_offset_sec
+        utc_estimate = local_epoch - max_offset_sec
+        return local_epoch - self.utc_offset_sec(utc_estimate)
 
-    def real_duration(self, local_start: int, wall_clock_sec: int) -> int:
-        """Convert wall-clock duration to real seconds, accounting for DST.
+    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
+        """Real seconds in a wall-clock span; DST transitions lengthen or shorten it.
 
         Exact for any event length and any number of DST transitions, provided
         neither endpoint falls in a spring-forward gap (a nonexistent local time).
         """
-        return self.to_utc(local_start + wall_clock_sec) - self.to_utc(local_start)
+        return self.to_utc(local_start + wall_clock_duration_sec) - self.to_utc(local_start)
 
     def _tick(self) -> None:
         now_ms = time.ticks_ms()
         if time.ticks_diff(now_ms, self._next_dst_check_ms) < 0:
             return
         self._next_dst_check_ms = time.ticks_add(now_ms, _DST_CHECK_INTERVAL_MS)
-        if self._next_transition > 0 and self._get_time() >= self._next_transition:
+        if self._next_transition_utc > 0 and self._get_time() >= self._next_transition_utc:
             self._update_dst()
 
     def _update_dst(self) -> None:
-        if self._dst_start is None or self._dst_end is None:
+        if self._dst_start_rule is None or self._dst_end_rule is None:
             return
 
-        utc = self._get_time()
+        utc_epoch = self._get_time()
         self._dst_active = _is_dst(
-            utc,
+            utc_epoch,
             self._tz_offset_sec,
             self._dst_offset_sec,
-            self._dst_start,
-            self._dst_end,
+            self._dst_start_rule,
+            self._dst_end_rule,
         )
 
         if self._dst_active:
@@ -198,10 +198,10 @@ class TimeService:
         else:
             self._offset_sec = self._tz_offset_sec
 
-        self._next_transition = _next_transition_utc(
-            utc,
+        self._next_transition_utc = _next_transition_utc(
+            utc_epoch,
             self._tz_offset_sec,
             self._dst_offset_sec,
-            self._dst_start,
-            self._dst_end,
+            self._dst_start_rule,
+            self._dst_end_rule,
         )

@@ -7,13 +7,13 @@ from services.time_service import TimeService
 
 _WEATHER_NAMES = ("sun", "rain", "snow", "fog")
 _WEATHER_DURATIONS = (15 * 60, 30 * 60, 60 * 60, 120 * 60, 150 * 60)
-_WEATHER_GAP_PERCENT = 20
+_WEATHER_GAP_PCT = 20
 
 
 def _random_event_loop(
     names: tuple,
     durations: tuple,
-    gap_percent: int,
+    gap_pct: int,
     start_timestamp: int,
     time_service: TimeService,
     color_index: int,
@@ -29,12 +29,12 @@ def _random_event_loop(
             cursor = window_start
         dur = random.choice(durations)
 
-        if random.randint(1, 100) <= gap_percent:
+        if random.randint(1, 100) <= gap_pct:
             cursor += dur
             continue
 
         name = random.choice(names)
-        real_dur = time_service.real_duration(cursor, dur)
+        real_dur = time_service.real_duration_sec(cursor, dur)
         yield Event(name, cursor, dur, real_dur, color_index=color_index)
         cursor += dur
 
@@ -49,7 +49,7 @@ def build_demo_streams(
         _random_event_loop(
             names=_WEATHER_NAMES,
             durations=_WEATHER_DURATIONS,
-            gap_percent=_WEATHER_GAP_PERCENT,
+            gap_pct=_WEATHER_GAP_PCT,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_SKY,
@@ -58,7 +58,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("code", "review", "deploy", "test", "debug"),
             durations=(15 * 60, 30 * 60, 45 * 60, 60 * 60),
-            gap_percent=15,
+            gap_pct=15,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_YELLOW,
@@ -67,7 +67,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("call", "standup", "retro", "chat"),
             durations=(15 * 60, 30 * 60, 60 * 60),
-            gap_percent=40,
+            gap_pct=40,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_PINK,
@@ -76,7 +76,7 @@ def build_demo_streams(
         _random_event_loop(
             names=("run", "walk", "gym", "yoga", "rest"),
             durations=(20 * 60, 30 * 60, 45 * 60, 60 * 60, 90 * 60),
-            gap_percent=25,
+            gap_pct=25,
             start_timestamp=start,
             time_service=time_service,
             color_index=STREAM_BLUE,

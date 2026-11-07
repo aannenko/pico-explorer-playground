@@ -34,11 +34,11 @@ def _weather_type(code: int) -> str | None:
     return None
 
 
-def _precip_rank_and_color(mm: float) -> tuple[int, int]:
+def _precip_rank_and_color(precip_mm: float) -> tuple[int, int]:
     """Ranks 1/2/3 mean light/moderate/heavy."""
-    if mm < _MODERATE_MM:
+    if precip_mm < _MODERATE_MM:
         return (1, STREAM_GREEN)
-    if mm < _HEAVY_MM:
+    if precip_mm < _HEAVY_MM:
         return (2, STREAM_YELLOW)
     return (3, STREAM_RED)
 
@@ -60,7 +60,7 @@ def _uv_column(payload: dict, n: int) -> list:
     return [v if isinstance(v, (int, float)) else None for v in uv]
 
 
-def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, int]) -> list[Event]:
+def _build_events(payload: dict, prob_threshold_pct: int, uv_thresholds: tuple[int, int]) -> list[Event]:
     """Return the weather bars from a forecast payload.
 
     Precipitation wins equal-priority ties; severe UV beats light precipitation.
@@ -75,10 +75,10 @@ def _build_events(payload: dict, prob_threshold: int, uv_thresholds: tuple[int, 
     for i in range(len(times)):
         candidates = []
         prob = probs[i]
-        kind = None if (prob is None or prob < prob_threshold) else _weather_type(codes[i])
+        kind = None if (prob is None or prob < prob_threshold_pct) else _weather_type(codes[i])
         if kind is not None:
-            mm = amounts[i] if amounts[i] is not None else 0.0
-            rank, color = _precip_rank_and_color(mm)
+            precip_mm = amounts[i] if amounts[i] is not None else 0.0
+            rank, color = _precip_rank_and_color(precip_mm)
             candidates.append((rank, kind, color))
         uv_lvl = event_runs.level(uv[i], uv_warn, uv_severe)
         if uv_lvl:
@@ -104,7 +104,7 @@ class WeatherService(EventStreamService):
         self,
         latitude: float,
         longitude: float,
-        prob_threshold: int,
+        prob_threshold_pct: int,
         uv_thresholds: tuple[int, int],
         wifi,  # has is_connected() -> bool
         coordinator: FetchCoordinator,
@@ -112,23 +112,23 @@ class WeatherService(EventStreamService):
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
-        clock=time.ticks_ms,  # () -> int
-        http_get=http_client.get_json,  # (url, timeout_s) -> dict
-        timeout_s: int = 3,
+        get_ticks_ms=time.ticks_ms,  # () -> int
+        http_get=http_client.get_json,  # (url, timeout_sec) -> dict
+        timeout_sec: int = 3,
         tick_scheduler=None,
     ) -> None:
         self._lat = latitude
         self._lon = longitude
-        self._threshold = prob_threshold
-        self._uv_thr = uv_thresholds
+        self._prob_threshold_pct = prob_threshold_pct
+        self._uv_thresholds = uv_thresholds
         self._http_get = http_get
-        self._timeout_s = timeout_s
+        self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
         enabled = not (latitude == 0.0 and longitude == 0.0)
         super().__init__(
             wifi, coordinator, schedule, interval_ms, "weather", enabled,
-            clock=clock, tick_scheduler=tick_scheduler,
+            get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,
         )
         if enabled:
             print("[weather] enabled: lat=%s lon=%s" % (latitude, longitude))
@@ -138,7 +138,7 @@ class WeatherService(EventStreamService):
     def _fetch_and_parse(self) -> list[Event]:
         print("[weather] fetching lat=%s lon=%s" % (self._lat, self._lon))
         payload = openmeteo_client.fetch_forecast(
-            self._http_get, self._lat, self._lon, _METRICS, self._timeout_s,
+            self._http_get, self._lat, self._lon, _METRICS, self._timeout_sec,
             self._forecast_hours, self._past_hours,
         )
-        return _build_events(payload, self._threshold, self._uv_thr)
+        return _build_events(payload, self._prob_threshold_pct, self._uv_thresholds)

@@ -121,7 +121,7 @@ def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
             geometry=ring.Geometry(
                 pico_graphics=pico_graphics,
                 font=config.FONT,
-                font_height=config.FONT_HEIGHT,
+                font_height=config.FONT_HEIGHT_PX,
                 text_scale=config.TEXT_SCALE,
             ),
             colors=ring.Colors(
@@ -180,10 +180,10 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
             geometry=calendar.Geometry(
                 pico_graphics=pico_graphics,
                 header_font=config.FONT,
-                header_font_height=config.FONT_HEIGHT,
+                header_font_height=config.FONT_HEIGHT_PX,
                 header_text_scale=config.TEXT_SCALE,
                 bar_font=config.FONT,
-                bar_font_height=config.FONT_HEIGHT,
+                bar_font_height=config.FONT_HEIGHT_PX,
                 bar_text_scale=const(2),
             ),
             colors=calendar.Colors(
@@ -209,7 +209,7 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
     status_display = StatusDisplay(
         pico_graphics=pico_graphics,
         font=config.FONT,
-        font_height=config.FONT_HEIGHT,
+        font_height=config.FONT_HEIGHT_PX,
         text_scale=config.TEXT_SCALE,
         background=BLACK,
         foreground=WHITE,
@@ -223,17 +223,17 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
 
     # Capture the first sensor sample before the network boot.
     bme690_reader = PimoroniBME690(
-        temp_offset=config.BME690_TEMP_OFFSET,
-        hum_offset=config.BME690_HUM_OFFSET,
-        prsr_offset=config.BME690_PRSR_OFFSET,
-        sensor_read_delay_ms=config.SENSOR_READ_DELAY_MS,
+        temp_offset_c=config.BME690_TEMP_OFFSET_C,
+        hum_offset_pct=config.BME690_HUM_OFFSET_PCT,
+        prsr_offset_hpa=config.BME690_PRSR_OFFSET_HPA,
+        read_period_ms=config.BME690_READ_PERIOD_MS,
     )
     sensors_geometry = sensors.Geometry(
         pico_graphics=pico_graphics,
         font=config.FONT,
-        font_height=config.FONT_HEIGHT,
+        font_height=config.FONT_HEIGHT_PX,
         text_scale=config.TEXT_SCALE,
-        tick_period_ms=tick_scheduler.ms_per_tick,
+        tick_period_ms=tick_scheduler.tick_period_ms,
     )
     sensor_history = RingHistory(
         bme690_reader.read,
@@ -256,8 +256,8 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
 
     time_service = TimeService(
         tz_offset_hours=config.TIME_ZONE_OFFSET_HOURS,
-        dst_start=config.DST_START,
-        dst_end=config.DST_END,
+        dst_start_rule=config.DST_START_RULE,
+        dst_end_rule=config.DST_END_RULE,
         dst_offset_hours=config.DST_OFFSET_HOURS,
         tick_scheduler=tick_scheduler,
     )
@@ -266,7 +266,7 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
     weather_service = WeatherService(
         latitude=config.LATITUDE,
         longitude=config.LONGITUDE,
-        prob_threshold=config.PRECIP_PROB_THRESHOLD,
+        prob_threshold_pct=config.PRECIP_PROB_THRESHOLD_PCT,
         uv_thresholds=config.UV_THRESHOLDS,
         wifi=wifi_client,
         coordinator=fetch_coordinator,
@@ -274,7 +274,7 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
-        timeout_s=config.HTTP_TIMEOUT_S,
+        timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,
     )
     weather_stream = Stream(
@@ -296,7 +296,7 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
-        timeout_s=config.HTTP_TIMEOUT_S,
+        timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,
     )
     air_stream = Stream(
@@ -319,7 +319,7 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
 
     display_manager = DisplayManager(
         displays=[sensors_display, countdown_display, calendar_display],
-        scheduler_period_ms=tick_scheduler.ms_per_tick,
+        tick_period_ms=tick_scheduler.tick_period_ms,
     )
     display_manager.initialize_current()
     tick_scheduler.register(display_manager.tick)

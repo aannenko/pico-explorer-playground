@@ -26,7 +26,7 @@ class NetworkService:
         self._password = password
         self._wifi = wifi
         self._sync_interval_ms = sync_interval_ms
-        self._last_sync_ticks = 0
+        self._last_sync_ms = 0
         self._phase = _IDLE
 
         if tick_scheduler is not None:
@@ -54,7 +54,7 @@ class NetworkService:
             _notify("ntp fail")
             raise RuntimeError("Could not sync time")
 
-        self._last_sync_ticks = time.ticks_ms()
+        self._last_sync_ms = time.ticks_ms()
 
     def _tick(self) -> None:
         try:
@@ -64,8 +64,8 @@ class NetworkService:
 
     def _tick_inner(self) -> None:
         if self._phase == _IDLE:
-            now = time.ticks_ms()
-            if time.ticks_diff(now, self._last_sync_ticks) < self._sync_interval_ms:
+            now_ms = time.ticks_ms()
+            if time.ticks_diff(now_ms, self._last_sync_ms) < self._sync_interval_ms:
                 return
             if self._wifi.is_connected():
                 self._phase = _NTP
@@ -78,12 +78,12 @@ class NetworkService:
             if s == wifi_client.CONNECTED:
                 self._phase = _NTP
             elif s == wifi_client.FAILED:
-                self._last_sync_ticks = time.ticks_ms()
+                self._last_sync_ms = time.ticks_ms()
                 self._phase = _IDLE
             else:
                 return
 
         if self._phase == _NTP:
             ntp.sync_time()
-            self._last_sync_ticks = time.ticks_ms()
+            self._last_sync_ms = time.ticks_ms()
             self._phase = _IDLE

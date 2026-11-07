@@ -6,12 +6,12 @@ import time
 _FORECAST_URL = "http://api.open-meteo.com/v1/forecast"
 _AIR_QUALITY_URL = "http://air-quality-api.open-meteo.com/v1/air-quality"
 
-# Keep ``hours`` and ``past_hours`` small, so each response body stays under ~1 KiB:
+# Keep ``forecast_hours`` and ``past_hours`` small, so each response body stays under ~1 KiB:
 # larger bodies can fail to allocate on-device.
 
 
 def _build_url(
-    base: str, lat: float, lon: float, metrics: str, hours: int, past_hours: int
+    base: str, lat: float, lon: float, metrics: str, forecast_hours: int, past_hours: int
 ) -> str:
     return (
         base
@@ -20,24 +20,28 @@ def _build_url(
         + "&longitude=" + str(lon)
         + "&hourly=" + metrics
         + "&past_hours=" + str(past_hours)
-        + "&forecast_hours=" + str(hours)
+        + "&forecast_hours=" + str(forecast_hours)
     )
 
 
 def fetch_forecast(
-    http_get, lat: float, lon: float, metrics: str, timeout_s: int, hours: int, past_hours: int
+    http_get, lat: float, lon: float, metrics: str, timeout_sec: int, forecast_hours: int, past_hours: int
 ) -> dict:
-    """Fetch hourly forecast ``metrics``, ``past_hours`` back to ``hours`` ahead."""
-    # http_get: (url, timeout_s) -> dict
-    return http_get(_build_url(_FORECAST_URL, lat, lon, metrics, hours, past_hours), timeout_s=timeout_s)
+    """Fetch hourly forecast ``metrics``, ``past_hours`` back to ``forecast_hours`` ahead."""
+    # http_get: (url, timeout_sec) -> dict
+    return http_get(
+        _build_url(_FORECAST_URL, lat, lon, metrics, forecast_hours, past_hours), timeout_sec=timeout_sec
+    )
 
 
 def fetch_air_quality(
-    http_get, lat: float, lon: float, metrics: str, timeout_s: int, hours: int, past_hours: int
+    http_get, lat: float, lon: float, metrics: str, timeout_sec: int, forecast_hours: int, past_hours: int
 ) -> dict:
-    """Fetch hourly air-quality ``metrics``, ``past_hours`` back to ``hours`` ahead."""
-    # http_get: (url, timeout_s) -> dict
-    return http_get(_build_url(_AIR_QUALITY_URL, lat, lon, metrics, hours, past_hours), timeout_s=timeout_s)
+    """Fetch hourly air-quality ``metrics``, ``past_hours`` back to ``forecast_hours`` ahead."""
+    # http_get: (url, timeout_sec) -> dict
+    return http_get(
+        _build_url(_AIR_QUALITY_URL, lat, lon, metrics, forecast_hours, past_hours), timeout_sec=timeout_sec
+    )
 
 
 def parse_iso_local(text: str) -> int:

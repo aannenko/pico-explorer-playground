@@ -71,8 +71,8 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     clock = [utc_epoch(2026, 9, 14, 7, 0, 0)]
     time_service = TimeService(
         tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
-        dst_start=config_defaults.DST_START,
-        dst_end=config_defaults.DST_END,
+        dst_start_rule=config_defaults.DST_START_RULE,
+        dst_end_rule=config_defaults.DST_END_RULE,
         dst_offset_hours=config_defaults.DST_OFFSET_HOURS,
         get_time=lambda: clock[0],
     )
@@ -93,7 +93,7 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
             _OtherDisplay(panel, "COUNTDOWN"),
             calendar,
         ],
-        scheduler_period_ms=500,
+        tick_period_ms=500,
     )
     manager.initialize_current()
     if visited_before:

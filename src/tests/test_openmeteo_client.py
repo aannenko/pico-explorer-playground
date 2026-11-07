@@ -12,8 +12,8 @@ class _FakeHttp:
         self.payload = payload if payload is not None else {"ok": True}
         self.calls: list[tuple] = []
 
-    def __call__(self, url, timeout_s=None) -> dict:
-        self.calls.append((url, timeout_s))
+    def __call__(self, url, timeout_sec=None) -> dict:
+        self.calls.append((url, timeout_sec))
         return self.payload
 
 
@@ -54,7 +54,7 @@ def test_fetch_air_quality_builds_air_quality_url():
 
 def test_fetch_honours_explicit_hours():
     http = _FakeHttp()
-    openmeteo_client.fetch_forecast(http, 1.0, 2.0, "x", 3, hours=6, past_hours=3)
+    openmeteo_client.fetch_forecast(http, 1.0, 2.0, "x", 3, forecast_hours=6, past_hours=3)
     assert "forecast_hours=6" in http.calls[0][0]
     assert "past_hours=3" in http.calls[0][0]
 

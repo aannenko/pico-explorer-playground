@@ -503,8 +503,8 @@ def test_real_defaults_take_a_fractional_zone_without_dst(workspace, utc) -> Non
 
     svc = TimeService(
         tz_offset_hours=cfg.TIME_ZONE_OFFSET_HOURS,
-        dst_start=cfg.DST_START,
-        dst_end=cfg.DST_END,
+        dst_start_rule=cfg.DST_START_RULE,
+        dst_end_rule=cfg.DST_END_RULE,
         dst_offset_hours=cfg.DST_OFFSET_HOURS,
         get_time=lambda: utc,
     )

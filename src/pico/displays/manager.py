@@ -4,9 +4,9 @@ from displays.base import Display, RefreshGate
 class DisplayManager:
     """View carousel: switches between views and drives the current one."""
 
-    def __init__(self, displays: list[Display], scheduler_period_ms: int) -> None:
+    def __init__(self, displays: list[Display], tick_period_ms: int) -> None:
         self._displays = displays
-        self._scheduler_period_ms = scheduler_period_ms
+        self._tick_period_ms = tick_period_ms
         self._current = 0
         self._gate = self._build_gate(displays[0])
 
@@ -20,7 +20,7 @@ class DisplayManager:
         period_ms = display.refresh_period_ms
         if period_ms <= 0:
             return None
-        ticks = round(period_ms / self._scheduler_period_ms)
+        ticks = round(period_ms / self._tick_period_ms)
         return RefreshGate(ticks if ticks > 1 else 1)
 
     def initialize_current(self) -> None:
@@ -44,7 +44,7 @@ class DisplayManager:
         self.initialize_current()
 
     def tick(self) -> None:
-        """Render the current view when due; call once per ``scheduler_period_ms``."""
+        """Render the current view when due; call once per ``tick_period_ms``."""
         if self._gate is None or self._gate.ready():
             self._displays[self._current].render()
 

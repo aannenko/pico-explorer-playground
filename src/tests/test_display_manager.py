@@ -35,8 +35,8 @@ class FakeDisplayWithButtons(FakeDisplay):
         self.calls.append("on_button_b")
 
 
-def _mgr(*displays, scheduler_period_ms: int = _SCHED_MS) -> DisplayManager:
-    return DisplayManager(displays=list(displays), scheduler_period_ms=scheduler_period_ms)
+def _mgr(*displays, tick_period_ms: int = _SCHED_MS) -> DisplayManager:
+    return DisplayManager(displays=list(displays), tick_period_ms=tick_period_ms)
 
 
 # ── lifecycle ──────────────────────────────────────────────────────────
@@ -216,10 +216,10 @@ def test_tick_renders_every_tick_when_period_zero() -> None:
 
 
 def test_tick_throttles_render_by_period_ticks() -> None:
-    # scheduler_period_ms=10, refresh_period_ms=30 → render every 3 ticks.
+    # tick_period_ms=10, refresh_period_ms=30 → render every 3 ticks.
     d0 = FakeDisplay("d0", refresh_period_ms=30)
 
-    mgr = _mgr(d0, scheduler_period_ms=10)
+    mgr = _mgr(d0, tick_period_ms=10)
     mgr.initialize_current()
     d0.calls.clear()
 
@@ -234,7 +234,7 @@ def test_tick_gate_resets_on_view_switch() -> None:
     d0 = FakeDisplay("d0", refresh_period_ms=30)
     d1 = FakeDisplay("d1", refresh_period_ms=30)
 
-    mgr = _mgr(d0, d1, scheduler_period_ms=10)
+    mgr = _mgr(d0, d1, tick_period_ms=10)
     mgr.initialize_current()
     d0.calls.clear()
 
@@ -256,7 +256,7 @@ def test_tick_gate_resets_on_view_switch() -> None:
 def test_button_press_resets_gate() -> None:
     d0 = FakeDisplayWithButtons("d0", refresh_period_ms=30)
 
-    mgr = _mgr(d0, scheduler_period_ms=10)
+    mgr = _mgr(d0, tick_period_ms=10)
     mgr.initialize_current()
     d0.calls.clear()
 
@@ -276,7 +276,7 @@ def test_button_press_resets_gate() -> None:
 def test_button_b_press_resets_gate() -> None:
     d0 = FakeDisplayWithButtons("d0", refresh_period_ms=30)
 
-    mgr = _mgr(d0, scheduler_period_ms=10)
+    mgr = _mgr(d0, tick_period_ms=10)
     mgr.initialize_current()
     d0.calls.clear()
 
@@ -295,7 +295,7 @@ def test_noop_button_press_does_not_reset_gate() -> None:
     # delay the next redraw on views that don't handle buttons.
     d0 = FakeDisplay("d0", refresh_period_ms=30)
 
-    mgr = _mgr(d0, scheduler_period_ms=10)
+    mgr = _mgr(d0, tick_period_ms=10)
     mgr.initialize_current()
     d0.calls.clear()
 

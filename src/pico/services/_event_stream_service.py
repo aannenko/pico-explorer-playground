@@ -30,7 +30,7 @@ class EventStreamService:
         interval_ms: int,
         log_tag: str,
         enabled: bool,
-        clock=time.ticks_ms,  # () -> int
+        get_ticks_ms=time.ticks_ms,  # () -> int
         tick_scheduler=None,
         backoff_base_ms: int = _DEFAULT_BACKOFF_BASE_MS,
         backoff_max_ms: int = _DEFAULT_BACKOFF_MAX_MS,
@@ -45,7 +45,7 @@ class EventStreamService:
         self._tick_err_tag = "[%s] tick err:" % log_tag
         self._store_err_tag = "[%s] store err:" % log_tag
         self._enabled = enabled
-        self._clock = clock
+        self._get_ticks_ms = get_ticks_ms
         self._backoff_base_ms = backoff_base_ms
         self._backoff_max_ms = backoff_max_ms
         self._stale_after_ms = stale_after_ms if stale_after_ms is not None else 2 * interval_ms
@@ -54,11 +54,11 @@ class EventStreamService:
         self._events: list[Event] = []
         self._generation = 0
 
-        self._next_due = clock()
+        self._next_fetch_ms = get_ticks_ms()
         self._failures = 0
-        self._last_success: int | None = None
+        self._last_success_ms: int | None = None
 
-        self._fetch: FetchState | None = None
+        self._fetch_state: FetchState | None = None
         self._fetcher_ref = self._fetch_and_parse
 
         self._tick_ref = self.tick
@@ -74,24 +74,24 @@ class EventStreamService:
             log_exception(self._tick_err_tag, exc)
 
     def _advance(self) -> None:
-        if self._fetch is None:
-            if time.ticks_diff(self._clock(), self._next_due) < 0:
+        if self._fetch_state is None:
+            if time.ticks_diff(self._get_ticks_ms(), self._next_fetch_ms) < 0:
                 return
-            self._fetch = FetchMachine.start(
+            self._fetch_state = FetchMachine.start(
                 self._fetcher_ref, self._wifi, self._schedule, self._coordinator
             )
-        FetchMachine.tick(self._fetch)
-        if FetchMachine.is_done(self._fetch):
-            state = self._fetch
-            self._fetch = None  # drop before harvest so a raising harvest can't repeat
+        FetchMachine.tick(self._fetch_state)
+        if FetchMachine.is_done(self._fetch_state):
+            state = self._fetch_state
+            self._fetch_state = None  # drop before harvest so a raising harvest can't repeat
             self._harvest(state)
 
     def _harvest(self, state) -> None:
-        now = self._clock()
+        now_ms = self._get_ticks_ms()
         if state.error is None:
             self._failures = 0
-            self._last_success = now
-            self._next_due = time.ticks_add(now, self._interval_ms)
+            self._last_success_ms = now_ms
+            self._next_fetch_ms = time.ticks_add(now_ms, self._interval_ms)
             try:
                 self._store(state.result)
             except Exception as exc:
@@ -103,7 +103,7 @@ class EventStreamService:
                 "[%s] err (fail #%d, retry in %dms):" % (self._log_tag, self._failures, delay),
                 state.error,
             )
-            self._next_due = time.ticks_add(now, delay)
+            self._next_fetch_ms = time.ticks_add(now_ms, delay)
 
     def _backoff_delay(self) -> int:
         shift = self._failures - 1
@@ -135,9 +135,9 @@ class EventStreamService:
             return DISABLED
         if self._failures >= self._error_after_failures:
             return ERROR
-        if self._last_success is None:
+        if self._last_success_ms is None:
             return STALE
-        if time.ticks_diff(self._clock(), self._last_success) <= self._stale_after_ms:
+        if time.ticks_diff(self._get_ticks_ms(), self._last_success_ms) <= self._stale_after_ms:
             return FRESH
         return STALE
 

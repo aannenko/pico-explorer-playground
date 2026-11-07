@@ -17,7 +17,7 @@ class _FakeTimeService:
     def now(self) -> int:
         return self._now
 
-    def real_duration(self, start: int, dur: int) -> int:
+    def real_duration_sec(self, start: int, dur: int) -> int:
         return dur
 
 
@@ -106,7 +106,7 @@ def test_wall_clock_hour_stable_across_periods():
 
 def test_real_duration_is_applied():
     class _SentinelTS(_FakeTimeService):
-        def real_duration(self, start: int, dur: int) -> int:
+        def real_duration_sec(self, start: int, dur: int) -> int:
             return dur + 7
 
     now = _epoch(2026, 6, 4) - _DAY

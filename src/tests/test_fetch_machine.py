@@ -21,7 +21,7 @@ from services.http_client import (
     HttpParseError,
     HttpProtocolError,
     HttpStatusError,
-    HttpTimeout,
+    HttpTimeoutError,
 )
 
 
@@ -192,7 +192,7 @@ def test_do_fetch_success_sets_done_and_releases():
 @pytest.mark.parametrize(
     "exc",
     [
-        HttpTimeout("t"),
+        HttpTimeoutError("t"),
         HttpConnectError("c"),
         HttpStatusError(500),
         HttpParseError("p"),

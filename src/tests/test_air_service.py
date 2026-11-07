@@ -214,7 +214,7 @@ class _Harness:
             wifi=self.wifi,
             coordinator=self.coord,
             schedule=self.schedule,
-            clock=lambda: self.clock_val,
+            get_ticks_ms=lambda: self.clock_val,
             http_get=self._http_get,
             interval_ms=1000,
             forecast_hours=4,
@@ -228,8 +228,8 @@ class _Harness:
         )
         self.window = build_event_windows(((1, 2),) * len(STREAM_COLORS), [stream])[0]
 
-    def _http_get(self, url, timeout_s=None):
-        self.get_calls.append((url, timeout_s))
+    def _http_get(self, url, timeout_sec=None):
+        self.get_calls.append((url, timeout_sec))
         if self.raise_exc is not None:
             raise self.raise_exc
         return self.payload

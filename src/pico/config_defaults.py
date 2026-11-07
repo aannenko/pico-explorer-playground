@@ -15,7 +15,7 @@ from micropython import const
 
 
 FONT = "bitmap8"
-FONT_HEIGHT = const(8)
+FONT_HEIGHT_PX = const(8)
 TEXT_SCALE = const(3)
 
 # WiFi credentials — override these in ``config.py``.  Booting with the
@@ -28,17 +28,18 @@ TIME_ZONE_OFFSET_HOURS = 1.0  # Prague winter time (UTC+1); fractional zones wor
 # Daylight Saving Time rules: (month, week, weekday, hour)
 # week: -1 = last occurrence; weekday: 0=Mon .. 6=Sun (MicroPython convention)
 # Set them to your zone's rules, or DST_OFFSET_HOURS = 0 if it has no DST.
-DST_START = (3, -1, 6, 2)   # Last Sunday of March at 02:00 (standard time)
-DST_END = (10, -1, 6, 3)    # Last Sunday of October at 03:00 (DST time)
-DST_OFFSET_HOURS = 1.0      # Added during DST (CEST = UTC+2)
+DST_START_RULE = (3, -1, 6, 2)  # Last Sunday of March at 02:00 (standard time)
+DST_END_RULE = (10, -1, 6, 3)   # Last Sunday of October at 03:00 (DST time)
+DST_OFFSET_HOURS = 1.0          # Added during DST (CEST = UTC+2)
 
-# Socket timeout (s) per HTTP connect/read, not a whole-fetch deadline; DNS lookups aren't covered.
-HTTP_TIMEOUT_S = const(3)
+# Socket timeout per HTTP connect/read, not a whole-fetch deadline; DNS lookups aren't covered.
+HTTP_TIMEOUT_SEC = const(3)
 
-SENSOR_READ_DELAY_MS = const(5_000)
-BME690_TEMP_OFFSET = -2.1
-BME690_HUM_OFFSET = 8.0
-BME690_PRSR_OFFSET = 45.0
+BME690_READ_PERIOD_MS = const(5_000)
+# Calibration offsets, added to the sensor's readings.
+BME690_TEMP_OFFSET_C = -2.1
+BME690_HUM_OFFSET_PCT = 8.0
+BME690_PRSR_OFFSET_HPA = 45.0
 
 # Sensors.  Each tuple holds 5 strictly ascending edges:
 # ``(cap_min, t1, t2, t3, cap_max)``.  The inner three edges drive
@@ -55,11 +56,11 @@ SENSOR_GAS_BANDS = (50, 100, 200, 350, 500)           # kΩ: polluted -> clean
 # Calendar: Weather forecast + UV row (Open-Meteo).
 # The weather row mixes precipitation and UV (they rarely coincide).
 # LATITUDE/LONGITUDE 0.0/0.0 disables fetching and showing weather and AQI.
-# Precipitation is shown if probability >= PRECIP_PROB_THRESHOLD.
+# Precipitation is shown if probability >= PRECIP_PROB_THRESHOLD_PCT.
 # UV_THRESHOLDS according to WHO UV index ``(warning, severe)``.
 LATITUDE = 0.0
 LONGITUDE = 0.0
-PRECIP_PROB_THRESHOLD = const(30)
+PRECIP_PROB_THRESHOLD_PCT = const(30)
 UV_THRESHOLDS = (6, 8)
 
 # Calendar: air quality (Euro AQI scale) + pollen grains/m³ row (Open-Meteo).

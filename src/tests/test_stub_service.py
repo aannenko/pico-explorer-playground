@@ -68,7 +68,7 @@ class _Harness:
             self.coord,
             interval_ms,
             schedule=self.schedule,
-            clock=lambda: self.clock_val,
+            get_ticks_ms=lambda: self.clock_val,
             enabled=enabled,
         )
         stream = Stream(
@@ -289,11 +289,11 @@ def test_only_one_stub_fetches_under_shared_coordinator():
     coord = FetchCoordinator()
     wifi = _FakeWifi(True)
     sched_a, sched_b = _FakeSchedule(), _FakeSchedule()
-    a = StubService(lambda: _payload(("A", 0, 100)), wifi, coord, 1000, schedule=sched_a, clock=lambda: 0)
-    b = StubService(lambda: _payload(("B", 0, 100)), wifi, coord, 1000, schedule=sched_b, clock=lambda: 0)
+    a = StubService(lambda: _payload(("A", 0, 100)), wifi, coord, 1000, schedule=sched_a, get_ticks_ms=lambda: 0)
+    b = StubService(lambda: _payload(("B", 0, 100)), wifi, coord, 1000, schedule=sched_b, get_ticks_ms=lambda: 0)
 
     a.tick()
     b.tick()
 
-    assert a._fetch.stage == FETCHING
-    assert b._fetch.stage == INITIAL  # held by the single-active invariant
+    assert a._fetch_state.stage == FETCHING
+    assert b._fetch_state.stage == INITIAL  # held by the single-active invariant

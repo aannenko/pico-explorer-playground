@@ -20,7 +20,7 @@ class HttpError(Exception):
     pass
 
 
-class HttpTimeout(HttpError):
+class HttpTimeoutError(HttpError):
     pass
 
 
@@ -47,18 +47,18 @@ class HttpProtocolError(HttpError):
 def _classify_oserror(exc: OSError) -> HttpError:
     code = exc.args[0] if exc.args else None
     if code == _ETIMEDOUT or code == _EAGAIN:
-        return HttpTimeout(str(exc))
+        return HttpTimeoutError(str(exc))
     return HttpConnectError(str(exc))
 
 
-def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
+def get_json(url: str, headers: dict | None = None, timeout_sec: int = 3) -> dict:
     """GET ``url`` and return the parsed JSON body as a dict.
 
     Raises an ``HttpError`` subclass for transport, status, protocol and JSON
     failures; anything else (e.g. ``MemoryError``) is logged and re-raised.
     """
     try:
-        return _get_json(url, headers, timeout_s)
+        return _get_json(url, headers, timeout_sec)
     except HttpError:
         raise
     except Exception as exc:
@@ -66,12 +66,12 @@ def get_json(url: str, headers: dict | None = None, timeout_s: int = 3) -> dict:
         raise
 
 
-def _get_json(url: str, headers: dict | None, timeout_s: int) -> dict:
+def _get_json(url: str, headers: dict | None, timeout_sec: int) -> dict:
     gc.collect()  # reduces fragmented-heap allocation failures
     response = None
     try:
         try:
-            response = _requests.get(url, headers=headers or {}, timeout=timeout_s)
+            response = _requests.get(url, headers=headers or {}, timeout=timeout_sec)
         except OSError as exc:
             raise _classify_oserror(exc)
         except (ValueError, NotImplementedError) as exc:

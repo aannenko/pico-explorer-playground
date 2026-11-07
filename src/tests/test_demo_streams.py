@@ -14,7 +14,7 @@ _PAST_SEC = 1800
 
 
 class _FakeTimeService:
-    """Minimal stand-in: demo streams need now() + real_duration()."""
+    """Minimal stand-in: demo streams need now() + real_duration_sec()."""
 
     def __init__(self):
         self.current_time = 1_000_000
@@ -23,9 +23,9 @@ class _FakeTimeService:
     def now(self) -> int:
         return self.current_time
 
-    def real_duration(self, local_start: int, wall_clock_sec: int) -> int:
+    def real_duration_sec(self, local_start: int, wall_clock_duration_sec: int) -> int:
         self.duration_calls += 1
-        return wall_clock_sec
+        return wall_clock_duration_sec
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_random_event_loop_stamps_color_index_on_every_event():
     gen = demo_streams._random_event_loop(
         names=("a", "b"),
         durations=(60, 120),
-        gap_percent=0,  # no gaps → deterministic yields
+        gap_pct=0,  # no gaps → deterministic yields
         start_timestamp=0,
         time_service=ts,
         color_index=3,

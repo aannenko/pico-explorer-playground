@@ -9,7 +9,7 @@ IDLE = const(0)
 SYNCED = const(1)
 FAILED = const(2)
 
-_RETRY_DELAY_S = const(10)
+_RETRY_DELAY_SEC = const(10)
 
 state = IDLE
 
@@ -28,6 +28,6 @@ def sync_time(attempts=1):
             log_exception("[ntp] exception:", e)
             state = FAILED
             if i < attempts - 1:
-                time.sleep(_RETRY_DELAY_S)
+                time.sleep(_RETRY_DELAY_SEC)
 
     return FAILED

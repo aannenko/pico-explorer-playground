@@ -173,7 +173,7 @@ def test_tick_ntp_sync_resets_to_idle(fake_ticks, monkeypatch):
     svc._tick()
 
     assert svc._phase == network_service._IDLE
-    assert svc._last_sync_ticks == 200
+    assert svc._last_sync_ms == 200
 
 
 def test_tick_updates_last_sync_on_wifi_fail(fake_ticks):
@@ -182,7 +182,7 @@ def test_tick_updates_last_sync_on_wifi_fail(fake_ticks):
     svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
     svc._tick()
 
-    assert svc._last_sync_ticks == 200
+    assert svc._last_sync_ms == 200
 
 
 def test_tick_exception_safety(fake_ticks, capsys):
@@ -219,7 +219,7 @@ def test_tick_full_cycle(fake_ticks, monkeypatch):
     wifi.state = wifi_client.CONNECTED
     svc._tick()  # CONNECTED → NTP → sync → IDLE
     assert svc._phase == network_service._IDLE
-    assert svc._last_sync_ticks == 200
+    assert svc._last_sync_ms == 200
     assert ntp_calls[0] == 1
 
 

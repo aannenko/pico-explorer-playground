@@ -24,17 +24,17 @@ class PimoroniBME690:
 
     def __init__(
         self,
-        temp_offset: float,
-        hum_offset: float,
-        prsr_offset: float,
-        sensor_read_delay_ms: int = 5000,
+        temp_offset_c: float,
+        hum_offset_pct: float,
+        prsr_offset_hpa: float,
+        read_period_ms: int = 5000,
         schedule=micropython.schedule,  # (callback, arg) -> None
         timer_factory=Timer,  # (int) -> Timer
     ) -> None:
-        self._temp_offset = temp_offset
-        self._hum_offset = hum_offset
-        self._prsr_offset = prsr_offset
-        self._read_interval_ms = sensor_read_delay_ms
+        self._temp_offset_c = temp_offset_c
+        self._hum_offset_pct = hum_offset_pct
+        self._prsr_offset_hpa = prsr_offset_hpa
+        self._read_period_ms = read_period_ms
         self._schedule = schedule
 
         self._bme = BreakoutBME69X(PimoroniI2C(**PICO_EXPLORER_I2C_PINS))
@@ -57,7 +57,7 @@ class PimoroniBME690:
         self._timer = timer_factory(-1)
         self._timer.init(
             mode=Timer.PERIODIC,
-            period=self._read_interval_ms,
+            period=self._read_period_ms,
             callback=self._timer_callback_ref,
         )
 
@@ -79,9 +79,9 @@ class PimoroniBME690:
         heater_stable = reading[4] & STATUS_HEATER_STABLE
         # A tuple, not array('f'): each array('f') read boxes a new float.
         self._last_reading = (
-            reading[0] + self._temp_offset,
-            reading[1] / 100 + self._prsr_offset,
-            reading[2] + self._hum_offset,
+            reading[0] + self._temp_offset_c,
+            reading[1] / 100 + self._prsr_offset_hpa,
+            reading[2] + self._hum_offset_pct,
             reading[3] / 1000 if heater_stable else float("nan"),
             "Stable" if heater_stable else "Unstable",
         )

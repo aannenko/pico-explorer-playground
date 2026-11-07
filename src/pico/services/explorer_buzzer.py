@@ -7,7 +7,7 @@ from hardware.explorer import BUZZER_PIN
 
 _DEFAULT_ALERT_BEEPS = const(5)
 _DEFAULT_ALERT_INTERVAL_MS = const(150)
-_DEFAULT_ALERT_FREQ = const(1000)
+_DEFAULT_ALERT_FREQ_HZ = const(1000)
 
 
 class ExplorerBuzzer:
@@ -24,7 +24,7 @@ class ExplorerBuzzer:
         self._pwm.duty_u16(0)
 
         self._alert_remaining = 0
-        self._alert_freq = 0
+        self._alert_freq_hz = 0
 
         self._toggle_alert_ref = self._toggle_alert
 
@@ -32,14 +32,14 @@ class ExplorerBuzzer:
 
     def play_alert(
         self,
-        count: int = _DEFAULT_ALERT_BEEPS,
-        freq: int = _DEFAULT_ALERT_FREQ,
+        beep_count: int = _DEFAULT_ALERT_BEEPS,
+        freq_hz: int = _DEFAULT_ALERT_FREQ_HZ,
         interval_ms: int = _DEFAULT_ALERT_INTERVAL_MS,
     ) -> None:
-        """Beep ``count`` times at ``freq`` Hz, ``interval_ms`` on then off."""
-        self._alert_remaining = count * 2
-        self._alert_freq = freq
-        self._beep(freq)
+        """Beeps are ``interval_ms`` long and ``interval_ms`` apart."""
+        self._alert_remaining = beep_count * 2
+        self._alert_freq_hz = freq_hz
+        self._beep(freq_hz)
         self._alert_timer.init(
             mode=Timer.PERIODIC,
             period=interval_ms,
@@ -51,8 +51,8 @@ class ExplorerBuzzer:
         self._alert_remaining = 0
         self._off()
 
-    def _beep(self, freq: int = 1000, duty: int = 32768) -> None:
-        self._pwm.freq(freq)
+    def _beep(self, freq_hz: int = 1000, duty: int = 32768) -> None:
+        self._pwm.freq(freq_hz)
         self._pwm.duty_u16(duty)
 
     def _off(self) -> None:
@@ -65,6 +65,6 @@ class ExplorerBuzzer:
             self._alert_timer.deinit()
             return
         if self._alert_remaining % 2 == 0:
-            self._beep(self._alert_freq)
+            self._beep(self._alert_freq_hz)
         else:
             self._off()
