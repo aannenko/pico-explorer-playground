@@ -1,42 +1,20 @@
-import time
-
-from micropython import const
 from services import wifi_client
 from services.wifi_client import WifiClient
-from utilities import ntp
-from utilities.log import log_exception
-
-_IDLE = const(0)
-_WIFI = const(1)
-_NTP = const(2)
 
 
 class NetworkService:
-    """NTP clock sync over WiFi: a blocking initial sync, then periodic resyncs."""
+    """Connects WiFi with its credentials: blocking at boot, in the background after."""
 
-    def __init__(
-        self,
-        ssid: str,
-        password: str,
-        wifi: WifiClient,
-        sync_interval_ms: int = 12 * 60 * 60 * 1000,
-        tick_scheduler=None,
-    ) -> None:
+    def __init__(self, ssid: str, password: str, wifi: WifiClient) -> None:
         self._ssid = ssid
         self._password = password
         self._wifi = wifi
-        self._sync_interval_ms = sync_interval_ms
-        self._last_sync_ms = 0
-        self._phase = _IDLE
 
-        if tick_scheduler is not None:
-            tick_scheduler.register(self._tick)
-
-    def connect_and_sync_initial(self, on_progress=None) -> None:  # on_progress: (str) -> None
-        """Block until WiFi connects and NTP syncs, else raise ``RuntimeError``.
+    def connect_initial(self, on_progress=None) -> None:  # on_progress: (str) -> None
+        """Block until WiFi connects, else raise ``RuntimeError``.
 
         ``on_progress`` receives progress messages during this call only; it isn't
-        retained, so periodic resyncs never draw over the active view.
+        retained, so reconnects never draw over the active view.
         """
         def _notify(msg: str) -> None:
             if on_progress is not None:
@@ -48,42 +26,10 @@ class NetworkService:
             _notify("wifi fail")
             raise RuntimeError("Could not connect to WiFi")
 
-        _notify("sync time")
-        result = ntp.sync_time(attempts=5)
-        if result != ntp.SYNCED:
-            _notify("ntp fail")
-            raise RuntimeError("Could not sync time")
+    def start_reconnect(self) -> None:
+        """Unless the link is up, start reconnecting without blocking.
 
-        self._last_sync_ms = time.ticks_ms()
-
-    def _tick(self) -> None:
-        try:
-            self._tick_inner()
-        except Exception as e:
-            log_exception("[net] tick err:", e)
-
-    def _tick_inner(self) -> None:
-        if self._phase == _IDLE:
-            now_ms = time.ticks_ms()
-            if time.ticks_diff(now_ms, self._last_sync_ms) < self._sync_interval_ms:
-                return
-            if self._wifi.is_connected():
-                self._phase = _NTP
-            else:
-                self._wifi.start_connect(self._ssid, self._password)
-                self._phase = _WIFI
-
-        if self._phase == _WIFI:
-            s = self._wifi.state
-            if s == wifi_client.CONNECTED:
-                self._phase = _NTP
-            elif s == wifi_client.FAILED:
-                self._last_sync_ms = time.ticks_ms()
-                self._phase = _IDLE
-            else:
-                return
-
-        if self._phase == _NTP:
-            ntp.sync_time()
-            self._last_sync_ms = time.ticks_ms()
-            self._phase = _IDLE
+        A reconnect already in progress carries on rather than restarting.
+        """
+        if not self._wifi.is_connected():
+            self._wifi.start_connect(self._ssid, self._password)

@@ -1,14 +1,14 @@
 import time
 
 from micropython import const
+from utilities import ntp
+from utilities.log import log_exception
 
 _SAKAMOTO_T = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
 _DAYS_IN_MONTH = (0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 _SEC_PER_HOUR = const(3600)
 
-# _tick reads the wall clock only this often; a minute of slack on the
-# transition instant is imperceptible.
-_DST_CHECK_INTERVAL_MS = const(60_000)
+_INITIAL_SYNC_ATTEMPTS = const(5)
 
 
 def _is_leap(year: int) -> bool:
@@ -95,6 +95,12 @@ def _next_transition_utc(
     return result
 
 
+def _validate_dst_rule(rule: tuple[int, int, int, int]) -> None:
+    month, week, weekday, _ = rule
+    if not (1 <= month <= 12 and (week == -1 or 1 <= week <= 5) and 0 <= weekday <= 6):
+        raise ValueError("DST rule out of range: %r" % (rule,))
+
+
 class TimeService:
     """Central time authority.  Computes local time from UTC + TZ/DST.
 
@@ -102,14 +108,19 @@ class TimeService:
     range, so every read allocates: gate per-tick reads with ``time.ticks_ms()``.
 
     ``dst_start_rule`` and ``dst_end_rule`` are ``(month, week, weekday, hour)``:
-    ``week`` 1-5, or -1 for the last; ``weekday`` 0=Mon .. 6=Sun; ``hour`` in
-    local standard time for the start and in local DST time for the end.
-    ``None`` for either rule disables DST.
+    ``month`` 1-12; ``week`` 1-5, or -1 for the last; ``weekday`` 0=Mon .. 6=Sun;
+    ``hour`` in local standard time for the start and in local DST time for the
+    end.  A month, week or weekday out of range raises ``ValueError``.  ``None``
+    for either rule disables DST.
 
     Offsets are hours and may be fractional (e.g. 5.75); they are rounded to
     whole seconds.  ``dst_offset_hours`` must not be negative.
 
-    Must be instantiated after NTP sync so ``time.time()`` is accurate.
+    ``sync_initial`` and ``sync`` set the RTC over NTP; until the first, times
+    follow whatever it holds.  Times follow each sync at once.
+
+    Owns no timer: ``now()`` re-derives its cached UTC offset on the first read
+    after a DST change or a sync.
     """
 
     def __init__(
@@ -119,8 +130,12 @@ class TimeService:
         dst_end_rule: tuple[int, int, int, int] | None,
         dst_offset_hours: float = 0.0,
         get_time=time.time,  # () -> int
-        tick_scheduler=None,
+        sync_time=ntp.sync_time,  # (int) -> bool
     ) -> None:
+        for rule in (dst_start_rule, dst_end_rule):
+            if rule is not None:
+                _validate_dst_rule(rule)
+
         # Whole seconds, converted once: a float offset would make every epoch it
         # touches a float, which rp2's single-precision floats round to 128 s.
         self._tz_offset_sec = round(tz_offset_hours * _SEC_PER_HOUR)
@@ -128,20 +143,45 @@ class TimeService:
         self._dst_start_rule = dst_start_rule
         self._dst_end_rule = dst_end_rule
         self._get_time = get_time
+        self._sync_time = sync_time
 
         self._offset_sec = self._tz_offset_sec
-        self._dst_active = False
         self._next_transition_utc = 0
-        self._next_dst_check_ms = time.ticks_ms()
+        self._dst_stale = True
 
-        self._update_dst()
+    def sync_initial(self, on_progress=None) -> None:  # on_progress: (str) -> None
+        """Block until NTP sets the RTC, else raise ``RuntimeError``.
 
-        if tick_scheduler is not None:
-            tick_scheduler.register(self._tick)
+        ``on_progress`` receives progress messages during this call only; it isn't
+        retained, so resyncs never draw over the active view.
+        """
+        def _notify(msg: str) -> None:
+            if on_progress is not None:
+                on_progress(msg)
+
+        _notify("sync time")
+        if not self.sync(_INITIAL_SYNC_ATTEMPTS):
+            _notify("ntp fail")
+            raise RuntimeError("Could not sync time")
+
+    def sync(self, attempts: int = 1) -> bool:
+        """Blocking NTP sync of the RTC; return whether one of ``attempts`` succeeded."""
+        # A sync can step the clock back across a DST change, which now()'s transition
+        # check never sees.  Marked before the attempt, so this needn't trust a failed
+        # or raising one to have left the RTC alone.
+        self._dst_stale = True
+        return self._sync_time(attempts)
 
     def now(self) -> int:
-        """Return the current local-epoch time in seconds."""
-        return self._get_time() + self._offset_sec
+        """Return the current local-epoch time in seconds.
+
+        Short of heap to re-derive the offset after a DST change or a sync, it uses
+        the previous offset, off by at most the DST offset, and the next call retries.
+        """
+        utc_epoch = self._get_time()
+        if self._dst_stale or (self._next_transition_utc > 0 and utc_epoch >= self._next_transition_utc):
+            self._update_dst(utc_epoch)
+        return utc_epoch + self._offset_sec
 
     def utc_offset_sec(self, utc_epoch: int) -> int:
         """Time-zone offset, plus the DST offset when DST is active at ``utc_epoch``."""
@@ -196,36 +236,35 @@ class TimeService:
         # say which pass it is, so to_utc(now()) would be off by the DST offset.
         return self.to_utc(local_epoch) - self._get_time()
 
-    def _tick(self) -> None:
-        now_ms = time.ticks_ms()
-        if time.ticks_diff(now_ms, self._next_dst_check_ms) < 0:
-            return
-        self._next_dst_check_ms = time.ticks_add(now_ms, _DST_CHECK_INTERVAL_MS)
-        if self._next_transition_utc > 0 and self._get_time() >= self._next_transition_utc:
-            self._update_dst()
-
-    def _update_dst(self) -> None:
+    def _update_dst(self, utc_epoch: int) -> None:
         if self._dst_start_rule is None or self._dst_end_rule is None:
+            self._dst_stale = False
             return
 
-        utc_epoch = self._get_time()
-        self._dst_active = _is_dst(
-            utc_epoch,
-            self._tz_offset_sec,
-            self._dst_offset_sec,
-            self._dst_start_rule,
-            self._dst_end_rule,
-        )
+        try:
+            dst_active = _is_dst(
+                utc_epoch,
+                self._tz_offset_sec,
+                self._dst_offset_sec,
+                self._dst_start_rule,
+                self._dst_end_rule,
+            )
+            next_transition_utc = _next_transition_utc(
+                utc_epoch,
+                self._tz_offset_sec,
+                self._dst_offset_sec,
+                self._dst_start_rule,
+                self._dst_end_rule,
+            )
+        except MemoryError as e:
+            # Keeps the previous offset rather than raising, as now() documents: a raise
+            # would end any generator reading the time, for good.
+            log_exception("[time] dst err:", e)
+            return
 
-        if self._dst_active:
+        if dst_active:
             self._offset_sec = self._tz_offset_sec + self._dst_offset_sec
         else:
             self._offset_sec = self._tz_offset_sec
-
-        self._next_transition_utc = _next_transition_utc(
-            utc_epoch,
-            self._tz_offset_sec,
-            self._dst_offset_sec,
-            self._dst_start_rule,
-            self._dst_end_rule,
-        )
+        self._next_transition_utc = next_transition_utc
+        self._dst_stale = False

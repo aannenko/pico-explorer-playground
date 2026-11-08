@@ -31,6 +31,7 @@ from services.button_poller import ButtonPoller
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
+from services.network_upkeep import NetworkUpkeep
 from services.pimoroni_bme690 import PimoroniBME690
 from services.ring_history import RingHistory
 from services.tick_scheduler import TickScheduler
@@ -41,7 +42,9 @@ from services.wifi_client import WifiClient
 
 _SEC_PER_HOUR = const(3600)
 
-_NET_SYNC_INTERVAL_MS = const(12 * 60 * 60 * 1000)
+# Also how often NTP is queried: shortening it to reconnect sooner would query the
+# public NTP pool that often.
+_NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
 
 _STREAM_REFRESH_MS = const(30 * 60 * 1000)
 # Forecast slack beyond the calendar window: covers scroll plus failed retries.
@@ -102,11 +105,13 @@ class App:
         tick_scheduler: TickScheduler,
         button_poller: ButtonPoller,
         network_service: NetworkService,
+        network_upkeep: NetworkUpkeep,
     ) -> None:
         self.display_manager = display_manager
         self.tick_scheduler = tick_scheduler
         self.button_poller = button_poller
         self.network_service = network_service
+        self.network_upkeep = network_upkeep
 
 
 def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
@@ -249,17 +254,23 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         ssid=config.WIFI_SSID,
         password=config.WIFI_PASSWORD,
         wifi=wifi_client,
-        sync_interval_ms=_NET_SYNC_INTERVAL_MS,
-        tick_scheduler=tick_scheduler,
     )
-    network_service.connect_and_sync_initial(on_progress=status_display.show)
-    del status_display
+    network_service.connect_initial(on_progress=status_display.show)
 
     time_service = TimeService(
         tz_offset_hours=config.TIME_ZONE_OFFSET_HOURS,
         dst_start_rule=config.DST_START_RULE,
         dst_end_rule=config.DST_END_RULE,
         dst_offset_hours=config.DST_OFFSET_HOURS,
+    )
+    time_service.sync_initial(on_progress=status_display.show)
+    del status_display
+
+    network_upkeep = NetworkUpkeep(
+        wifi=wifi_client,
+        start_reconnect=network_service.start_reconnect,
+        sync_clock=time_service.sync,
+        period_ms=_NETWORK_UPKEEP_PERIOD_MS,
         tick_scheduler=tick_scheduler,
     )
 
@@ -336,4 +347,5 @@ def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> N
         tick_scheduler=tick_scheduler,
         button_poller=button_poller,
         network_service=network_service,
+        network_upkeep=network_upkeep,
     )

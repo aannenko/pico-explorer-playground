@@ -270,6 +270,33 @@ def fake_ticks(monkeypatch):
     return ticks
 
 
+TICKS_PERIOD_MS = 1 << 30
+
+
+@pytest.fixture
+def wrapping_ticks(monkeypatch):
+    """Like ``fake_ticks``, but wrapping as rp2's ``time.ticks_*`` do.
+
+    The ticks period is ``TICKS_PERIOD_MS``, and ``ticks_add`` raises
+    ``OverflowError`` for a delta of half that or more (``extmod/modtime.c``).
+    """
+    ticks = [0]
+    half_ms = TICKS_PERIOD_MS // 2
+
+    def ticks_diff(end_ms: int, start_ms: int) -> int:
+        return (end_ms - start_ms + half_ms) % TICKS_PERIOD_MS - half_ms
+
+    def ticks_add(start_ms: int, delta_ms: int) -> int:
+        if not -half_ms < delta_ms < half_ms:
+            raise OverflowError("ticks interval overflow")
+        return (start_ms + delta_ms) % TICKS_PERIOD_MS
+
+    monkeypatch.setattr(_time, "ticks_ms", lambda: ticks[0] % TICKS_PERIOD_MS)
+    monkeypatch.setattr(_time, "ticks_diff", ticks_diff)
+    monkeypatch.setattr(_time, "ticks_add", ticks_add)
+    return ticks
+
+
 class RecordingRenderer:
     """Generic call-recording renderer for display tests.
 

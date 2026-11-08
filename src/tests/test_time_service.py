@@ -190,14 +190,6 @@ def test_next_transition_after_fall_back():
 # ── TimeService ─────────────────────────────────────────────────────
 
 
-class FakeScheduler:
-    def __init__(self):
-        self.callbacks = []
-
-    def register(self, cb):
-        self.callbacks.append(cb)
-
-
 def test_now_returns_local_epoch():
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
     svc = TimeService(
@@ -236,54 +228,23 @@ def test_no_dst_config_uses_tz_only():
     assert svc.now() == utc + 5 * 3600
 
 
-def test_tick_triggers_dst_transition():
-    """Simulate crossing from winter into summer via tick."""
+def test_now_applies_the_spring_forward_from_the_first_read_after_it():
     clock = [_utc_epoch(2026, 3, 29, 0, 30, 0)]  # 00:30 UTC, before spring forward
-
-    sched = FakeScheduler()
     svc = TimeService(
         tz_offset_hours=1,
         dst_start_rule=_DST_START,
         dst_end_rule=_DST_END,
         dst_offset_hours=1,
         get_time=lambda: clock[0],
-        tick_scheduler=sched,
     )
-    assert len(sched.callbacks) == 1
-    assert svc._dst_active is False
     assert svc.now() == clock[0] + 1 * 3600  # CET
 
-    # Advance clock past the spring-forward transition (01:00 UTC)
     clock[0] = _utc_epoch(2026, 3, 29, 1, 0, 0)
-    svc._tick()
-
-    assert svc._dst_active is True
     assert svc.now() == clock[0] + 2 * 3600  # CEST
 
 
-def test_tick_no_transition_when_not_reached():
-    clock = [_utc_epoch(2026, 1, 15, 12, 0, 0)]
-
-    svc = TimeService(
-        tz_offset_hours=1,
-        dst_start_rule=_DST_START,
-        dst_end_rule=_DST_END,
-        dst_offset_hours=1,
-        get_time=lambda: clock[0],
-    )
-    initial_offset = svc._offset_sec
-
-    # Advance by 1 hour — still winter, no transition
-    clock[0] += 3600
-    svc._tick()
-
-    assert svc._offset_sec == initial_offset
-
-
-def test_tick_fall_back_transition():
-    """Simulate crossing from summer into winter via tick."""
+def test_now_applies_the_fall_back_from_the_first_read_after_it():
     clock = [_utc_epoch(2026, 10, 25, 0, 30, 0)]  # 02:30 CEST, before fall back
-
     svc = TimeService(
         tz_offset_hours=1,
         dst_start_rule=_DST_START,
@@ -291,29 +252,21 @@ def test_tick_fall_back_transition():
         dst_offset_hours=1,
         get_time=lambda: clock[0],
     )
-    assert svc._dst_active is True
     assert svc.now() == clock[0] + 2 * 3600  # CEST
 
-    # Advance past fall-back (01:00 UTC)
     clock[0] = _utc_epoch(2026, 10, 25, 1, 0, 0)
-    svc._tick()
-
-    assert svc._dst_active is False
     assert svc.now() == clock[0] + 1 * 3600  # CET
 
 
-def test_tick_throttles_wall_clock_reads(fake_ticks):
-    """``_tick`` samples the (big-int-allocating) wall clock ~once a minute, not
-    every tick — the DST boundary is far away, so per-tick reads are pure churn.
-    """
-    clock = [_utc_epoch(2026, 1, 15, 12, 0, 0)]  # winter, far from any transition
+def test_now_reads_the_wall_clock_once_per_call():
+    """Each read allocates a big int, so re-deriving must reuse the instant ``now()`` read."""
+    clock = [0]
     reads = [0]
 
-    def get_time():
+    def get_time() -> int:
         reads[0] += 1
         return clock[0]
 
-    fake_ticks[0] = 0
     svc = TimeService(
         tz_offset_hours=1,
         dst_start_rule=_DST_START,
@@ -321,34 +274,51 @@ def test_tick_throttles_wall_clock_reads(fake_ticks):
         dst_offset_hours=1,
         get_time=get_time,
     )
-    reads_after_init = reads[0]
-
-    # First tick (gate initialised to construction time) is due → one read.
-    svc._tick()
-    assert reads[0] == reads_after_init + 1
-
-    # Ticks within the throttle window must not touch the wall clock.
-    for t in (1, 250, 30_000, 59_999):
-        fake_ticks[0] = t
-        svc._tick()
-    assert reads[0] == reads_after_init + 1
-
-    # Once the window elapses, it samples again.
-    fake_ticks[0] = 60_000
-    svc._tick()
-    assert reads[0] == reads_after_init + 2
+    # A first read, one that re-derives across the spring-forward, then a plain one.
+    for utc in (
+        _utc_epoch(2026, 3, 29, 0, 59, 0),
+        _utc_epoch(2026, 3, 29, 1, 0, 0),
+        _utc_epoch(2026, 3, 29, 1, 1, 0),
+    ):
+        clock[0] = utc
+        reads_before = reads[0]
+        svc.now()
+        assert reads[0] == reads_before + 1
 
 
-def test_constructor_registers_tick():
-    sched = FakeScheduler()
-    TimeService(
-        tz_offset_hours=0,
-        dst_start_rule=None,
-        dst_end_rule=None,
-        get_time=lambda: 0,
-        tick_scheduler=sched,
+def test_reads_away_from_a_dst_change_do_no_dst_math(monkeypatch):
+    clock = [_utc_epoch(2026, 1, 15, 12, 0, 0)]
+    svc = TimeService(
+        tz_offset_hours=1,
+        dst_start_rule=_DST_START,
+        dst_end_rule=_DST_END,
+        dst_offset_hours=1,
+        get_time=lambda: clock[0],
     )
-    assert len(sched.callbacks) == 1
+    svc.now()
+    mktime = time.mktime
+    mktime_calls = [0]
+
+    def counting_mktime(fields: tuple) -> int:
+        mktime_calls[0] += 1
+        return mktime(fields)
+
+    monkeypatch.setattr(time, "mktime", counting_mktime)
+    for _ in range(5):
+        clock[0] += 60
+        svc.now()
+    assert mktime_calls[0] == 0
+
+
+@pytest.mark.parametrize("which", ["dst_start_rule", "dst_end_rule"])
+@pytest.mark.parametrize(
+    "rule",
+    [(0, -1, 6, 2), (13, -1, 6, 2), (3, 0, 6, 2), (3, 6, 6, 2), (3, -2, 6, 2), (3, -1, -1, 2), (3, -1, 7, 2)],
+)
+def test_rejects_a_dst_rule_out_of_range(which: str, rule: tuple[int, int, int, int]):
+    kwargs = {"dst_start_rule": _DST_START, "dst_end_rule": _DST_END, which: rule}
+    with pytest.raises(ValueError):
+        TimeService(tz_offset_hours=1, dst_offset_hours=1, get_time=lambda: 0, **kwargs)
 
 
 # ── utc_offset_sec ──────────────────────────────────────────────────
@@ -573,18 +543,15 @@ def test_lord_howe_spring_forward_shortens_by_half_an_hour():
     assert svc.real_remaining_sec(svc.now() + 3 * 3600) == 3 * 3600 - 1800
 
 
-def test_tick_applies_fractional_dst_offset():
+def test_now_applies_a_fractional_dst_offset():
     clock = [_utc_epoch(2026, 10, 3, 15, 0, 0)]  # 30 min before Lord Howe's spring-forward
-    sched = FakeScheduler()
     svc = TimeService(
         tz_offset_hours=10.5, dst_start_rule=_LORD_HOWE_DST_START,
         dst_end_rule=_LORD_HOWE_DST_END, dst_offset_hours=0.5,
-        get_time=lambda: clock[0], tick_scheduler=sched,
+        get_time=lambda: clock[0],
     )
     assert svc.now() == clock[0] + 37_800
     clock[0] = _utc_epoch(2026, 10, 3, 15, 30, 0)
-    svc._next_dst_check_ms = 0
-    sched.callbacks[0]()
     local = svc.now()
     assert type(local) is int
     assert local == clock[0] + 39_600
@@ -702,14 +669,11 @@ def test_to_utc_around_a_transition_in_another_utc_year(
     assert svc.to_utc(_local_epoch(*local_fields)) == _utc_epoch(*utc_fields, 0)
 
 
-def test_tick_applies_a_transition_from_the_previous_rule_year() -> None:
+def test_now_applies_a_transition_from_the_previous_rule_year() -> None:
     clock = [_utc_epoch(2027, 1, 1, 1, 0, 0)]
-    sched = FakeScheduler()
-    svc = TimeService(**_DECEMBER_END_KWARGS, get_time=lambda: clock[0], tick_scheduler=sched)
+    svc = TimeService(**_DECEMBER_END_KWARGS, get_time=lambda: clock[0])
     assert svc.now() == clock[0] - 14_400
     clock[0] = _utc_epoch(2027, 1, 1, 3, 0, 0)
-    svc._next_dst_check_ms = 0
-    sched.callbacks[0]()
     assert svc.now() == clock[0] - 18_000
 
 
@@ -738,3 +702,149 @@ def test_real_remaining_sec_counts_real_seconds_from_now(
         dst_offset_hours=1, get_time=lambda: utc,
     )
     assert svc.real_remaining_sec(_local_epoch(*local_end)) == expected_sec
+
+
+# ── NTP sync ────────────────────────────────────────────────────────
+
+_WINTER_UTC = _utc_epoch(2026, 1, 15, 12, 0, 0)
+_SUMMER_2036_UTC = _utc_epoch(2036, 7, 1, 12, 0, 0)
+
+
+class _FakeNtp:
+    """Records ``sync_time`` calls; each sets the clock to ``synced_utc`` if given, then returns ``ok``."""
+
+    def __init__(self, utc: int, synced_utc: int | None = None, ok: bool = True) -> None:
+        self.clock = [utc]
+        self.calls: list[int] = []
+        self._synced_utc = synced_utc
+        self._ok = ok
+
+    def sync_time(self, attempts: int) -> bool:
+        self.calls.append(attempts)
+        if self._synced_utc is not None:
+            self.clock[0] = self._synced_utc
+        return self._ok
+
+
+def _cet_service(ntp: _FakeNtp, sync_time=None) -> TimeService:  # sync_time: (int) -> bool
+    return TimeService(
+        tz_offset_hours=1, dst_start_rule=_DST_START, dst_end_rule=_DST_END, dst_offset_hours=1,
+        get_time=lambda: ntp.clock[0], sync_time=sync_time or ntp.sync_time,
+    )
+
+
+def test_sync_initial_reports_progress_and_makes_five_attempts():
+    ntp = _FakeNtp(_WINTER_UTC)
+    progress: list[str] = []
+    _cet_service(ntp).sync_initial(on_progress=progress.append)
+    assert ntp.calls == [5]
+    assert progress == ["sync time"]
+
+
+def test_sync_initial_raises_when_every_attempt_fails():
+    ntp = _FakeNtp(_WINTER_UTC, ok=False)
+    progress: list[str] = []
+    with pytest.raises(RuntimeError, match="Could not sync time"):
+        _cet_service(ntp).sync_initial(on_progress=progress.append)
+    assert progress == ["sync time", "ntp fail"]
+
+
+def test_sync_initial_without_on_progress():
+    ntp = _FakeNtp(_WINTER_UTC)
+    _cet_service(ntp).sync_initial()
+    assert ntp.calls == [5]
+
+
+def test_sync_initial_applies_the_synced_offset_at_once():
+    # The unsynced RTC reads winter; the sync lands in summer.
+    ntp = _FakeNtp(_utc_epoch(2021, 1, 1, 0, 0, 0), synced_utc=_utc_epoch(2026, 7, 15, 12, 0, 0))
+    svc = _cet_service(ntp)
+    assert svc.now() == ntp.clock[0] + 3600
+    svc.sync_initial()
+    assert svc.now() == ntp.clock[0] + 7200
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_sync_makes_one_attempt_by_default_and_returns_its_result(ok: bool):
+    ntp = _FakeNtp(_WINTER_UTC, ok=ok)
+    assert _cet_service(ntp).sync() is ok
+    assert ntp.calls == [1]
+
+
+def test_sync_that_steps_the_clock_back_restores_the_offset_and_transitions():
+    # A bad NTP reply put the RTC in summer 2036; the next sync steps it back to winter 2026.
+    ntp = _FakeNtp(_SUMMER_2036_UTC, synced_utc=_WINTER_UTC)
+    svc = _cet_service(ntp)
+    assert svc.now() == ntp.clock[0] + 7200
+    svc.sync()
+    assert svc.now() == ntp.clock[0] + 3600
+    ntp.clock[0] = _utc_epoch(2026, 3, 29, 1, 0, 0)  # the 2026 spring-forward
+    assert svc.now() == ntp.clock[0] + 7200
+
+
+def test_failed_sync_that_moved_the_clock_still_leaves_the_right_offset():
+    ntp = _FakeNtp(_SUMMER_2036_UTC, synced_utc=_WINTER_UTC, ok=False)
+    svc = _cet_service(ntp)
+    svc.now()
+    svc.sync()
+    assert svc.now() == ntp.clock[0] + 3600
+
+
+def test_sync_that_raises_after_moving_the_clock_still_leaves_the_right_offset():
+    ntp = _FakeNtp(_SUMMER_2036_UTC, synced_utc=_WINTER_UTC)
+
+    def raising_sync_time(attempts: int) -> bool:
+        ntp.sync_time(attempts)
+        raise OSError("socket closed")
+
+    svc = _cet_service(ntp, sync_time=raising_sync_time)
+    svc.now()
+    with pytest.raises(OSError):
+        svc.sync()
+    assert svc.now() == ntp.clock[0] + 3600
+
+
+def _fail_dst_math_once(monkeypatch) -> None:
+    mktime = time.mktime
+    failures = [1]
+
+    def failing_mktime(fields: tuple) -> int:
+        if failures[0]:
+            failures[0] -= 1
+            raise MemoryError
+        return mktime(fields)
+
+    monkeypatch.setattr(time, "mktime", failing_mktime)
+
+
+def test_failed_rederive_after_a_sync_keeps_the_old_offset_until_the_next_read(monkeypatch, capsys):
+    ntp = _FakeNtp(_SUMMER_2036_UTC, synced_utc=_WINTER_UTC)
+    svc = _cet_service(ntp)
+    svc.now()
+    svc.sync()
+    _fail_dst_math_once(monkeypatch)
+    assert svc.now() == ntp.clock[0] + 7200
+    assert "[time] dst err:" in capsys.readouterr().out
+    assert svc.now() == ntp.clock[0] + 3600
+
+
+def test_failed_rederive_at_a_dst_change_keeps_the_old_offset_until_the_next_read(monkeypatch, capsys):
+    ntp = _FakeNtp(_utc_epoch(2026, 3, 29, 0, 59, 0))
+    svc = _cet_service(ntp)
+    svc.now()
+    ntp.clock[0] = _utc_epoch(2026, 3, 29, 1, 0, 0)  # the spring-forward
+    _fail_dst_math_once(monkeypatch)
+    assert svc.now() == ntp.clock[0] + 3600
+    assert "[time] dst err:" in capsys.readouterr().out
+    assert svc.now() == ntp.clock[0] + 7200
+
+
+def test_dst_math_errors_other_than_memory_still_raise(monkeypatch):
+    svc = _cet_service(_FakeNtp(_WINTER_UTC))
+
+    def broken_mktime(fields: tuple) -> int:
+        raise OverflowError
+
+    monkeypatch.setattr(time, "mktime", broken_mktime)
+    with pytest.raises(OverflowError):
+        svc.now()

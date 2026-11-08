@@ -40,8 +40,7 @@ graph TD
     app --> TimeService
     app --> StatusDisplay["StatusDisplay (boot overlay)"]
 
-    TickScheduler -- "periodic tick()" --> TimeService
-    TickScheduler -- "periodic tick()" --> NetworkService
+    TickScheduler -- "periodic tick()" --> NetworkUpkeep
     TickScheduler -- "periodic tick()" --> RingHistory
     TickScheduler -- "periodic tick()" --> WeatherService
     TickScheduler -- "periodic tick()" --> AirService
@@ -59,9 +58,13 @@ graph TD
     CalendarDisplay -- "get_local_time, real_remaining_sec" --> TimeService
     CalendarDisplay --> EventWindow --> scheduling["scheduling/event + event_runs + event_factory + stream"]
 
+    NetworkUpkeep -- "start_reconnect()" --> NetworkService
+    NetworkUpkeep -- "sync()" --> TimeService
+    NetworkUpkeep -- "is_connected()" --> WifiClient
     NetworkService -- "on_progress (bootstrap only)" --> StatusDisplay
     NetworkService --> WifiClient
-    NetworkService --> ntp["utilities/ntp"]
+    TimeService -- "on_progress (bootstrap only)" --> StatusDisplay
+    TimeService --> ntp["utilities/ntp"]
     WeatherService -- "precip + UV" --> WifiClient
     AirService -- "AQI + pollen" --> WifiClient
     WeatherService --> EventStreamService["EventStreamService base (fetch_machine: FetchMachine + FetchCoordinator)"]

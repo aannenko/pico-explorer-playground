@@ -100,7 +100,6 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         manager.previous_ref(0)
         manager.next_ref(0)
     clock[0] += 30 * 86400
-    time_service._update_dst()
 
     event_type = demo_streams.Event
     produced = 0

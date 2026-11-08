@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from services import network_service, wifi_client
+from services import wifi_client
 from services.network_service import NetworkService
-from utilities import ntp
+
+_SSID = "TestSSID"
+_PASSWORD = "TestPass"
 
 
 class FakeWifiClient:
     """Minimal stand-in for WifiClient — exposes the subset used by NetworkService."""
 
-    def __init__(self, *, connect_result=None, is_connected=False, state=None):
+    def __init__(self, *, connect_result=None, is_connected=False):
         self._connect_result = (
             wifi_client.CONNECTED if connect_result is None else connect_result
         )
-        self._is_connected = is_connected
-        self.state = wifi_client.IDLE if state is None else state
+        self.connected = is_connected
         self.connect_calls: list[tuple[str, str]] = []
         self.start_connect_calls: list[tuple[str, str]] = []
 
@@ -27,204 +28,65 @@ class FakeWifiClient:
         self.start_connect_calls.append((ssid, pw))
 
     def is_connected(self):
-        return self._is_connected
+        return self.connected
 
 
-def _mk_service(wifi=None, **kwargs):
+def _mk_service(wifi=None):
     progress_calls: list[tuple[str, ...]] = []
 
     def on_progress(text: str, subtext: str = "") -> None:
         progress_calls.append((text, subtext))
 
     svc = NetworkService(
-        ssid="TestSSID",
-        password="TestPass",
+        ssid=_SSID,
+        password=_PASSWORD,
         wifi=wifi if wifi is not None else FakeWifiClient(),
-        **kwargs,
     )
     return svc, on_progress, progress_calls
 
 
-# --- connect_and_sync_initial ---
+# --- connect_initial ---
 
-def test_connect_and_sync_initial_success(monkeypatch):
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
+def test_connect_initial_success():
+    wifi = FakeWifiClient(connect_result=wifi_client.CONNECTED)
+    svc, on_progress, progress_calls = _mk_service(wifi=wifi)
+    svc.connect_initial(on_progress=on_progress)
 
-    svc, on_progress, progress_calls = _mk_service(
-        wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
-    )
-    svc.connect_and_sync_initial(on_progress=on_progress)
-
-    assert progress_calls == [("wifi", ""), ("sync time", "")]
+    assert wifi.connect_calls == [(_SSID, _PASSWORD)]
+    assert progress_calls == [("wifi", "")]
 
 
-def test_connect_and_sync_initial_wifi_fail(monkeypatch):
+def test_connect_initial_wifi_fail():
     svc, on_progress, progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.FAILED),
     )
 
     with pytest.raises(RuntimeError, match="Could not connect to WiFi"):
-        svc.connect_and_sync_initial(on_progress=on_progress)
+        svc.connect_initial(on_progress=on_progress)
 
-    assert ("wifi fail", "") in progress_calls
-
-
-def test_connect_and_sync_initial_ntp_fail(monkeypatch):
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.FAILED)
-
-    svc, on_progress, progress_calls = _mk_service(
-        wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
-    )
-
-    with pytest.raises(RuntimeError, match="Could not sync time"):
-        svc.connect_and_sync_initial(on_progress=on_progress)
-
-    assert ("ntp fail", "") in progress_calls
+    assert progress_calls == [("wifi", ""), ("wifi fail", "")]
 
 
-def test_connect_and_sync_initial_without_on_progress(monkeypatch):
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
-
+def test_connect_initial_without_on_progress():
     svc, _on_progress, _progress_calls = _mk_service(
         wifi=FakeWifiClient(connect_result=wifi_client.CONNECTED),
     )
-    svc.connect_and_sync_initial()  # must not raise
+    svc.connect_initial()
 
 
-# --- _tick() phase-based orchestration ---
+# --- start_reconnect ---
 
-def test_tick_does_nothing_before_interval(fake_ticks):
-    wifi = FakeWifiClient()
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=1000)
-    svc._tick()
+def test_start_reconnect_connects_a_dropped_link():
+    wifi = FakeWifiClient(is_connected=False)
+    svc, _, _ = _mk_service(wifi=wifi)
+    svc.start_reconnect()
+
+    assert wifi.start_connect_calls == [(_SSID, _PASSWORD)]
+
+
+def test_start_reconnect_leaves_a_live_link_alone():
+    wifi = FakeWifiClient(is_connected=True)
+    svc, _, _ = _mk_service(wifi=wifi)
+    svc.start_reconnect()
 
     assert wifi.start_connect_calls == []
-
-
-def test_tick_starts_wifi_when_not_connected(fake_ticks):
-    fake_ticks[0] = 200
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-
-    assert len(wifi.start_connect_calls) == 1
-    assert svc._phase == network_service._WIFI
-
-
-def test_tick_skips_wifi_when_connected(fake_ticks, monkeypatch):
-    fake_ticks[0] = 200
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
-
-    wifi = FakeWifiClient(is_connected=True)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-
-    assert wifi.start_connect_calls == []
-    assert svc._phase == network_service._IDLE
-
-
-def test_tick_wifi_connecting_stays_in_wifi_phase(fake_ticks, monkeypatch):
-    fake_ticks[0] = 200
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
-    ntp_calls = [0]
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: _inc_and_return(ntp_calls, ntp.SYNCED))
-
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-    svc._tick()
-
-    assert ntp_calls[0] == 0
-    assert svc._phase == network_service._WIFI
-
-
-def test_tick_wifi_connected_transitions_to_ntp(fake_ticks, monkeypatch):
-    fake_ticks[0] = 200
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-    assert svc._phase == network_service._WIFI
-
-    wifi.state = wifi_client.CONNECTED
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
-    svc._tick()
-
-    assert svc._phase == network_service._IDLE
-
-
-def test_tick_wifi_failed_resets_to_idle(fake_ticks):
-    fake_ticks[0] = 200
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-    assert svc._phase == network_service._WIFI
-
-    wifi.state = wifi_client.FAILED
-    svc._tick()
-
-    assert svc._phase == network_service._IDLE
-
-
-def test_tick_ntp_sync_resets_to_idle(fake_ticks, monkeypatch):
-    fake_ticks[0] = 200
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: ntp.SYNCED)
-
-    wifi = FakeWifiClient(is_connected=True)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-
-    assert svc._phase == network_service._IDLE
-    assert svc._last_sync_ms == 200
-
-
-def test_tick_updates_last_sync_on_wifi_fail(fake_ticks):
-    fake_ticks[0] = 200
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.FAILED)
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-    svc._tick()
-
-    assert svc._last_sync_ms == 200
-
-
-def test_tick_exception_safety(fake_ticks, capsys):
-    fake_ticks[0] = 200
-
-    class BoomWifi(FakeWifiClient):
-        def is_connected(self):
-            raise RuntimeError("boom")
-
-    svc, _, _ = _mk_service(wifi=BoomWifi(), sync_interval_ms=100)
-    svc._tick()  # must not raise — _tick wraps in try/except
-
-    captured = capsys.readouterr()
-    assert "[net] tick err:" in captured.out
-    assert "RuntimeError: boom" in captured.out
-
-
-def test_tick_full_cycle(fake_ticks, monkeypatch):
-    """Simulate IDLE → WIFI → NTP → IDLE across multiple ticks."""
-    wifi = FakeWifiClient(is_connected=False, state=wifi_client.CONNECTING)
-
-    ntp_calls = [0]
-    monkeypatch.setattr(ntp, "sync_time", lambda attempts=1: _inc_and_return(ntp_calls, ntp.SYNCED))
-
-    svc, _, _ = _mk_service(wifi=wifi, sync_interval_ms=100)
-
-    fake_ticks[0] = 200
-    svc._tick()  # IDLE → WIFI, wifi CONNECTING
-    assert svc._phase == network_service._WIFI
-
-    svc._tick()  # wifi still CONNECTING
-    assert svc._phase == network_service._WIFI
-
-    wifi.state = wifi_client.CONNECTED
-    svc._tick()  # CONNECTED → NTP → sync → IDLE
-    assert svc._phase == network_service._IDLE
-    assert svc._last_sync_ms == 200
-    assert ntp_calls[0] == 1
-
-
-# --- Helpers ---
-
-def _inc_and_return(counter: list[int], value):
-    counter[0] += 1
-    return value
