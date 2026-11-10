@@ -5,9 +5,9 @@ from hardware.explorer import BUZZER_PIN
 # Note: You must bridge the pin you use over to the AUDIO pin
 # on the Pico Explorer header in order to drive the onboard Piezo.
 
-_DEFAULT_ALERT_BEEPS = const(5)
-_DEFAULT_ALERT_INTERVAL_MS = const(150)
-_DEFAULT_ALERT_FREQ_HZ = const(1000)
+_DEFAULT_BEEP_COUNT = const(5)
+_DEFAULT_BEEP_TOGGLE_MS = const(150)
+_DEFAULT_BEEP_FREQ_HZ = const(1000)
 
 
 class ExplorerBuzzer:
@@ -32,17 +32,17 @@ class ExplorerBuzzer:
 
     def play_alert(
         self,
-        beep_count: int = _DEFAULT_ALERT_BEEPS,
-        freq_hz: int = _DEFAULT_ALERT_FREQ_HZ,
-        interval_ms: int = _DEFAULT_ALERT_INTERVAL_MS,
+        beep_count: int = _DEFAULT_BEEP_COUNT,
+        freq_hz: int = _DEFAULT_BEEP_FREQ_HZ,
+        beep_toggle_ms: int = _DEFAULT_BEEP_TOGGLE_MS,
     ) -> None:
-        """Beeps are ``interval_ms`` long and ``interval_ms`` apart."""
+        """Each beep, and each gap between beeps, lasts ``beep_toggle_ms``."""
         self._alert_remaining = beep_count * 2
         self._alert_freq_hz = freq_hz
         self._beep(freq_hz)
         self._alert_timer.init(
             mode=Timer.PERIODIC,
-            period=interval_ms,
+            period=beep_toggle_ms,
             callback=self._toggle_alert_ref,
         )
 
@@ -51,7 +51,7 @@ class ExplorerBuzzer:
         self._alert_remaining = 0
         self._off()
 
-    def _beep(self, freq_hz: int = 1000, duty: int = 32768) -> None:
+    def _beep(self, freq_hz: int, duty: int = 32768) -> None:
         self._pwm.freq(freq_hz)
         self._pwm.duty_u16(duty)
 

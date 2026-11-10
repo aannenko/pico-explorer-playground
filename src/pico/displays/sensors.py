@@ -18,11 +18,14 @@ from displays.shared import _icons_data, icons_p4
 from displays.shared.header import format_header_time, header_fits
 from picographics import PicoGraphics  # type: ignore
 from services.pimoroni_bme690 import PimoroniBME690
+from services.ring_history import RingHistory
+from services.time_service import TimeService
 
 
 _HISTORY_MS = const(24 * 3600 * 1000)
 _VALUE_GRAPH_GAP_PX = const(3)
 _GRAPH_RIGHT_MARGIN_PX = const(0)
+_TYPICAL_INDOOR_BAND_INDEX = const(1)
 _ICON_SCALE = const(2)
 # bitmap8 glyph ink sits high in its cell, so a box-centred icon reads low
 # against digits.
@@ -83,7 +86,6 @@ class Geometry:
         self.width, self.height = pico_graphics.get_bounds()
 
         self.font = font
-        pico_graphics.set_font(font)
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
         self.line_spacing = self.text_height // 2
@@ -124,6 +126,7 @@ class Geometry:
         self.unit_x = self.icon_x + self.icon_size_px + 4
         self.value_x = self.unit_x + self.unit_size_px + 6
 
+        pico_graphics.set_font(font)
         value_max_text_width = pico_graphics.measure_text(
             _WIDEST_VALUE_TEXT, scale=text_scale
         )
@@ -168,8 +171,8 @@ class Renderer:
     def draw_left_column(
         self,
         row_index: int,
-        icon: tuple,
-        unit: tuple,
+        icon: tuple[int, int, bytes],
+        unit: tuple[int, int, bytes],
     ) -> None:
         """Draw a row's ``icon`` and ``unit``; their area must already be clear."""
         if row_index < 0 or row_index >= len(self._last_row_texts):
@@ -215,7 +218,7 @@ class Renderer:
 
         self._last_row_texts[row_index] = text
 
-    def replace_row_icon(self, row_index: int, icon: tuple) -> None:
+    def replace_row_icon(self, row_index: int, icon: tuple[int, int, bytes]) -> None:
         """Replace a row's icon, erasing the old one."""
         if row_index < 0 or row_index >= len(self._last_row_texts):
             return
@@ -326,14 +329,14 @@ class Display(_Display):
         self,
         renderer: Renderer,
         bme690_reader: PimoroniBME690,
-        time_service,
-        history,
+        time_service: TimeService,
+        history: RingHistory,
         graph_height: int,
         *,
-        temp_bands: tuple,
-        pressure_bands: tuple,
-        humidity_bands: tuple,
-        gas_bands: tuple,
+        temp_bands: tuple[float, ...],
+        pressure_bands: tuple[float, ...],
+        humidity_bands: tuple[float, ...],
+        gas_bands: tuple[float, ...],
     ) -> None:
         self._renderer = renderer
         self._time_service = time_service
@@ -342,8 +345,8 @@ class Display(_Display):
         self._band_pens = build_sensor_band_pens()
         self._graph_height = graph_height
         self._active = False
-        self._row_icons: list[tuple | None] = [None] * len(self.ROWS)
-        self._last_rendered_reading: tuple | None = None
+        self._row_icons: list[tuple[int, int, bytes] | None] = [None] * len(self.ROWS)
+        self._last_rendered_reading: tuple[float, float, float, float, str] | None = None
         self._last_commit = -1
         self._gas_was_stable: bool | None = None
         self._last_header_minute = -1
@@ -356,7 +359,7 @@ class Display(_Display):
         )
 
     @staticmethod
-    def _validated_bands(row_index: int, bands) -> tuple:
+    def _validated_bands(row_index: int, bands: tuple[float, ...]) -> tuple[float, float, float, float, float]:
         """Return ``bands`` as a tuple of edges ``(cap_min, t1, t2, t3, cap_max)``.
 
         Raises ``ValueError`` unless ``bands`` holds 5 strictly ascending edges.
@@ -377,7 +380,7 @@ class Display(_Display):
         return (b0, b1, b2, b3, b4)
 
     @staticmethod
-    def _band_index(value: float, edges: tuple) -> int:
+    def _band_index(value: float, edges: tuple[float, float, float, float, float]) -> int:
         """Return ``value``'s band, 0..3, as split by the three inner edges of ``edges``.
 
         A value on an edge falls in the band above it.  The outer edges bound the graph,
@@ -393,7 +396,7 @@ class Display(_Display):
 
     @staticmethod
     @micropython.native
-    def _marker_y(value: float, edges: tuple, graph_height: int) -> int | None:
+    def _marker_y(value: float, edges: tuple[float, float, float, float, float], graph_height: int) -> int | None:
         """``cap_max`` (``edges[-1]``) maps to y 0 (top) and ``cap_min`` (``edges[0]``)
         to ``graph_height - 1`` (bottom), both inclusive; outside them it returns
         ``None``.  ``value`` must not be NaN.
@@ -423,7 +426,7 @@ class Display(_Display):
             return "-999"
         return str(i)
 
-    def _maybe_swap_icon(self, row_index: int, new_icon: tuple) -> None:
+    def _maybe_swap_icon(self, row_index: int, new_icon: tuple[int, int, bytes]) -> None:
         if new_icon != self._row_icons[row_index]:
             self._renderer.replace_row_icon(row_index, new_icon)
             self._row_icons[row_index] = new_icon
@@ -459,13 +462,7 @@ class Display(_Display):
                 fill_pen, marker_pen = pens_row[band]
                 marker_y = self._marker_y(value, edges, graph_height)
                 col = capacity - 1 - i
-                renderer.draw_graph_column(
-                    metric_index,
-                    col,
-                    fill_pen,
-                    marker_pen if marker_y is not None else None,
-                    marker_y,
-                )
+                renderer.draw_graph_column(metric_index, col, fill_pen, marker_pen, marker_y)
 
     def _update_display(self) -> None:
         # The wall-clock read allocates, so do it only once a minute boundary is due.
@@ -532,8 +529,7 @@ class Display(_Display):
         self._active = True
         self._renderer.reset()
         for i, (unit, _edges, cells) in enumerate(self._rows):
-            # Band 1 by default, so a typical indoor reading needs no first swap.
-            default_icon = cells[1][0]
+            default_icon = cells[_TYPICAL_INDOOR_BAND_INDEX][0]
             self._renderer.draw_left_column(i, default_icon, unit)
             self._row_icons[i] = default_icon
         # A cleared screen still needs repainting when the reading object is unchanged.
@@ -550,7 +546,7 @@ class Display(_Display):
         self._active = False
 
 
-def build_sensor_band_pens():
+def build_sensor_band_pens() -> tuple[tuple[tuple[int, int], ...], ...]:
     """Return each band's ``(fill, marker)`` pens, indexed ``pens[metric_index][band_index]``.
 
     The marker is the fill's auto-contrast, precomputed so the render loop does no

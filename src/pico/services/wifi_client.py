@@ -199,7 +199,7 @@ class WifiClient:
             self._timer.deinit()
             self._timer = None
 
-    def _timer_callback(self, _t) -> None:
+    def _timer_callback(self, _: Timer) -> None:
         # _pending collapses firings queued behind blocking work into one scheduled run.
         if self._pending:
             return

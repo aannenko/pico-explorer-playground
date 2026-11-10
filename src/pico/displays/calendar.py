@@ -13,8 +13,8 @@ from scheduling.stream import FRESH
 WINDOW_PAST_SEC = const(30 * 60)
 WINDOW_FUTURE_SEC = const(90 * 60)
 WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)
+MAX_ROWS = const(5)
 
-_MAX_ROWS = const(5)
 _HEADER_MARGIN_PX = const(6)
 _AXIS_MARGIN_PX = const(3)
 _BAR_TEXT_MARGIN_PX = const(2)
@@ -52,7 +52,7 @@ class Colors:
 
 
 class Geometry:
-    """Pixel layout of the Calendar view: a header, ``_MAX_ROWS`` rows and a time axis.
+    """Pixel layout of the Calendar view: a header, ``MAX_ROWS`` rows and a time axis.
 
     Raises ``RuntimeError`` if the header doesn't fit the panel width.
     """
@@ -91,22 +91,22 @@ class Geometry:
         body_bottom = self.axis_y - _AXIS_MARGIN_PX
         body_height = body_bottom - body_top
 
-        cell_height = body_height // _MAX_ROWS
+        cell_height = body_height // MAX_ROWS
         gap = max(3, cell_height // 5)
         bar_height = cell_height - gap
 
-        self.row_count = _MAX_ROWS
+        self.row_count = MAX_ROWS
         self.row_y: list[int] = []
         self.bar_height = bar_height
         self.gap_y: list[int] = []
         self.gap_height = gap
 
-        for i in range(_MAX_ROWS):
+        for i in range(MAX_ROWS):
             row_top = body_top + i * cell_height
             self.row_y.append(row_top)
             self.gap_y.append(row_top + bar_height)
 
-        self.now_x = self.width // 4
+        self.now_x = WINDOW_PAST_SEC * self.width // WINDOW_TOTAL_SEC
 
 
 class Renderer:
@@ -302,7 +302,7 @@ class Renderer:
 class Display(_Display):
     """Calendar view: a timeline of event rows that scrolls with the clock.
 
-    ``event_windows`` must hold at most ``_MAX_ROWS`` rows, ``get_local_time``
+    ``event_windows`` must hold at most ``MAX_ROWS`` rows, ``get_local_time``
     must return epoch seconds, and ``real_remaining_sec(local_epoch)`` the real
     seconds from now until ``local_epoch``.
     """

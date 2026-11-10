@@ -6,11 +6,14 @@ from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
 from services.fetch_machine import FetchCoordinator
+from services.tick_scheduler import TickScheduler
 
 _LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
-def _dominant_pollen(labels, values, warn, severe) -> tuple[int, str | None]:
+def _dominant_pollen(
+    labels: tuple[str, ...], values: list[float | None], warn: int, severe: int
+) -> tuple[int, str | None]:
     """Return ``(level, label)`` for one hour.
 
     Highest severity wins; ties go to the highest raw count.  ``(0, None)`` when
@@ -33,7 +36,9 @@ def _dominant_pollen(labels, values, warn, severe) -> tuple[int, str | None]:
     return best_level, best_label
 
 
-def _build_events(aq_payload, species, aqi_thresholds, pollen_thresholds) -> list[Event]:
+def _build_events(
+    aq_payload: dict, species: tuple[str, ...], aqi_thresholds: tuple[int, int], pollen_thresholds: tuple[int, int]
+) -> list[Event]:
     """Return the air bars from an air-quality payload.
 
     Each hour the more severe of AQI and pollen wins; AQI wins ties.
@@ -68,8 +73,7 @@ def _build_events(aq_payload, species, aqi_thresholds, pollen_thresholds) -> lis
 class AirService(EventStreamService):
     """Air row (European AQI + pollen) over one Open-Meteo air-quality fetch.
 
-    Coordinates of 0.0/0.0 mean unconfigured: the service stays disabled rather
-    than silently fetch Gulf-of-Guinea air quality.
+    Stays disabled unless ``openmeteo_client.is_location_set(latitude, longitude)``.
     """
 
     def __init__(
@@ -88,7 +92,7 @@ class AirService(EventStreamService):
         get_ticks_ms=time.ticks_ms,  # () -> int
         http_get=http_client.get_json,  # (url, timeout_sec) -> dict
         timeout_sec: int = 3,
-        tick_scheduler=None,
+        tick_scheduler: TickScheduler | None = None,
     ) -> None:
         self._lat = latitude
         self._lon = longitude
@@ -100,7 +104,7 @@ class AirService(EventStreamService):
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
         self._metrics = ",".join(["european_aqi"] + [s + "_pollen" for s in self._species])
-        enabled = not (latitude == 0.0 and longitude == 0.0)
+        enabled = openmeteo_client.is_location_set(latitude, longitude)
         super().__init__(
             wifi, coordinator, schedule, interval_ms, "air", enabled,
             get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,

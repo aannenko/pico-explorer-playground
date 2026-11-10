@@ -24,6 +24,11 @@ def _build_url(
     )
 
 
+def is_location_set(latitude: float, longitude: float) -> bool:
+    """Return whether the coordinates are set: 0.0/0.0, a point at sea, means unset."""
+    return not (latitude == 0.0 and longitude == 0.0)
+
+
 def fetch_forecast(
     http_get, lat: float, lon: float, metrics: str, timeout_sec: int, forecast_hours: int, past_hours: int
 ) -> dict:

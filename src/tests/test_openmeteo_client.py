@@ -111,3 +111,9 @@ def test_extract_hourly_raises_on_missing_key():
 def test_extract_hourly_raises_on_missing_hourly():
     with pytest.raises(KeyError):
         openmeteo_client.extract_hourly({"unexpected": "shape"}, ("time",))
+
+
+def test_location_is_unset_only_when_both_coordinates_are_zero():
+    assert openmeteo_client.is_location_set(0.0, 0.0) is False
+    assert openmeteo_client.is_location_set(0.0, 14.42) is True
+    assert openmeteo_client.is_location_set(50.08, 0.0) is True

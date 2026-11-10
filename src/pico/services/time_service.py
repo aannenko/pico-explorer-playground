@@ -40,7 +40,7 @@ def _mday_of_nth_weekday(year: int, month: int, week: int, weekday: int) -> int:
     return 1 + (weekday - first_wd) % 7 + (week - 1) * 7
 
 
-def _transition_utc(year: int, rule: tuple, offset_sec: int) -> int:
+def _transition_utc(year: int, rule: tuple[int, int, int, int], offset_sec: int) -> int:
     """Return the UTC epoch of ``rule``'s transition in ``year``.
 
     ``offset_sec`` is the UTC offset the rule's hour is expressed in.  Near the
@@ -55,8 +55,8 @@ def _is_dst(
     utc_epoch: int,
     tz_offset_sec: int,
     dst_offset_sec: int,
-    dst_start_rule: tuple,
-    dst_end_rule: tuple,
+    dst_start_rule: tuple[int, int, int, int],
+    dst_end_rule: tuple[int, int, int, int],
 ) -> bool:
     year = time.gmtime(utc_epoch)[0]
     latest_utc = -1
@@ -77,8 +77,8 @@ def _next_transition_utc(
     utc_epoch: int,
     tz_offset_sec: int,
     dst_offset_sec: int,
-    dst_start_rule: tuple,
-    dst_end_rule: tuple,
+    dst_start_rule: tuple[int, int, int, int],
+    dst_end_rule: tuple[int, int, int, int],
 ) -> int:
     """Returns 0 if no future transition is found (should not happen
     for valid rules within a reasonable year range).

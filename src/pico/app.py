@@ -2,6 +2,7 @@
 
 from micropython import const
 from machine import Pin
+from picographics import PicoGraphics  # type: ignore
 
 import config
 import demo_streams
@@ -114,7 +115,7 @@ class App:
         self.network_upkeep = network_upkeep
 
 
-def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
+def _build_countdown_display(pico_graphics: PicoGraphics, tick_scheduler: TickScheduler) -> countdown.Display:
     buzzer = ExplorerBuzzer()
     timer = CountdownTimer(
         on_done=buzzer.play_alert,
@@ -141,11 +142,11 @@ def _build_countdown_display(pico_graphics, tick_scheduler: TickScheduler):
 
 
 def _build_sensors_display(
-    bme690_reader,
+    bme690_reader: PimoroniBME690,
     time_service: TimeService,
     geometry: sensors.Geometry,
     history: RingHistory,
-):
+) -> sensors.Display:
     return sensors.Display(
         renderer=sensors.Renderer(
             geometry=geometry,
@@ -167,15 +168,16 @@ def _build_sensors_display(
     )
 
 
-def _build_calendar_display(pico_graphics, time_service: TimeService, network_streams):
-    # Calendar lays out 5 rows.
+def _build_calendar_display(
+    pico_graphics: PicoGraphics, time_service: TimeService, network_streams: list[Stream]
+) -> calendar.Display:
     streams = [
         work_week.build_stream(time_service),
         waste.build_stream(time_service, config.WASTE_SCHEDULE),
     ]
     streams.extend(network_streams)
     streams.extend(
-        demo_streams.build_demo_streams(time_service, calendar.WINDOW_PAST_SEC)[: 5 - len(streams)]
+        demo_streams.build_demo_streams(time_service, calendar.WINDOW_PAST_SEC)[: calendar.MAX_ROWS - len(streams)]
     )
 
     windows = build_event_windows(STREAM_COLORS, streams)
@@ -205,7 +207,7 @@ def _build_calendar_display(pico_graphics, time_service: TimeService, network_st
     )
 
 
-def build_app(pico_graphics, schedule) -> App:  # schedule: (callback, arg) -> None
+def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callback, arg) -> None
     """Compose the services and displays.
 
     Blocks through the initial WiFi connect and NTP sync, raising

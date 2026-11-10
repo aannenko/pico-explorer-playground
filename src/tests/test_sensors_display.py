@@ -839,7 +839,6 @@ def test_subsequent_warming_ticks_do_nothing_to_gas_row(monkeypatch) -> None:
 
 
 def test_out_of_cap_value_renders_fill_only(monkeypatch) -> None:
-    """Out-of-cap: marker_pen is None and marker_y is None in the draw call."""
     renderer = RecordingRenderer()
     monkeypatch.setattr(time, "gmtime", lambda _t: (2026, 1, 4, 13, 5, 0, 0, 0, 0))
 
@@ -853,10 +852,9 @@ def test_out_of_cap_value_renders_fill_only(monkeypatch) -> None:
     col_calls = [c for c in _graph_calls(renderer) if c[0] == "draw_graph_column" and c[1][0] == 0]
     assert len(col_calls) == 1
     _name, args, _kw = col_calls[0]
-    row_index, col, fill_pen, marker_pen, marker_y = args
+    row_index, col, fill_pen, _marker_pen, marker_y = args
     # Fill pen present (band 3 for above-cap), marker suppressed.
     assert fill_pen == d._band_pens[0][3][0]
-    assert marker_pen is None
     assert marker_y is None
 
 

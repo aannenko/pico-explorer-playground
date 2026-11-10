@@ -44,7 +44,7 @@ def merge_runs(emitted: list[tuple[int, str, int]]) -> list[Event]:
     Only adjacent hours with equal label and color_index merge into one ``Event``.
     """
     events: list[Event] = []
-    run = None  # [label, color_index, start_epoch, end_epoch]
+    run: list | None = None  # [label, color_index, start_epoch, end_epoch]
     for epoch, label, color_index in emitted:
         if run is not None and run[0] == label and run[1] == color_index and run[3] == epoch:
             run[3] = epoch + _SEC_PER_HOUR

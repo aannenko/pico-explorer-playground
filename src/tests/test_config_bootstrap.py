@@ -145,6 +145,33 @@ def test_uppercase_callable_and_module_aliases_are_not_treated_as_settings(
     assert "GETCWD" not in out
 
 
+@pytest.mark.parametrize(
+    ("name", "is_setting"),
+    [
+        ("WIFI_SSID", True),
+        ("BME690_READ_PERIOD_MS", True),
+        ("_SENTINEL", False),
+        ("const", False),
+        ("Wifi_Ssid", False),
+        ("", False),
+    ],
+)
+def test_only_upper_snake_case_names_are_settings(name: str, is_setting: bool) -> None:
+    assert config_bootstrap._is_public_setting(name, 1) is is_setting
+
+
+class _UnindexableStr(str):
+    def __getitem__(self, key):
+        raise AssertionError("indexed")
+
+    def __iter__(self):
+        raise AssertionError("iterated")
+
+
+def test_setting_name_check_neither_indexes_nor_iterates_the_name() -> None:
+    assert config_bootstrap._is_public_setting(_UnindexableStr("WIFI_SSID"), 1) is True
+
+
 def test_const_values_round_trip_as_plain_ints(workspace) -> None:
     """``const()`` is a MicroPython compile-time hint that returns the bare
     value at runtime — the loader should treat ``const(8080)`` as ``int``."""

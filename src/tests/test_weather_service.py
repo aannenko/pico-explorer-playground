@@ -32,10 +32,11 @@ _UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
 @pytest.mark.parametrize(
     "wmo_code, expected",
     [
-        (51, "RAIN"), (61, "RAIN"), (67, "RAIN"), (80, "RAIN"),
-        (71, "SNOW"), (75, "SNOW"), (85, "SNOW"), (86, "SNOW"),
+        (51, "RAIN"), (61, "RAIN"), (67, "RAIN"), (80, "RAIN"), (82, "RAIN"),
+        (71, "SNOW"), (75, "SNOW"), (77, "SNOW"), (85, "SNOW"), (86, "SNOW"),
         (95, "STORM"), (99, "STORM"),
-        (0, None), (3, None), (45, None),
+        (0, None), (3, None), (45, None), (50, None), (68, None), (70, None),
+        (78, None), (79, None), (83, None), (84, None), (87, None), (94, None), (100, None),
     ],
 )
 def test_precip_label_mapping(wmo_code, expected):

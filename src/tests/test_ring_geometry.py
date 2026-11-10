@@ -9,13 +9,9 @@ from displays.ring import Geometry, RING_SEGMENTS
 class FakeDisplay:
     def __init__(self, width: int, height: int) -> None:
         self._bounds = (width, height)
-        self.font_calls: list[str] = []
 
     def get_bounds(self) -> tuple[int, int]:
         return self._bounds
-
-    def set_font(self, font: str) -> None:
-        self.font_calls.append(font)
 
 
 def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
@@ -32,8 +28,6 @@ def test_geometry_sets_expected_dimensions_and_ring_values() -> None:
     assert g.inner_circle_r == g.outer_circle_r - g.ring_thickness
     assert g.outer_poly_r == g.outer_circle_r + 2
     assert g.inner_poly_r == g.inner_circle_r - 1
-
-    assert display.font_calls == ["bitmap6"]
 
 
 def test_geometry_center_rounds_up_for_odd_dimensions() -> None:

@@ -578,6 +578,31 @@ class TestBarTruncation:
 
 
 # ---------------------------------------------------------------------------
+# Now line
+# ---------------------------------------------------------------------------
+
+class TestNowLine:
+    def test_now_line_sits_at_now_for_any_window_split(self, monkeypatch):
+        # Not the shipped quarter, so a hardcoded fraction would misplace the line.
+        monkeypatch.setattr(calendar, "WINDOW_PAST_SEC", 40 * 60)
+        monkeypatch.setattr(calendar, "WINDOW_FUTURE_SEC", 80 * 60)
+        monkeypatch.setattr(calendar, "WINDOW_TOTAL_SEC", 120 * 60)
+        renderer, gfx = _make_renderer()
+        now = 7200
+        window_start = now - calendar.WINDOW_PAST_SEC
+        window_end = now + calendar.WINDOW_FUTURE_SEC
+        stream = EventWindow(iter([_make_event("a", now, 1800)]), stream_colors=[10])
+        stream.get_visible(window_start, window_end)
+
+        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
+        renderer.draw_static_overlay()
+
+        bar_x0 = next(x for (pen, x, _y, _w, _h) in gfx.rect_calls if pen == 10)
+        now_line_xs = {x1 for (x1, _y1, x2, _y2) in gfx.line_calls if x1 == x2}
+        assert now_line_xs == {bar_x0}
+
+
+# ---------------------------------------------------------------------------
 # Tick marks (15-minute markers below baseline)
 # ---------------------------------------------------------------------------
 

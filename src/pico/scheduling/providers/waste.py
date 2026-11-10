@@ -7,7 +7,9 @@ from services.time_service import TimeService
 _SEC_PER_WEEK = 7 * 24 * 60 * 60
 
 
-def build_stream(time_service: TimeService, pickups: list) -> Stream:
+def build_stream(
+    time_service: TimeService, pickups: list[tuple[str, int, tuple[int, int, int], int, int, int, int]]
+) -> Stream:
     """Build the waste-collection stream from ``pickups``.
 
     Occurrences of all pickups are yielded in start-time order; a pickup with
@@ -16,9 +18,11 @@ def build_stream(time_service: TimeService, pickups: list) -> Stream:
     return Stream(events_iter=_waste_loop(time_service, pickups))
 
 
-def _waste_loop(time_service: TimeService, pickups: list):  # Iterator[Event]
+def _waste_loop(
+    time_service: TimeService, pickups: list[tuple[str, int, tuple[int, int, int], int, int, int, int]]
+):  # Iterator[Event]
     now = time_service.now()
-    cursors = []  # [next_start_local, label, color_index, dur_sec, period_sec]
+    cursors: list[list] = []  # [next_start_local, label, color_index, dur_sec, period_sec]
     for label, color_index, anchor, hh, mm, dur_min, period_weeks in pickups:
         year, month, day = anchor
         start = time.mktime((year, month, day, hh, mm, 0, 0, 0))

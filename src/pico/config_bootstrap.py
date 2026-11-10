@@ -18,7 +18,7 @@ _SENTINEL_ATTR = "_CONFIG_BOOTSTRAP_MERGED"
 _MODULE_TYPE = type(sys)
 
 
-def _is_compatible(expected, actual):
+def _is_compatible(expected, actual) -> bool:
     """Return True when ``actual`` matches ``expected``'s type and shape."""
     et = type(expected)
     at = type(actual)
@@ -49,21 +49,19 @@ def _is_compatible(expected, actual):
     return True
 
 
-def _is_public_setting(name, value):
+def _is_public_setting(name: str, value) -> bool:
     """Return True when ``(name, value)`` looks like a top-level config key:
     non-empty UPPER_SNAKE_CASE name, not callable, not a module.
     """
-    if not name or name[0] == "_":
+    # str methods only: indexing or iterating interns each one-char result for good on MicroPython.
+    if name.startswith("_") or not name.isupper():
         return False
-    for ch in name:
-        if not (ch == "_" or ("A" <= ch <= "Z") or ("0" <= ch <= "9")):
-            return False
     if callable(value) or type(value) is _MODULE_TYPE:
         return False
     return True
 
 
-def _describe(value):
+def _describe(value) -> str:
     name = type(value).__name__
     if name == "tuple":
         return "tuple of length {}".format(len(value))
@@ -73,7 +71,7 @@ def _describe(value):
     return name
 
 
-def _collect_settings(module):
+def _collect_settings(module) -> dict:  # module: ModuleType
     settings = {}
     for name in dir(module):
         if name == _SENTINEL_ATTR:
@@ -84,7 +82,7 @@ def _collect_settings(module):
     return settings
 
 
-def _user_module_file_exists(user_name):
+def _user_module_file_exists(user_name: str) -> bool:
     """Probe files because MicroPython's ``ImportError`` has no ``.name`` to
     tell a missing config from a broken import inside it.
     """
@@ -100,7 +98,7 @@ def _user_module_file_exists(user_name):
     return False
 
 
-def apply_overrides(defaults_name="config_defaults", user_name="config"):
+def apply_overrides(defaults_name: str = "config_defaults", user_name: str = "config"):  # -> ModuleType
     """Load ``user_name`` on top of ``defaults_name``, in place; the two must differ.
 
     Merging in place, not into a new namespace, keeps pre-existing

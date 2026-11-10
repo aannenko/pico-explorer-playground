@@ -74,7 +74,7 @@ def test_play_alert_starts_beeping() -> None:
 
 def test_play_alert_custom_params() -> None:
     buzzer, timers = _mk_buzzer()
-    buzzer.play_alert(beep_count=3, freq_hz=2000, interval_ms=200)
+    buzzer.play_alert(beep_count=3, freq_hz=2000, beep_toggle_ms=200)
 
     assert buzzer._pwm._freq == 2000
     assert buzzer._alert_remaining == 6  # 3 beeps * 2 toggles
@@ -89,7 +89,7 @@ def test_play_alert_custom_params() -> None:
 def test_play_alert_full_pattern() -> None:
     """Run through the complete toggle pattern for 2 beeps (4 toggles)."""
     buzzer, timers = _mk_buzzer()
-    buzzer.play_alert(beep_count=2, freq_hz=1000, interval_ms=100)
+    buzzer.play_alert(beep_count=2, freq_hz=1000, beep_toggle_ms=100)
 
     # Initial state: beeping, remaining=4
     assert buzzer._pwm._duty > 0

@@ -2,6 +2,8 @@ import time
 
 from micropython import const
 
+from services.tick_scheduler import TickScheduler
+
 INITIAL = const(0)
 RUNNING = const(1)
 PAUSED = const(2)
@@ -16,7 +18,7 @@ class CountdownTimer:
         on_done=lambda: None,  # () -> None
         on_configure=lambda: None,  # () -> None
         get_time=time.time,  # () -> int
-        tick_scheduler=None,
+        tick_scheduler: TickScheduler | None = None,
     ) -> None:
         self._on_done_action = on_done
         self._on_configure_action = on_configure

@@ -79,7 +79,6 @@ class Geometry:
             self.y_inner_vertices[i] = int(y_center + inner_r * sin)
 
         self.font = font
-        pico_graphics.set_font(font)
         self.text_scale = text_scale
         self.text_height = font_height * text_scale
         self.line_spacing = self.text_height // 2

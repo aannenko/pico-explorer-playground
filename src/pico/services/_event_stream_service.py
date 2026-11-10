@@ -5,6 +5,7 @@ from micropython import const
 from scheduling.event import Event
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE
 from services.fetch_machine import FetchCoordinator, FetchMachine, FetchState
+from services.tick_scheduler import TickScheduler
 from utilities.log import log_exception
 
 _DEFAULT_BACKOFF_BASE_MS = const(5_000)
@@ -31,7 +32,7 @@ class EventStreamService:
         log_tag: str,
         enabled: bool,
         get_ticks_ms=time.ticks_ms,  # () -> int
-        tick_scheduler=None,
+        tick_scheduler: TickScheduler | None = None,
         backoff_base_ms: int = _DEFAULT_BACKOFF_BASE_MS,
         backoff_max_ms: int = _DEFAULT_BACKOFF_MAX_MS,
         stale_after_ms: int | None = None,
@@ -86,7 +87,7 @@ class EventStreamService:
             self._fetch_state = None  # drop before harvest so a raising harvest can't repeat
             self._harvest(state)
 
-    def _harvest(self, state) -> None:
+    def _harvest(self, state: FetchState) -> None:
         now_ms = self._get_ticks_ms()
         if state.error is None:
             self._failures = 0

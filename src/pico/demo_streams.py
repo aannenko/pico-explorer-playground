@@ -11,8 +11,8 @@ _WEATHER_GAP_PCT = 20
 
 
 def _random_event_loop(
-    labels: tuple,
-    durations: tuple,
+    labels: tuple[str, ...],
+    durations: tuple[int, ...],
     gap_pct: int,
     start_timestamp: int,
     time_service: TimeService,

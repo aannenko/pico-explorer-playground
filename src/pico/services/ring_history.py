@@ -68,8 +68,6 @@ class RingHistory:
 
     def update_latest(self, metric_index: int, value: float) -> None:
         """Overwrite the newest sample of one metric without advancing the ring."""
-        if self._sample_count == 0:
-            return
         i = self._next_slot - 1
         if i < 0:
             i += self._capacity

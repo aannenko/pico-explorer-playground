@@ -48,7 +48,7 @@ class FetchMachine:
     """Stateless driver for a ``FetchState``; call ``tick`` once per owner tick."""
 
     @staticmethod
-    def start(fetcher, wifi, schedule, coordinator) -> FetchState:
+    def start(fetcher, wifi, schedule, coordinator: FetchCoordinator) -> FetchState:
         # fetcher: () -> result; wifi: has is_connected() -> bool; schedule: (callback, arg) -> None
         return FetchState(fetcher, wifi, schedule, coordinator)
 

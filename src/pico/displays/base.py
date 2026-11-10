@@ -4,6 +4,9 @@ class Display:
     An ``on_button_a`` / ``on_button_b`` override must redraw what the press
     changed before returning: the press restarts the view's redraw cadence, so
     the next scheduled render is a full period away.
+
+    A view must select its font before it draws or measures text:
+    PicoGraphics keeps one selected font, which every view shares.
     """
 
     refresh_period_ms = 1000  # 0 renders every scheduler tick

@@ -1,11 +1,14 @@
 import time
 
+from micropython import const
+
 from displays.palette import STREAM_GREEN, STREAM_YELLOW, STREAM_RED
 from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
 from services._event_stream_service import EventStreamService
 from services.fetch_machine import FetchCoordinator
+from services.tick_scheduler import TickScheduler
 
 _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
@@ -13,21 +16,36 @@ _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 _MODERATE_MM = 2.5
 _HEAVY_MM = 7.6
 
+# WMO weather interpretation codes (Open-Meteo ``weathercode``), as inclusive ranges.
+_WMO_DRIZZLE_AND_RAIN_FIRST = const(51)  # freezing drizzle and freezing rain included
+_WMO_DRIZZLE_AND_RAIN_LAST = const(67)
+_WMO_SNOW_FIRST = const(71)  # snow grains included
+_WMO_SNOW_LAST = const(77)
+_WMO_RAIN_SHOWERS_FIRST = const(80)
+_WMO_RAIN_SHOWERS_LAST = const(82)
+_WMO_SNOW_SHOWERS_FIRST = const(85)
+_WMO_SNOW_SHOWERS_LAST = const(86)
+_WMO_THUNDERSTORM_FIRST = const(95)  # hail included
+_WMO_THUNDERSTORM_LAST = const(99)
+
 _UV_LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
 
 def _precip_label(wmo_code: int) -> str | None:
     """Return ``None`` for non-precipitation codes: probability alone must not
     draw a precipitation bar.
-
-    WMO drizzle, rain, freezing rain and rain showers map to RAIN, snow and
-    snow showers to SNOW, thunderstorms to STORM.
     """
-    if 51 <= wmo_code <= 67 or 80 <= wmo_code <= 82:
+    if (
+        _WMO_DRIZZLE_AND_RAIN_FIRST <= wmo_code <= _WMO_DRIZZLE_AND_RAIN_LAST
+        or _WMO_RAIN_SHOWERS_FIRST <= wmo_code <= _WMO_RAIN_SHOWERS_LAST
+    ):
         return "RAIN"
-    if 71 <= wmo_code <= 77 or wmo_code == 85 or wmo_code == 86:
+    if (
+        _WMO_SNOW_FIRST <= wmo_code <= _WMO_SNOW_LAST
+        or _WMO_SNOW_SHOWERS_FIRST <= wmo_code <= _WMO_SNOW_SHOWERS_LAST
+    ):
         return "SNOW"
-    if 95 <= wmo_code <= 99:
+    if _WMO_THUNDERSTORM_FIRST <= wmo_code <= _WMO_THUNDERSTORM_LAST:
         return "STORM"
     return None
 
@@ -41,7 +59,7 @@ def _precip_rank_and_color(precip_mm: float) -> tuple[int, int]:
     return (3, STREAM_RED)
 
 
-def _uv_column(payload: dict, n: int) -> list:
+def _uv_column(payload: dict, n: int) -> list[float | None]:
     """Return the payload's ``n`` hourly UV index values.
 
     Precip must render even if UV is absent or malformed, so any problem
@@ -94,8 +112,7 @@ class WeatherService(EventStreamService):
 
     Precipitation and UV rarely coincide, so sharing a row keeps it dense.
 
-    Coordinates of 0.0/0.0 mean unconfigured: the service stays disabled rather
-    than silently fetch Gulf-of-Guinea weather.
+    Stays disabled unless ``openmeteo_client.is_location_set(latitude, longitude)``.
     """
 
     def __init__(
@@ -113,7 +130,7 @@ class WeatherService(EventStreamService):
         get_ticks_ms=time.ticks_ms,  # () -> int
         http_get=http_client.get_json,  # (url, timeout_sec) -> dict
         timeout_sec: int = 3,
-        tick_scheduler=None,
+        tick_scheduler: TickScheduler | None = None,
     ) -> None:
         self._lat = latitude
         self._lon = longitude
@@ -123,7 +140,7 @@ class WeatherService(EventStreamService):
         self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
-        enabled = not (latitude == 0.0 and longitude == 0.0)
+        enabled = openmeteo_client.is_location_set(latitude, longitude)
         super().__init__(
             wifi, coordinator, schedule, interval_ms, "weather", enabled,
             get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,

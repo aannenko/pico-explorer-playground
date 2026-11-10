@@ -20,8 +20,7 @@ class DisplayManager:
         period_ms = display.refresh_period_ms
         if period_ms <= 0:
             return None
-        ticks = round(period_ms / self._tick_period_ms)
-        return RefreshGate(ticks if ticks > 1 else 1)
+        return RefreshGate(round(period_ms / self._tick_period_ms))
 
     def initialize_current(self) -> None:
         """Enter the current view with a fresh redraw cadence."""
