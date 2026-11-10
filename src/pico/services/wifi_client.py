@@ -55,6 +55,9 @@ class WifiClient:
         """Non-blocking connect.
 
         Idempotent if already CONNECTING. From other states, resets first.
+
+        Raises if no timer can be started, leaving the state FAILED so the next
+        call retries; the join already begun may still bring the link up.
         """
         if self._state == CONNECTING:
             return
@@ -65,12 +68,17 @@ class WifiClient:
             return
 
         self._pending = False
-        self._timer = Timer(-1)
-        self._timer.init(
-            mode=Timer.PERIODIC,
-            period=_TIMER_PERIOD_MS,
-            callback=self._timer_callback_ref,
-        )
+        try:
+            self._timer = Timer(-1)
+            self._timer.init(
+                mode=Timer.PERIODIC,
+                period=_TIMER_PERIOD_MS,
+                callback=self._timer_callback_ref,
+            )
+        except Exception:
+            self._state = FAILED
+            self._stop_timer()
+            raise
 
     def connect(self, ssid: str, password: str, timeout_ms: int = 300_000) -> int:
         """Blocking connect with timeout; returns CONNECTED or FAILED.

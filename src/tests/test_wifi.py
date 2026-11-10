@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import time
 
 import pytest
@@ -122,6 +123,41 @@ def test_start_connect_empty_ssid_fails(wifi, fake_wlan, fake_timer, fake_ticks)
     wifi.start_connect("", "pass")
     assert wifi.state == wifi_client.FAILED
     assert not fake_timer.init_called
+
+
+def _exhaust_alarm_pool(**_kwargs):
+    raise OSError(errno.ENOMEM, "ENOMEM")
+
+
+def test_start_connect_raises_and_fails_when_no_timer_starts(wifi, fake_wlan, fake_timer, fake_ticks):
+    fake_timer.init = _exhaust_alarm_pool
+
+    with pytest.raises(OSError):
+        wifi.start_connect("MySSID", "pass")
+
+    assert wifi.state == wifi_client.FAILED
+
+
+def test_link_joined_after_a_timer_failure_counts_as_connected(wifi, fake_wlan, fake_timer, fake_ticks):
+    fake_timer.init = _exhaust_alarm_pool
+    with pytest.raises(OSError):
+        wifi.start_connect("MySSID", "pass")
+
+    fake_wlan._connected = True
+
+    assert wifi.is_connected() is True
+
+
+def test_start_connect_retries_after_a_timer_failure(wifi, fake_wlan, fake_timer, fake_ticks):
+    fake_timer.init = _exhaust_alarm_pool
+    with pytest.raises(OSError):
+        wifi.start_connect("MySSID", "pass")
+    del fake_timer.init
+
+    wifi.start_connect("MySSID", "pass")
+
+    assert wifi.state == wifi_client.CONNECTING
+    assert fake_timer.init_called
 
 
 def _refuse_connect(_ssid, _password):
