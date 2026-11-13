@@ -1,8 +1,9 @@
 # Plan: integer UI scaling
 
-**Status:** planned, not started (2026-10-10). The inventory below reflects
-the code on that date, its Sensors parts refreshed for the quadrant layout on
-2026-11-10; re-check it before implementing.
+**Status:** planned, not started (2026-10-10). The inventory below was
+re-checked on 2026-11-13 against the code after the Sensors quadrants and
+their optimisation, and against the Pimoroni v1.29.0-2 firmware; re-check
+it before implementing.
 
 ## Goal
 
@@ -14,8 +15,8 @@ able to overflow its space silently.
 
 bitmap8 glyphs and the P4 icons render cleanly only at whole-number scales
 (each source pixel becomes an N×N block), and `icons_p4.draw_icon` takes an
-int scale. So the system is one integer `S`, with today's Explorer layout
-defined as `S = 1`.
+int scale (its viper `_blit` raises `TypeError` on a float). So the system is
+one integer `S`, with today's Explorer layout defined as `S = 1`.
 
 ## What already scales
 
@@ -26,7 +27,9 @@ defined as `S = 1`.
   header guard.
 - **Space fillers.** Sensors quadrant spans, graph widths and heights, and
   `ticks_per_commit`, Calendar row heights and bar positions, ring thickness
-  (`min(W, H) // 30`), and centred Ring / Status text.
+  (`min(W, H) // _RING_THICKNESS_DIVISOR`, 30), and centred Ring / Status
+  text. Graph height enters a 32-bit product in the viper
+  `_Quadrant._replace_graph` (span × graph height < 2³¹; see its comment).
 - **Text-derived heights.** Text height, and the Sensors stack offsets
   (margins are measured to ink: text height less its descender row).
 
@@ -52,12 +55,14 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 
 **1-px elements, which need a policy rather than a multiply (open question 2):**
 
-- Calendar bar seams (`x0 - 1`, `x1 - 1`), the `label_right + 1` separation,
-  the baseline, and quarter-hour tick lines (`gfx.line`, always 1 px).
+- Calendar bar seams (`_BAR_SEAM_PX` 1), the `label_right + 1` separation,
+  and the now-line, baseline and quarter-hour ticks (`gfx.line`, always
+  1 px).
 - Sensors graph columns (1 px wide, one history sample each) and the 1-px
   graph line.
-- Ring polygon overdraw (`outer_poly_r + 2`, `inner_poly_r - 1`). This
-  compensates for integer rasterization, not layout, and probably stays fixed.
+- Ring polygon overdraw (`outer_poly_r = outer_circle_r + 2`,
+  `inner_poly_r = inner_circle_r - 1`). This compensates for integer
+  rasterization, not layout, and probably stays fixed.
 
 ## Design
 
@@ -73,6 +78,10 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
   bars, Sensors labels) `2 × S`.
 - `TEXT_SCALE` retires as a config key. A leftover override then only warns
   as unknown; the current `config.py` has none.
+- Every new name costs a qstr slot for good, and a full boot already fills
+  about 1,180 of the 1,260 slots that fit before the next pool, which needs a
+  7.7 KB block a booted heap doesn't have (see the Qstr pool note in
+  `.github/copilot-instructions.md`).
 
 ### 2. The layout owns the icon box
 
@@ -118,11 +127,12 @@ badge centre.
 1. **Source of `S`.** An explicit `UI_SCALE` key (lean: predictable, and the
    boot guards validate it), auto-derived as
    `max(1, min(W // 240, H // 240))`, or both (`UI_SCALE = 0` meaning auto).
-2. **1-px elements.** Do seams, ticks, the baseline, the label separation,
-   the Sensors graph line and the badge ring scale to `S` px, or stay
-   hairlines? For the Sensors graphs, 1-px columns give `S×` more history
-   resolution (and `S×` the `RingHistory` capacity), while `S`-px columns
-   keep today's resolution and visual weight.
+2. **1-px elements.** Do seams, ticks, the now-line, the baseline, the label
+   separation and the Sensors graph line scale to `S` px, or stay hairlines?
+   For the Sensors graphs, 1-px columns give `S×` more history resolution
+   (and `S×` the `SampleHistory` capacity at 16 B per column, and `S×` the
+   commit's in-place shift, about 6 ms at today's 119 columns), while `S`-px
+   columns keep today's resolution and visual weight.
 3. **Leftover space.** Does the Calendar window stay at 2 h on a wider
    panel? Widening it cascades into the network forecast horizons, which
    `app.py` derives from the calendar windows.
@@ -153,13 +163,14 @@ badge centre.
 ## Verification
 
 - **`S = 1`:** snapshots unchanged. On the device, the Sensors geometry
-  must be unchanged too (add `ui_scale=1` once it exists):
+  must be unchanged too (add `ui_scale=1` once it exists). Run this at the
+  REPL after Ctrl-C, reusing `main.py`'s `PICO_GRAPHICS`: a second
+  `PicoGraphics` would allocate a 57.6 KB RGB332 framebuffer, more than a
+  booted heap has free.
 
   ```python
-  from picographics import PicoGraphics, DISPLAY_PICO_EXPLORER
   from displays.sensors import Geometry
-  gfx = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
-  g = Geometry(pico_graphics=gfx, font="bitmap8", font_height=8,
+  g = Geometry(pico_graphics=PICO_GRAPHICS, font="bitmap8", font_height=8,
                value_text_scale=3, label_text_scale=2, tick_period_ms=500)
   print((g.value_offset, g.range_offset, g.graph_offset, g.graph_height,
          g.graph_columns, g.ticks_per_commit, g.badge_rects, g.badge_r))
@@ -175,15 +186,19 @@ badge centre.
 
 ## Out of scope, but these gate the choice of panel
 
-- **Framebuffer memory.** A `PEN_P4` framebuffer is `W × H / 2` bytes,
-  against a measured heap of about 192 KB (196,800 B). Today, 240×240 needs
-  28.8 KB. 480×480 would need 115 KB, and 800×480 would need 192 KB,
-  nearly the entire heap. On the RP2040 a larger panel is only viable at a lower bit
-  depth (typical for e-ink) or on a board with more RAM.
-- **E-ink refresh.** A full refresh takes seconds and flashes the panel. The
-  1 s Sensors cadence and the continuous Calendar scroll need a slower,
-  change-driven update strategy (`refresh_period_ms`, `RefreshGate`), not
-  just new geometry.
+- **Framebuffer memory.** A `PEN_P4` framebuffer is `W × H / 2` bytes, on a
+  GC heap of 178,112 B on Pimoroni v1.29.0-2 (196,800 B on the earlier
+  1.27-based build), about 32 KB of it free once the app has booted. Today,
+  240×240 needs 28.8 KB. 480×480 would need 115 KB, and 800×480 would need
+  192 KB, more than the entire heap; even a 1-bit 800×480 framebuffer would
+  need 48 KB, 19.2 KB more than today's. On the RP2040 a larger panel is only
+  viable at a lower bit depth (typical for e-ink) or on a board with more
+  RAM.
+- **E-ink refresh.** A full refresh takes seconds and flashes the panel.
+  Sensors renders every second and already pushes a frame only when
+  something changed, but a BME690 reading can change a value every 5 s;
+  Calendar scrolls every minute. Both need a slower update strategy
+  (`refresh_period_ms`, `RefreshGate`), not just new geometry.
 - **Colour language.** The 16-colour palette, the `LABEL_FOR_SLOT` contrast
   table and the CVD verification all assume a colour panel. A mono or
   three-colour panel needs its own palette.
