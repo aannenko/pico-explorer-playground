@@ -265,12 +265,8 @@ class TestHeaderGuard:
         _renderer, _gfx = _make_renderer()
 
     def test_raises_when_header_too_wide(self):
-        """The calendar header is drawn unmeasured at x=0, and its font/scale
-        are wired separately from the Sensors view, so it needs its own boot
-        guard.  Today both views happen to share ``config.TEXT_SCALE``, which
-        means Sensors would halt boot first — this pins that the calendar does
-        not depend on that coincidence.
-        """
+        """The calendar header is drawn unmeasured at x=0, so an over-wide font
+        or scale must fail at boot rather than clip the date silently."""
         with pytest.raises(RuntimeError, match="no room for header"):
             calendar.Geometry(
                 pico_graphics=FakeGfx(),

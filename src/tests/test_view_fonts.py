@@ -83,21 +83,19 @@ class _History:
 
 def _build_sensors(panel: _Panel, clock: _Clock) -> sensors.Display:
     geom = sensors.Geometry(
-        pico_graphics=panel, font=_SENSORS_FONT, font_height=8, text_scale=3, tick_period_ms=500
+        pico_graphics=panel,
+        font=_SENSORS_FONT,
+        font_height=8,
+        value_text_scale=3,
+        label_text_scale=2,
+        tick_period_ms=500,
     )
     return sensors.Display(
-        renderer=sensors.Renderer(
-            geometry=geom,
-            colors=sensors.Colors(background=0, header_text=1, value_text=2, secondary_text=3),
-        ),
-        bme690_reader=_Reader(),
-        time_service=clock,
-        history=_History(geom.graph_width),
-        graph_height=geom.graph_height,
-        temp_bands=(16, 18, 25, 29, 31),
-        pressure_bands=(980, 1000, 1013, 1025, 1040),
-        humidity_bands=(10, 30, 50, 70, 90),
-        gas_bands=(50, 100, 200, 350, 500),
+        geometry=geom,
+        get_reading=_Reader().read,
+        get_local_time=clock.now,
+        history=_History(geom.graph_columns),
+        band_edges=((18.0, 25.0, 29.0), (1000.0, 1013.0, 1025.0), (30.0, 50.0, 70.0), (100.0, 200.0, 350.0)),
     )
 
 

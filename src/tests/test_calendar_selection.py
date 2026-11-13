@@ -1,8 +1,5 @@
 """Calendar composition and selection after time spent on another screen."""
 
-import importlib
-import sys
-
 import pytest
 
 import config_defaults
@@ -49,18 +46,6 @@ class _OtherDisplay(Display):
         self.panel.clear()
         self.panel.text(self.name, 0, 0, scale=1)
         self.panel.update()
-
-
-@pytest.fixture
-def app_module(monkeypatch):
-    monkeypatch.setitem(sys.modules, "config", config_defaults)
-    previous = sys.modules.pop("app", None)
-    try:
-        yield importlib.import_module("app")
-    finally:
-        sys.modules.pop("app", None)
-        if previous is not None:
-            sys.modules["app"] = previous
 
 
 @pytest.mark.parametrize("direction", ["next", "previous"])

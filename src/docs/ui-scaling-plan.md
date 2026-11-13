@@ -1,7 +1,8 @@
 # Plan: integer UI scaling
 
 **Status:** planned, not started (2026-10-10). The inventory below reflects
-the code on that date; re-check it before implementing.
+the code on that date, its Sensors parts refreshed for the quadrant layout on
+2026-11-10; re-check it before implementing.
 
 ## Goal
 
@@ -20,13 +21,14 @@ defined as `S = 1`.
 
 - **Measured text.** Width is exactly `scale × (Σ glyph widths + n − 1)`
   (device-verified, 90/90 cases at scales 1, 2, 3, 4 and 6), so everything derived
-  from `measure_text` follows the text scale: the Sensors graph position,
-  Calendar label fitting, and both header guards.
-- **Space fillers.** Sensors graph width and `ticks_per_commit`, Calendar
-  row heights and bar positions, ring thickness (`min(W, H) // 30`), and
-  centred Ring / Status text.
-- **Text-derived heights.** Text height, and the Sensors row pitch
-  (text height × 1.5).
+  from `measure_text` follows the text scale: the Sensors value, range and
+  badge cells and the badge radius, Calendar label fitting, and the Calendar
+  header guard.
+- **Space fillers.** Sensors quadrant spans, graph widths and heights, and
+  `ticks_per_commit`, Calendar row heights and bar positions, ring thickness
+  (`min(W, H) // 30`), and centred Ring / Status text.
+- **Text-derived heights.** Text height, and the Sensors stack offsets
+  (margins are measured to ink: text height less its descender row).
 
 ## What does not: hand-written pixel values
 
@@ -34,12 +36,12 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 
 | Where | Value | Role |
 |---|---|---|
-| `app.py` | `TEXT_SCALE` 3 (config) | primary text: Status, Ring, Calendar header, Sensors values + unit glyphs |
-| `app.py` | `bar_text_scale` 2 | Calendar bar labels and time axis |
-| `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the cell budget (design §2) |
-| `sensors.py` | `_VALUE_GRAPH_GAP_PX` 3, `_GRAPH_RIGHT_MARGIN_PX` 0 | value→graph gap, graph→edge |
-| `sensors.py` | inline `+ 4`, `+ 6` | icon→unit and unit→value gaps |
-| `sensors.py` | inline `+ 2` | icon lift: bitmap8 ink sits high in its cell |
+| `app.py` | `TEXT_SCALE` 3 (config) | primary text: Status, Ring, Calendar header, Sensors values and badge time |
+| `app.py` | `_SECONDARY_TEXT_SCALE` 2 | Calendar bar labels and time axis; Sensors ranges, units, badge weekday and date |
+| `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the box budget (design §2) |
+| `sensors.py` | `_GUTTER_PX` 3, `_MARGIN_PX` 4 | quadrant gutters; gaps between stacked elements and to the edges |
+| `sensors.py` | `_UNIT_DROP_PX` 2 | unit drop: unit ink sits high in its cell |
+| `sensors.py` | `_BADGE_LINE_GAP_PX` 4, `_BADGE_PADDING_PX` 2, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | badge line gaps; black space inside the ring; the ring; black border outside it |
 | `calendar.py` | `_HEADER_MARGIN_PX` 6, `_AXIS_MARGIN_PX` 3 | header→rows, rows→axis |
 | `calendar.py` | `_BAR_TEXT_MARGIN_PX` 2, `_MIN_LABEL_PX` 14 | label inset, minimum bar width for a label |
 | `calendar.py` | `_TICK_MARK_HEIGHT_PX` 4, `_STATUS_GLYPH_PX` 4 | axis ticks, stale-data square |
@@ -52,8 +54,8 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 
 - Calendar bar seams (`x0 - 1`, `x1 - 1`), the `label_right + 1` separation,
   the baseline, and quarter-hour tick lines (`gfx.line`, always 1 px).
-- Sensors graph columns (1 px wide, one history sample each) and the value
-  marker (`gfx.pixel`).
+- Sensors graph columns (1 px wide, one history sample each) and the 1-px
+  graph line.
 - Ring polygon overdraw (`outer_poly_r + 2`, `inner_poly_r - 1`). This
   compensates for integer rasterization, not layout, and probably stays fixed.
 
@@ -67,75 +69,69 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
   once, in its `Geometry`, at boot. That has no hot-path cost, and `S = 1`
   stays pixel-identical to today.
 - Text scales are derived at the composition root (`app.py`), as values
-  shared by several views: primary text `3 × S`, Calendar bars `2 × S`.
+  shared by several views: primary text `3 × S`, secondary text (Calendar
+  bars, Sensors labels) `2 × S`.
 - `TEXT_SCALE` retires as a config key. A leftover override then only warns
   as unknown; the current `config.py` has none.
 
-### 2. The layout owns the icon cell
+### 2. The layout owns the icon box
 
-Today the Sensors left column is as wide as the widest icon in
-`Display.ROWS` (`left_column_native_px()`), with no upper bound. One
-oversized blob therefore reflows every row, and nothing checks vertical fit
-at all. The rows are 36 px apart, so at scale 2 an 18 px icon touches the
-next row and a 20 px one overlaps it. Today the only guard is
-`test_sensors_display.py`, which pins every icon at exactly 16×16 and every
-unit glyph at 8×8.
+The Sensors band icons draw at the fixed `_ICON_SCALE` 2 from 16 px art
+(`_ICON_ART_PX`), so a larger blob would overflow its box rather than shrink
+to fit. `_check_layout` rejects a box that meets its neighbours, the badge or
+the quadrant edge, and `test_p4_wiring.py` pins every icon at 16×16, inked
+in rows 1–14 (`_ICON_INK_INSET_ROWS`), and every unit glyph at 8×8.
 
 Two contracts, each enforced where it belongs:
 
-- **Layout contract, checked at boot.** A square cell `_ICON_CELL = 32 × S`,
-  with `icon_scale = cell // native`. Raise if the scale comes out as 0 (art
-  too large for its cell), and raise if the cell is taller than the row
-  pitch. Unit glyphs keep the text scale, since they sit inline with the
-  text, and get the same row-pitch check.
-- **Art contract, checked by a test.** Every icon in a column shares one
-  square native size, and so do the unit glyphs. Mixed sizes would get
-  different scales and so render at different visual sizes. Generalise the
-  existing `== (16, 16)` / `== (8, 8)` assertions to "all equal".
+- **Layout contract, checked at boot.** A square box `32 × S`, with
+  `icon_scale = box // native`. Raise if the scale comes out as 0 (art too
+  large for its box). Unit glyphs keep the secondary text scale, since they
+  sit beside the text.
+- **Art contract, checked by a test.** Every band icon shares one square
+  native size, and so do the unit glyphs. Mixed sizes would get different
+  scales and so render at different visual sizes. Generalise the existing
+  `== (16, 16)` / `== (8, 8)` assertions to "all equal".
 
 Effect: 16 px art draws at scale 2 when `S = 1` and at 4 when `S = 2`.
 32 px art for a larger panel draws at scale 2: sharper, with the same
-footprint and no code change. `left_column_native_px()` stays, as the
-`native` input.
+footprint and no code change.
 
 ### 3. Every view asserts its fit at boot
 
 Each view raises a `RuntimeError` naming itself, like today's header and
-graph guards. There are no silent clips. Missing today:
+Sensors layout guards. There are no silent clips. Missing today:
 
-- **Sensors:** the header plus all rows fit the panel height. The last row
-  currently ends near y = 170.
 - **Calendar:** the derived bar height is ≥ 1.
 - **Ring:** the text lines fit inside the inner circle. Today a panel that
   is too small fails with a cryptic `math domain error` from `sqrt`.
-- **Sensors icon cell:** the cell fits the row pitch (§2).
 
 ### 4. Leftover space
 
 Panels are rarely an exact multiple of 240×240 (800×480 at `S = 2` leaves a
 320 px strip, for example). Width already flows into the space fillers
-(Sensors graph, Calendar bars); Ring and Status centre. Whether to centre
-the Sensors block vertically or keep it top-aligned is open question 3.
+(Sensors quadrants and graphs, Calendar bars); Ring, Status and the Sensors
+badge centre.
 
 ## Open questions (settle in the plan review)
 
 1. **Source of `S`.** An explicit `UI_SCALE` key (lean: predictable, and the
    boot guards validate it), auto-derived as
    `max(1, min(W // 240, H // 240))`, or both (`UI_SCALE = 0` meaning auto).
-2. **1-px elements.** Do seams, ticks, the baseline and the label separation
-   scale to `S` px, or stay hairlines? For the Sensors graph, 1-px columns
-   give `S×` more history resolution (and `S×` the `RingHistory` capacity),
-   while `S`-px columns keep today's resolution and visual weight.
-3. **Leftover space.** Top-align or centre Sensors? Does the Calendar
-   window stay at 2 h on a wider panel? Widening it cascades into the
-   network forecast horizons, which `app.py` derives from the calendar
-   windows.
+2. **1-px elements.** Do seams, ticks, the baseline, the label separation,
+   the Sensors graph line and the badge ring scale to `S` px, or stay
+   hairlines? For the Sensors graphs, 1-px columns give `S×` more history
+   resolution (and `S×` the `RingHistory` capacity), while `S`-px columns
+   keep today's resolution and visual weight.
+3. **Leftover space.** Does the Calendar window stay at 2 h on a wider
+   panel? Widening it cascades into the network forecast horizons, which
+   `app.py` derives from the calendar windows.
 4. **Art for larger panels.** Upscale the 16 px set, or ship a native
    higher-resolution set? Today's 20 icons pack to 2,176 bytes, so a 32 px
    set costs about 4× that in flash.
-5. **The duplicated bitmap8 ink offset.** The `+ 2` appears in both
-   `sensors.py` and `calendar.py`. Lean: one shared constant, since it's a
-   font property.
+5. **The duplicated bitmap8 ink offset.** Calendar's inline `+ 2` and
+   Sensors' `_UNIT_DROP_PX` both make up for ink sitting high in its cell.
+   Lean: one shared constant, since it's a font property.
 
 ## Steps (one commit each)
 
@@ -144,14 +140,13 @@ the Sensors block vertically or keep it top-aligned is open question 3.
 1. **Snapshot tests.** Pin the draw-call log of each view's first frame at
    today's config, with fixed time and inputs. This is the pixel-identity
    safety net for everything after it. `FakePicoGraphics` records `clear`,
-   `rectangle`, `text` and `pixel`, but not `line` (Calendar ticks and
-   baseline) or `circle` / `polygon` (Ring), so extend it first.
+   `rectangle`, `text`, `pixel` and `circle`, but not `line` (Calendar ticks
+   and baseline) or `polygon` (Ring), so extend it first.
 2. **Thread `S` through.** Add `UI_SCALE`, pass `ui_scale` into each
    `Geometry`, and multiply its constants: one commit per view. The
    snapshots must not change at `S = 1`.
 3. **Derive text scales from `S`** and retire `TEXT_SCALE`.
-4. **Sensors icon cell** (§2): cell budget, art-uniformity test, and the
-   cell ≤ row-pitch guard.
+4. **Sensors icon box** (§2): box budget and the art-uniformity test.
 5. **Vertical fit guards** (§3).
 6. **1-px policy**, once decided.
 
@@ -165,10 +160,11 @@ the Sensors block vertically or keep it top-aligned is open question 3.
   from displays.sensors import Geometry
   gfx = PicoGraphics(display=DISPLAY_PICO_EXPLORER)
   g = Geometry(pico_graphics=gfx, font="bitmap8", font_height=8,
-               text_scale=3, tick_period_ms=500)
-  print((g.icon_size_px, g.unit_size_px, g.icon_y_offset, g.unit_x,
-         g.value_x, g.graph_x, g.graph_width, g.ticks_per_commit))
-  # expect (32, 24, 6, 36, 66, 132, 108, 1600)
+               value_text_scale=3, label_text_scale=2, tick_period_ms=500)
+  print((g.value_offset, g.range_offset, g.graph_offset, g.graph_height,
+         g.graph_columns, g.ticks_per_commit, g.badge_rects, g.badge_r))
+  # expect (36, 61, 79, 39, 119, 1465,
+  #         ((105, 91, 30, 14), (89, 109, 63, 21), (91, 134, 58, 16)), 48)
   ```
 - **`S = 2`:** on a 480×480 fake, every fixed layout value exactly doubles.
   `_fakes.bitmap8_width` is exact at any scale, so text-derived values are

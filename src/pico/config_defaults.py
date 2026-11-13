@@ -41,17 +41,13 @@ BME690_TEMP_OFFSET_C = -2.1
 BME690_HUM_OFFSET_PCT = 8.0
 BME690_PRSR_OFFSET_HPA = 45.0
 
-# Sensors.  Each tuple holds 5 strictly ascending edges:
-# ``(cap_min, t1, t2, t3, cap_max)``.  The inner three edges drive
-# the icon-swap band classification (4 bands per row).  The outer two
-# edges (``cap_min`` / ``cap_max``) bound the 24-hour history graph: a value
-# at ``cap_max`` plots at the top of the row, ``cap_min`` at the bottom;
-# values outside the range render as a fill column only (no marker value
-# pixel).
-SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)              # °C: cold / cool / warm / hot
-SENSOR_PRESSURE_BANDS = (980, 1000, 1013, 1025, 1040) # hPa: low -> high
-SENSOR_HUMIDITY_BANDS = (10, 30, 50, 70, 90)          # %RH: dry -> very humid
-SENSOR_GAS_BANDS = (50, 100, 200, 350, 500)           # kΩ: polluted -> clean
+# Sensors.  Each tuple holds 3 strictly ascending edges splitting a reading
+# into 4 bands, which pick the icon in its quadrant; a value on an edge takes
+# the band above it.
+SENSOR_TEMP_BANDS = (18.0, 25.0, 29.0)            # °C: cold / cool / warm / hot
+SENSOR_PRESSURE_BANDS = (1000.0, 1013.0, 1025.0)  # hPa: low -> high
+SENSOR_HUMIDITY_BANDS = (30.0, 50.0, 70.0)        # %RH: dry -> very humid
+SENSOR_GAS_BANDS = (100.0, 200.0, 350.0)          # kΩ: polluted -> clean
 
 # Calendar: Weather forecast + UV row (Open-Meteo).
 # The weather row mixes precipitation and UV (they rarely coincide).

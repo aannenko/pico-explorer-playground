@@ -33,6 +33,32 @@ def bitmap8_width(text: str, scale: int) -> int:
     return scale * (total + len(text) - 1)
 
 
+def circle_pixels(x_center: int, y_center: int, radius: int) -> set[tuple[int, int]]:
+    """The pixels ``PicoGraphics.circle()`` fills, ported from pimoroni-pico's ``pico_graphics.cpp``."""
+    pixels: set[tuple[int, int]] = set()
+
+    def span(x: int, y: int, length: int) -> None:
+        pixels.update((x + i, y) for i in range(length))
+
+    ox, oy, err = radius, 0, -radius
+    while ox >= oy:
+        last_oy = oy
+        err += oy
+        oy += 1
+        err += oy
+        span(x_center - ox, y_center + last_oy, ox * 2 + 1)
+        if last_oy != 0:
+            span(x_center - ox, y_center - last_oy, ox * 2 + 1)
+        if err >= 0 and ox != last_oy:
+            span(x_center - last_oy, y_center + ox, last_oy * 2 + 1)
+            if ox != 0:
+                span(x_center - last_oy, y_center - ox, last_oy * 2 + 1)
+            err -= ox
+            ox -= 1
+            err -= ox
+    return pixels
+
+
 class FakePicoGraphics:
     """In-memory ``PicoGraphics`` substitute that records every draw call.
 
@@ -73,6 +99,9 @@ class FakePicoGraphics:
 
     def pixel(self, x: int, y: int) -> None:
         self.calls.append(("pixel", (x, y), {}))
+
+    def circle(self, x: int, y: int, r: int) -> None:
+        self.calls.append(("circle", (x, y, r), {}))
 
     def get_bounds(self) -> tuple[int, int]:
         return (240, 240)

@@ -43,6 +43,8 @@ from services.wifi_client import WifiClient
 
 _SEC_PER_HOUR = const(3600)
 
+_SECONDARY_TEXT_SCALE = const(2)
+
 # Also how often NTP is queried: shortening it to reconnect sooner would query the
 # public NTP pool that often.
 _NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
@@ -74,7 +76,7 @@ _SENSOR_BANDS_KEYS = (
 
 
 def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
-    """Halt unless each ``SENSOR_*_BANDS`` holds 5 strictly ascending edges.
+    """Halt unless each ``SENSOR_*_BANDS`` holds 3 strictly ascending edges.
 
     The config loader validates only their structure, not order or uniqueness.
     Halting shows the error on ``status_display`` and raises ``SystemExit``,
@@ -85,9 +87,9 @@ def _validate_sensor_bands_or_halt(status_display: StatusDisplay) -> None:
         try:
             ok = (
                 bands is not None
-                and len(bands) == 5
+                and len(bands) == 3
                 and list(bands) == sorted(bands)
-                and len(set(bands)) == 5
+                and len(set(bands)) == 3
             )
         except (TypeError, ValueError):
             ok = False
@@ -142,29 +144,32 @@ def _build_countdown_display(pico_graphics: PicoGraphics, tick_scheduler: TickSc
 
 
 def _build_sensors_display(
+    pico_graphics: PicoGraphics,
+    tick_scheduler: TickScheduler,
     bme690_reader: PimoroniBME690,
     time_service: TimeService,
-    geometry: sensors.Geometry,
-    history: RingHistory,
 ) -> sensors.Display:
+    geometry = sensors.Geometry(
+        pico_graphics=pico_graphics,
+        font=config.FONT,
+        font_height=config.FONT_HEIGHT_PX,
+        value_text_scale=config.TEXT_SCALE,
+        label_text_scale=_SECONDARY_TEXT_SCALE,
+        tick_period_ms=tick_scheduler.tick_period_ms,
+    )
+    history = RingHistory(
+        bme690_reader.read,
+        metric_count=len(_SENSOR_BANDS_KEYS),
+        capacity=geometry.graph_columns,
+        ticks_per_commit=geometry.ticks_per_commit,
+    )
+    tick_scheduler.register(history.tick)
     return sensors.Display(
-        renderer=sensors.Renderer(
-            geometry=geometry,
-            colors=sensors.Colors(
-                background=BLACK,
-                header_text=WHITE,
-                value_text=WHITE,
-                secondary_text=GRAY,
-            ),
-        ),
-        bme690_reader=bme690_reader,
-        time_service=time_service,
+        geometry=geometry,
+        get_reading=bme690_reader.read,
+        get_local_time=time_service.now,
         history=history,
-        graph_height=geometry.graph_height,
-        temp_bands=config.SENSOR_TEMP_BANDS,
-        pressure_bands=config.SENSOR_PRESSURE_BANDS,
-        humidity_bands=config.SENSOR_HUMIDITY_BANDS,
-        gas_bands=config.SENSOR_GAS_BANDS,
+        band_edges=tuple(getattr(config, name) for name in _SENSOR_BANDS_KEYS),
     )
 
 
@@ -191,7 +196,7 @@ def _build_calendar_display(
                 header_text_scale=config.TEXT_SCALE,
                 bar_font=config.FONT,
                 bar_font_height=config.FONT_HEIGHT_PX,
-                bar_text_scale=const(2),
+                bar_text_scale=_SECONDARY_TEXT_SCALE,
             ),
             colors=calendar.Colors(
                 background=BLACK,
@@ -228,28 +233,21 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     _validate_sensor_bands_or_halt(status_display)
 
     tick_scheduler = TickScheduler()
+    time_service = TimeService(
+        tz_offset_hours=config.TIME_ZONE_OFFSET_HOURS,
+        dst_start_rule=config.DST_START_RULE,
+        dst_end_rule=config.DST_END_RULE,
+        dst_offset_hours=config.DST_OFFSET_HOURS,
+    )
 
-    # Capture the first sensor sample before the network boot.
+    # Capture the first sensor sample, and check the Sensors layout, before the network boot.
     bme690_reader = PimoroniBME690(
         temp_offset_c=config.BME690_TEMP_OFFSET_C,
         hum_offset_pct=config.BME690_HUM_OFFSET_PCT,
         prsr_offset_hpa=config.BME690_PRSR_OFFSET_HPA,
         read_period_ms=config.BME690_READ_PERIOD_MS,
     )
-    sensors_geometry = sensors.Geometry(
-        pico_graphics=pico_graphics,
-        font=config.FONT,
-        font_height=config.FONT_HEIGHT_PX,
-        text_scale=config.TEXT_SCALE,
-        tick_period_ms=tick_scheduler.tick_period_ms,
-    )
-    sensor_history = RingHistory(
-        bme690_reader.read,
-        metric_count=4,
-        capacity=sensors_geometry.graph_width,
-        ticks_per_commit=sensors_geometry.ticks_per_commit,
-    )
-    tick_scheduler.register(sensor_history.tick)
+    sensors_display = _build_sensors_display(pico_graphics, tick_scheduler, bme690_reader, time_service)
 
     wifi_client = WifiClient()
     network_service = NetworkService(
@@ -259,12 +257,6 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     )
     network_service.connect_initial(on_progress=status_display.show)
 
-    time_service = TimeService(
-        tz_offset_hours=config.TIME_ZONE_OFFSET_HOURS,
-        dst_start_rule=config.DST_START_RULE,
-        dst_end_rule=config.DST_END_RULE,
-        dst_offset_hours=config.DST_OFFSET_HOURS,
-    )
     time_service.sync_initial(on_progress=status_display.show)
     del status_display
 
@@ -320,12 +312,6 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         get_status=lambda: air_service.status,
     )
 
-    sensors_display = _build_sensors_display(
-        bme690_reader,
-        time_service,
-        sensors_geometry,
-        sensor_history,
-    )
     countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
     calendar_display = _build_calendar_display(
         pico_graphics, time_service, [weather_stream, air_stream]

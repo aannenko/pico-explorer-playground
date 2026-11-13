@@ -27,10 +27,17 @@ if "micropython" not in sys.modules:
     _mp.const = lambda x: x  # type: ignore[attr-defined]
     sys.modules["micropython"] = _mp
 
-from displays.palette import PALETTE_RGB  # noqa: E402
+from displays.palette import (  # noqa: E402
+    GREEN_SHADE,
+    ORANGE_SHADE,
+    PALETTE_RGB,
+    PINK_SHADE,
+    SKY_SHADE,
+)
 
-# Names for the 12 authored slots (slots 12-15 are spare); RGBs come from the
-# canonical PALETTE_RGB so they can never drift.
+# Names for the 12 authored slots; RGBs come from the canonical PALETTE_RGB so
+# they can never drift.  Slots 12-15 shade four of them for graph fills, so
+# they sit deliberately close to their bases and are checked separately below.
 _NAMES = ("BLACK", "WHITE", "GRAY", "DARK_GRAY", "BLUE", "GREEN", "YELLOW",
           "RED", "SKY", "ORANGE", "PINK", "BROWN")
 PALETTE = tuple((_NAMES[i], *PALETTE_RGB[i]) for i in range(len(_NAMES)))
@@ -163,27 +170,29 @@ for kind in ("normal", "protan", "deutan", "tritan"):
     print()
 
 
-# Per-metric sensor-band fill sets (band 0 -> 3, low -> high).  Within one graph
-# these 4 fills co-occur, but the band is ALSO carried by the icon + the
-# value-pixel position, so a sub-threshold fill pair degrades rather than breaks
-# readability.  This reports the worst within-set pair per CVD type for info.
-METRIC_SETS = (
-    ("TEMPERATURE", ("SKY", "GREEN", "ORANGE", "RED")),
-    ("HUMIDITY", ("YELLOW", "GREEN", "SKY", "BLUE")),
-    ("PRESSURE", ("PINK", "GREEN", "YELLOW", "ORANGE")),
-    ("GAS", ("RED", "ORANGE", "GREEN", "SKY")),
+# Sensors quadrants as (metric, field, graph-fill shade).  What sits on a field or
+# its shade must stay distinguishable from it: the DARK_GRAY units, ranges and
+# graph line, and the BLACK values.  A shade is a deliberate near-match of its
+# field, so that pair isn't checked.
+QUADRANTS = (
+    ("TEMPERATURE", "ORANGE", ORANGE_SHADE),
+    ("PRESSURE", "PINK", PINK_SHADE),
+    ("HUMIDITY", "SKY", SKY_SHADE),
+    ("GAS", "GREEN", GREEN_SHADE),
 )
-print("### Per-metric band-fill distinguishability (worst pair per CVD type) ###")
-for label, members in METRIC_SETS:
-    print("%-12s %s" % (label, " ".join(members)))
+print("### Sensors quadrants: marks against their background (worst pair per CVD type) ###")
+for label, field, shade in QUADRANTS:
+    print("%-12s %s" % (label, field))
+    pairs = (
+        ("DARK_GRAY", _BY_NAME["DARK_GRAY"], field, _BY_NAME[field]),
+        ("DARK_GRAY", _BY_NAME["DARK_GRAY"], field + "_SHADE", PALETTE_RGB[shade]),
+        ("BLACK", _BY_NAME["BLACK"], field, _BY_NAME[field]),
+    )
     for kind in ("normal", "protan", "deutan", "tritan"):
-        labs = {m: rgb_to_lab(simulate(_BY_NAME[m], kind)) for m in members}
-        worst = None
-        for a in range(len(members)):
-            for b in range(a + 1, len(members)):
-                de = ciede2000(labs[members[a]], labs[members[b]])
-                if worst is None or de < worst[0]:
-                    worst = (de, members[a], members[b])
+        worst = min(
+            (ciede2000(rgb_to_lab(simulate(mark, kind)), rgb_to_lab(simulate(background, kind))), mark_name, name)
+            for mark_name, mark, name, background in pairs
+        )
         flag = "  *** below %.0f" % MIN_DISTINGUISHABLE_DE if worst[0] < MIN_DISTINGUISHABLE_DE else ""
         print("    %-7s worst dE %5.1f  %s<->%s%s" % (kind, worst[0], worst[1], worst[2], flag))
     print()

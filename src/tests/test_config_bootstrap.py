@@ -255,17 +255,17 @@ def test_invalid_override_raises_invalid_config_error(workspace) -> None:
 
 
 def test_invalid_tuple_shape_message_mentions_both_lengths(workspace) -> None:
-    """Realistic regression: user kept the old 3-tuple SENSOR_*_BANDS shape."""
-    workspace.write_defaults("SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)\n")
-    workspace.write_user("SENSOR_TEMP_BANDS = (10, 20, 30)\n")
+    """Realistic regression: user kept the old 5-tuple SENSOR_*_BANDS shape."""
+    workspace.write_defaults("SENSOR_TEMP_BANDS = (18.0, 25.0, 29.0)\n")
+    workspace.write_user("SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)\n")
 
     with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
         config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
     msg = str(exc.value)
     assert "SENSOR_TEMP_BANDS" in msg
-    assert "length 5" in msg
     assert "length 3" in msg
+    assert "length 5" in msg
 
 
 def test_failed_validation_does_not_set_sentinel(workspace) -> None:

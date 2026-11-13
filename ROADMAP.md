@@ -34,10 +34,11 @@ leaves them ambiguous.
   and web configuration land.
 
 - **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
-  gas resistance) with a local-time header. Each row pairs the current value
-  with a 24-hour history graph coloured by per-metric bands from
-  `config.SENSOR_*_BANDS`. The gas row hides its graph while the heater warms
-  up. No persistence across reboots.
+  gas resistance) in four colour quadrants around a date and time badge.
+  Each quadrant shows the current value, a band icon picked by
+  `config.SENSOR_*_BANDS`, the 24-hour range and an auto-scaled 24-hour
+  history graph (gas on a log scale). The gas quadrant hides its graph while
+  the heater warms up. No persistence across reboots.
 
 ## Partially implemented
 
@@ -81,8 +82,9 @@ leaves them ambiguous.
 
 - Keep views modular (separate rendering + state per view); do not assume
   there is only one screen.
-- On the 240×240 display, only the Sensors and Calendar views share a
-  common header (time / date); other views may use the full screen.
+- On the 240×240 display, only the Calendar view has a full-width time / date
+  header; the Sensors view shows them in its central badge, and other views
+  may use the full screen.
 - Prefer clean boundaries between data acquisition (sensors / network),
   scheduling, and rendering.
 - Be mindful of MicroPython constraints: small memory footprint and

@@ -41,7 +41,7 @@ class TestWidestHeader:
 
 class TestHeaderFits:
     def test_shipped_font_and_scale_fit_the_panel(self):
-        """bitmap8/scale 3 must clear the 240 px Explorer, or both views halt."""
+        """bitmap8/scale 3 must clear the 240 px Explorer, or the Calendar view halts."""
         gfx = FakePicoGraphics()
         width, _height = gfx.get_bounds()
 
@@ -56,7 +56,7 @@ class TestHeaderFits:
 
     def test_selects_the_font_before_measuring(self):
         """measure_text reports against whatever font is currently set, so the
-        helper must select its own — the two header views needn't share one."""
+        helper must select its own — another view may have left a different one."""
         gfx = FakePicoGraphics()
         gfx.set_font("some-other-font")
 

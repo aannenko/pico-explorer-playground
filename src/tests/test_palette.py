@@ -4,12 +4,18 @@ import displays.palette as palette
 from displays.palette import (
     BLACK,
     BLUE,
+    GREEN,
+    GREEN_SHADE,
     ICON_SLOTS,
     LABEL_FOR_SLOT,
     ORANGE,
+    ORANGE_SHADE,
     PALETTE_RGB,
     PINK,
+    PINK_SHADE,
     BROWN,
+    SKY,
+    SKY_SHADE,
     STREAM_COLORS,
     WHITE,
     program_palette,
@@ -51,19 +57,27 @@ def test_slot_constants_match_their_indices() -> None:
     assert palette.ORANGE == 9
     assert palette.PINK == 10
     assert palette.BROWN == 11
+    assert palette.ORANGE_SHADE == 12
+    assert palette.PINK_SHADE == 13
+    assert palette.SKY_SHADE == 14
+    assert palette.GREEN_SHADE == 15
 
 
 def test_icon_slots_are_the_twelve_authored_and_distinct() -> None:
-    # ICON_SLOTS excludes the 4 spares so the converter's exact-match map is
-    # unambiguous (the spares duplicate BLACK).
+    # The converter maps icon pixels by exact colour, so icon art can't pick up a
+    # graph-fill shade.
     assert ICON_SLOTS == tuple(range(12))
     authored = [PALETTE_RGB[i] for i in ICON_SLOTS]
     assert len(set(authored)) == 12, "authored slot colours must be distinct"
 
 
-def test_spare_slots_are_black() -> None:
-    for i in range(12, 16):
-        assert PALETTE_RGB[i] == (0, 0, 0)
+def test_shade_slots_dim_their_base_colours_evenly() -> None:
+    for shade, base in ((ORANGE_SHADE, ORANGE), (PINK_SHADE, PINK), (SKY_SHADE, SKY), (GREEN_SHADE, GREEN)):
+        shade_rgb = PALETTE_RGB[shade]
+        base_rgb = PALETTE_RGB[base]
+        factor = max(shade_rgb) / max(base_rgb)
+        assert factor < 1
+        assert all(abs(channel - base_channel * factor) < 1 for channel, base_channel in zip(shade_rgb, base_rgb))
 
 
 # ---------------------------------------------------------------------------

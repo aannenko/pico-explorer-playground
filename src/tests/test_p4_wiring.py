@@ -1,99 +1,84 @@
-"""Cheap host-side wiring checks for the P4 sensors display.
-
-``sensors.Display.ROWS`` is the single source that colocates each band's
-``(icon, fill)``.  These tests catch metric/band remap typos and a metric-order
-swap without a device: every icon/unit must resolve to a real generated blob of
-the right size, and the band pens derived from ROWS must be valid slots in the
-right order.
-"""
-
 from __future__ import annotations
 
+import math
+
 from displays import sensors
-from displays.palette import BLUE, GREEN, LABEL_FOR_SLOT, ORANGE, RED, PINK, SKY, YELLOW
-from displays.sensors import build_sensor_band_pens
-from displays.shared import _icons_data
+from displays.palette import (
+    DARK_GRAY,
+    GREEN,
+    GREEN_SHADE,
+    ORANGE,
+    ORANGE_SHADE,
+    PINK,
+    PINK_SHADE,
+    SKY,
+    SKY_SHADE,
+)
+from displays.shared import _icons_data as icons
 
 
-def _is_icon_tuple(obj) -> bool:
-    return (
-        isinstance(obj, tuple)
-        and len(obj) == 3
-        and isinstance(obj[0], int)
-        and isinstance(obj[1], int)
-        and isinstance(obj[2], (bytes, bytearray))
+def _ink(art: tuple[int, int, bytes]) -> list[tuple[int, int, int]]:
+    """``(col, row, slot)`` of each pixel the blitter draws."""
+    width, height, data = art
+    pixels: list[tuple[int, int, int]] = []
+    for i in range(width * height):
+        byte = data[i >> 1]
+        slot = byte >> 4 if i % 2 == 0 else byte & 0x0F
+        if slot:
+            pixels.append((i % width, i // width, slot))
+    return pixels
+
+
+def test_metrics_table() -> None:
+    assert sensors._METRICS == (
+        (
+            icons.UNIT_CELSIUS,
+            (icons.ICON_THERMO_BLUE, icons.ICON_THERMO_GREEN, icons.ICON_THERMO_ORANGE, icons.ICON_THERMO_RED),
+            1,
+            ORANGE,
+            ORANGE_SHADE,
+            4.0,
+            False,
+        ),
+        (
+            icons.UNIT_MBAR,
+            (icons.ICON_GAUGE_MIN, icons.ICON_GAUGE_LOW, icons.ICON_GAUGE_HIGH, icons.ICON_GAUGE_MAX),
+            0,
+            PINK,
+            PINK_SHADE,
+            10.0,
+            False,
+        ),
+        (
+            icons.UNIT_PERCENT,
+            (icons.ICON_DROP_LOW, icons.ICON_DROP_MED, icons.ICON_DROP_HIGH, icons.ICON_DROP_MAX),
+            1,
+            SKY,
+            SKY_SHADE,
+            20.0,
+            False,
+        ),
+        (
+            icons.UNIT_KOHM,
+            (icons.ICON_MASK_RED, icons.ICON_MASK_ORANGE, icons.ICON_MASK_GREEN, icons.ICON_MASK_BLUE),
+            1,
+            GREEN,
+            GREEN_SHADE,
+            math.log(2),
+            True,
+        ),
     )
 
 
-_DATA_ICONS = [
-    v for k, v in vars(_icons_data).items()
-    if not k.startswith("_") and _is_icon_tuple(v)
-]
+def test_band_icons_are_16_px_art_inked_between_one_blank_row_above_and_below() -> None:
+    for _unit, band_icons, *_rest in sensors._METRICS:
+        for icon in band_icons:
+            assert icon[:2] == (16, 16)
+            rows = {row for _col, row, _slot in _ink(icon)}
+            assert (min(rows), max(rows)) == (1, 14)
 
 
-def test_rows_have_four_cells_with_real_blobs_and_valid_fills() -> None:
-    for unit, cells in sensors.Display.ROWS:
-        assert _is_icon_tuple(unit)
-        assert unit in _DATA_ICONS, "ROWS unit is not a generated icon blob"
-        assert len(cells) == 4, "each metric row must have 4 band cells"
-        for icon, fill in cells:
-            assert _is_icon_tuple(icon)
-            assert icon in _DATA_ICONS, "ROWS icon is not a generated icon blob"
-            assert 0 <= fill <= 15, "fill must be a valid palette slot"
-
-
-def test_row_icon_and_unit_dimensions() -> None:
-    for unit, cells in sensors.Display.ROWS:
-        assert (unit[0], unit[1]) == (8, 8), "units are 8x8"
-        for icon, _fill in cells:
-            assert (icon[0], icon[1]) == (16, 16), "metric icons are 16x16"
-
-
-def test_band_pen_fields_are_valid_slots() -> None:
-    pens = build_sensor_band_pens()
-    assert len(pens) == 4
-    for row in pens:
-        assert len(row) == 4
-        for fill, marker in row:
-            assert 0 <= fill <= 15
-            assert 0 <= marker <= 15
-
-
-def test_band_pen_marker_is_auto_contrast_of_fill() -> None:
-    pens = build_sensor_band_pens()
-    for row in pens:
-        for fill, marker in row:
-            assert marker == LABEL_FOR_SLOT[fill]
-
-
-def test_band_pen_metric_order_guard() -> None:
-    # Guards the ROWS metric order (temp / PRESSURE / HUMIDITY / gas): if
-    # pressure↔humidity ever swap, these break loudly.
-    pens = build_sensor_band_pens()
-    assert pens[1][0][0] == PINK, "pressure band-0 fill must be PINK"
-    assert pens[2][0][0] == YELLOW, "humidity band-0 fill must be YELLOW"
-
-
-def test_rows_match_expected_band_order() -> None:
-    # Pins the full ROWS table (unit + per-band (icon, fill)) — a metric swap or
-    # band/colour reorder breaks this loudly.
-    d = _icons_data
-    expected = (
-        (d.UNIT_CELSIUS, (
-            (d.ICON_THERMO_BLUE, SKY), (d.ICON_THERMO_GREEN, GREEN),
-            (d.ICON_THERMO_ORANGE, ORANGE), (d.ICON_THERMO_RED, RED),
-        )),
-        (d.UNIT_MBAR, (
-            (d.ICON_GAUGE_MIN, PINK), (d.ICON_GAUGE_LOW, GREEN),
-            (d.ICON_GAUGE_HIGH, YELLOW), (d.ICON_GAUGE_MAX, ORANGE),
-        )),
-        (d.UNIT_PERCENT, (
-            (d.ICON_DROP_LOW, YELLOW), (d.ICON_DROP_MED, GREEN),
-            (d.ICON_DROP_HIGH, SKY), (d.ICON_DROP_MAX, BLUE),
-        )),
-        (d.UNIT_KOHM, (
-            (d.ICON_MASK_RED, RED), (d.ICON_MASK_ORANGE, ORANGE),
-            (d.ICON_MASK_GREEN, GREEN), (d.ICON_MASK_BLUE, SKY),
-        )),
-    )
-    assert sensors.Display.ROWS == expected
+def test_units_are_8_px_dark_gray_art() -> None:
+    for unit, *_rest in sensors._METRICS:
+        assert unit[:2] == (8, 8)
+        assert {slot for _col, _row, slot in _ink(unit)} == {DARK_GRAY}

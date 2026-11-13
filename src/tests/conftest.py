@@ -297,6 +297,23 @@ def wrapping_ticks(monkeypatch):
     return ticks
 
 
+@pytest.fixture
+def app_module(monkeypatch):
+    """``app``, imported with ``config_defaults`` as its ``config``."""
+    import importlib
+
+    import config_defaults
+
+    monkeypatch.setitem(sys.modules, "config", config_defaults)
+    previous = sys.modules.pop("app", None)
+    try:
+        yield importlib.import_module("app")
+    finally:
+        sys.modules.pop("app", None)
+        if previous is not None:
+            sys.modules["app"] = previous
+
+
 class RecordingRenderer:
     """Generic call-recording renderer for display tests.
 

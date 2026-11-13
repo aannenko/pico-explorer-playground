@@ -35,9 +35,8 @@ if "micropython" not in sys.modules:
 
 from displays.palette import ICON_SLOTS, PALETTE_RGB  # noqa: E402
 
-# Exact-match map limited to the slots icons may use (ICON_SLOTS excludes the
-# spare slots 12-15) so a stray/off-palette colour errors out instead of
-# silently snapping to a spare.
+# Exact-match map limited to ICON_SLOTS, so any other colour, a graph-fill shade
+# included, errors out instead of being silently accepted.
 _EXACT = {PALETTE_RGB[i]: i for i in ICON_SLOTS}
 
 
