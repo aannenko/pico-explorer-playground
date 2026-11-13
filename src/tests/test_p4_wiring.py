@@ -70,15 +70,21 @@ def test_metrics_table() -> None:
     )
 
 
-def test_band_icons_are_16_px_art_inked_between_one_blank_row_above_and_below() -> None:
+def _ink_box(art: tuple[int, int, bytes]) -> tuple[int, int, int, int]:
+    """``(left, top, right, bottom)`` of the pixels the blitter draws."""
+    cols = [col for col, _row, _slot in _ink(art)]
+    rows = [row for _col, row, _slot in _ink(art)]
+    return (min(cols), min(rows), max(cols), max(rows))
+
+
+def test_band_icons_are_trimmed_to_their_ink_and_share_a_size_per_metric() -> None:
     for _unit, band_icons, *_rest in sensors._METRICS:
+        assert len({icon[:2] for icon in band_icons}) == 1
         for icon in band_icons:
-            assert icon[:2] == (16, 16)
-            rows = {row for _col, row, _slot in _ink(icon)}
-            assert (min(rows), max(rows)) == (1, 14)
+            assert _ink_box(icon) == (0, 0, icon[0] - 1, icon[1] - 1)
 
 
-def test_units_are_8_px_dark_gray_art() -> None:
+def test_units_are_dark_gray_art_trimmed_to_their_ink() -> None:
     for unit, *_rest in sensors._METRICS:
-        assert unit[:2] == (8, 8)
+        assert _ink_box(unit) == (0, 0, unit[0] - 1, unit[1] - 1)
         assert {slot for _col, _row, slot in _ink(unit)} == {DARK_GRAY}

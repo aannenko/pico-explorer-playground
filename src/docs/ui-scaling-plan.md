@@ -1,9 +1,9 @@
 # Plan: integer UI scaling
 
 **Status:** planned, not started (2026-10-10). The inventory below was
-re-checked on 2026-11-13 against the code after the Sensors quadrants and
-their optimisation, and against the Pimoroni v1.29.0-2 firmware; re-check
-it before implementing.
+re-checked on 2026-11-13 against the code after the Sensors quadrants,
+their optimisation, spacing and trimmed icons, and against the Pimoroni
+v1.29.0-2 firmware; re-check it before implementing.
 
 ## Goal
 
@@ -31,7 +31,8 @@ one integer `S`, with today's Explorer layout defined as `S = 1`.
   text. Graph height enters a 32-bit product in the viper
   `_Quadrant._replace_graph` (span × graph height < 2³¹; see its comment).
 - **Text-derived heights.** Text height, and the Sensors stack offsets
-  (margins are measured to ink: text height less its descender row).
+  (margins are measured to ink: text height less its descender row, and
+  icons trimmed to their ink).
 
 ## What does not: hand-written pixel values
 
@@ -41,15 +42,14 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 |---|---|---|
 | `app.py` | `TEXT_SCALE` 3 (config) | primary text: Status, Ring, Calendar header, Sensors values and badge time |
 | `app.py` | `_SECONDARY_TEXT_SCALE` 2 | Calendar bar labels and time axis; Sensors ranges, units, badge weekday and date |
-| `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the box budget (design §2) |
-| `sensors.py` | `_GUTTER_PX` 3, `_MARGIN_PX` 4 | quadrant gutters; gaps between stacked elements and to the edges |
-| `sensors.py` | `_UNIT_DROP_PX` 2 | unit drop: unit ink sits high in its cell |
-| `sensors.py` | `_BADGE_LINE_GAP_PX` 4, `_BADGE_PADDING_PX` 2, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | badge line gaps; black space inside the ring; the ring; black border outside it |
+| `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the icon row (design §2) |
+| `sensors.py` | `_GUTTER_PX` 3, `_MARGIN_PX` 8 | quadrant gutters; every gap between neighbouring texts, icons and graphs, and from a text or icon to the edges and gutter |
+| `sensors.py` | `_BADGE_PADDING_PX` 5, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | black space inside the ring; the ring; black border outside it |
 | `calendar.py` | `_HEADER_MARGIN_PX` 6, `_AXIS_MARGIN_PX` 3 | header→rows, rows→axis |
 | `calendar.py` | `_BAR_TEXT_MARGIN_PX` 2, `_MIN_LABEL_PX` 14 | label inset, minimum bar width for a label |
 | `calendar.py` | `_TICK_MARK_HEIGHT_PX` 4, `_STATUS_GLYPH_PX` 4 | axis ticks, stale-data square |
 | `calendar.py` | `max(3, …)` | minimum row gap |
-| `calendar.py` | inline `+ 2` in bar `text_y` | label lift: the same bitmap8 ink offset |
+| `calendar.py` | inline `+ 2` in bar `text_y` | label lift: bitmap8 ink sits high in its cell |
 | `ring.py` | `_RING_OUTER_MARGIN_PX` 2 | ring→edge |
 | `status.py` | `h // 2 + 5` | subtext offset |
 
@@ -85,25 +85,25 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 
 ### 2. The layout owns the icon box
 
-The Sensors band icons draw at the fixed `_ICON_SCALE` 2 from 16 px art
-(`_ICON_ART_PX`), so a larger blob would overflow its box rather than shrink
-to fit. `_check_layout` rejects a box that meets its neighbours, the badge or
-the quadrant edge, and `test_p4_wiring.py` pins every icon at 16×16, inked
-in rows 1–14 (`_ICON_INK_INSET_ROWS`), and every unit glyph at 8×8.
+The Sensors band icons draw at the fixed `_ICON_SCALE` 2 from art that
+`icons-to-p4.py` trims to its ink (band icons 10–14 × 14 px, unit glyphs at
+most 8 × 8), so a larger blob would overflow its box rather than shrink to
+fit. `_check_layout` rejects a box that meets its neighbours, the badge or
+the quadrant edge, and `test_p4_wiring.py` checks that every icon is
+trimmed to its ink and that a metric's band icons share one size.
 
 Two contracts, each enforced where it belongs:
 
-- **Layout contract, checked at boot.** A square box `32 × S`, with
-  `icon_scale = box // native`. Raise if the scale comes out as 0 (art too
-  large for its box). Unit glyphs keep the secondary text scale, since they
-  sit beside the text.
-- **Art contract, checked by a test.** Every band icon shares one square
-  native size, and so do the unit glyphs. Mixed sizes would get different
-  scales and so render at different visual sizes. Generalise the existing
-  `== (16, 16)` / `== (8, 8)` assertions to "all equal".
+- **Layout contract, checked at boot.** An icon row `28 × S` tall, with
+  `icon_scale = row // native height` of the tallest band icon. Raise if
+  the scale comes out as 0 (art too large for its row). Unit glyphs keep
+  the secondary text scale, since they sit beside the text.
+- **Art contract, checked by a test.** Every band icon shares one native
+  height, so all scale alike; widths may differ between metrics. Extend the
+  existing per-metric size check to heights across metrics.
 
-Effect: 16 px art draws at scale 2 when `S = 1` and at 4 when `S = 2`.
-32 px art for a larger panel draws at scale 2: sharper, with the same
+Effect: 14 px tall art draws at scale 2 when `S = 1` and at 4 when `S = 2`.
+28 px tall art for a larger panel draws at scale 2: sharper, with the same
 footprint and no code change.
 
 ### 3. Every view asserts its fit at boot
@@ -137,11 +137,9 @@ badge centre.
    panel? Widening it cascades into the network forecast horizons, which
    `app.py` derives from the calendar windows.
 4. **Art for larger panels.** Upscale the 16 px set, or ship a native
-   higher-resolution set? Today's 20 icons pack to 2,176 bytes, so a 32 px
-   set costs about 4× that in flash.
-5. **The duplicated bitmap8 ink offset.** Calendar's inline `+ 2` and
-   Sensors' `_UNIT_DROP_PX` both make up for ink sitting high in its cell.
-   Lean: one shared constant, since it's a font property.
+   higher-resolution set? Today's 20 icons, trimmed to their ink, pack to
+   1,444 bytes, so a set at twice the resolution costs about 4× that in
+   flash.
 
 ## Steps (one commit each)
 
@@ -156,7 +154,7 @@ badge centre.
    `Geometry`, and multiply its constants: one commit per view. The
    snapshots must not change at `S = 1`.
 3. **Derive text scales from `S`** and retire `TEXT_SCALE`.
-4. **Sensors icon box** (§2): box budget and the art-uniformity test.
+4. **Sensors icon row** (§2): the row budget and the art-height test.
 5. **Vertical fit guards** (§3).
 6. **1-px policy**, once decided.
 
@@ -174,8 +172,8 @@ badge centre.
                value_text_scale=3, label_text_scale=2, tick_period_ms=500)
   print((g.value_offset, g.range_offset, g.graph_offset, g.graph_height,
          g.graph_columns, g.ticks_per_commit, g.badge_rects, g.badge_r))
-  # expect (36, 61, 79, 39, 119, 1465,
-  #         ((105, 91, 30, 14), (89, 109, 63, 21), (91, 134, 58, 16)), 48)
+  # expect (44, 73, 95, 23, 119, 1465,
+  #         ((105, 87, 30, 14), (89, 109, 63, 21), (91, 138, 58, 16)), 54)
   ```
 - **`S = 2`:** on a 480×480 fake, every fixed layout value exactly doubles.
   `_fakes.bitmap8_width` is exact at any scale, so text-derived values are

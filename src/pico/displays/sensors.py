@@ -27,20 +27,14 @@ from services.sample_history import MISSING, SampleHistory
 
 _HISTORY_MS = const(24 * 3600 * 1000)
 _GUTTER_PX = const(3)
-# Between stacked elements, and from the outermost ones to the panel edge or the gutter.
-_MARGIN_PX = const(4)
-_ICON_ART_PX = const(16)
+# Every gap between neighbouring texts, icons and graphs, in a quadrant or the badge, and from a text or icon to the
+# panel edge or the gutter.
+_MARGIN_PX = const(8)
 _ICON_SCALE = const(2)
-# Blank art rows above and below every band icon's ink, so margins can be measured to the ink.
-_ICON_INK_INSET_ROWS = const(1)
-_UNIT_ART_PX = const(8)
-# Unit ink sits high in its cell, as bitmap8's does, so a unit centred on its icon's box reads high.
-_UNIT_DROP_PX = const(2)
 # bitmap8's bottom cell row holds only descenders, which values, times and weekday names never use.
 _DESCENDER_ROWS = const(1)
-_BADGE_LINE_GAP_PX = const(4)
 # Black space between the smallest disc that holds every badge line and the ring.
-_BADGE_PADDING_PX = const(2)
+_BADGE_PADDING_PX = const(5)
 # The badge is a 2-px DARK_GRAY ring with a 2-px black border outside it.
 _BADGE_RING_PX = const(2)
 _BADGE_BORDER_PX = const(2)
@@ -76,6 +70,7 @@ _BADGE_PENS = (GRAY, WHITE, GRAY)
 
 # Per metric in ``PimoroniBME690.read()`` order, which also places the quadrants left to right, then top to
 # bottom: (unit, band icons from low to high, decimals, field pen, graph fill pen, minimum graph span, log scale).
+# A metric's band icons must share one size: its quadrant places and erases each one in the first one's box.
 # On a log scale the span is a natural-log ratio: the gas graph spans at least a doubling.
 _METRICS = (
     (
@@ -280,13 +275,10 @@ class Geometry:
         self.label_ink_height = ink_rows * label_text_scale
         # The whole cell, since "warming..." descends.
         self.range_height = font_height * label_text_scale
-        self.icon_size = _ICON_ART_PX * _ICON_SCALE
-        self.unit_size = _UNIT_ART_PX * label_text_scale
+        self.icon_height = _ICON_SCALE * max(icon[1] for metric in _METRICS for icon in metric[1])
 
-        # Offsets from a quadrant's gutter edge; the margins are measured to ink.
-        icon_inset = _ICON_INK_INSET_ROWS * _ICON_SCALE
-        self.icon_offset = _MARGIN_PX - icon_inset
-        self.value_offset = _MARGIN_PX + self.icon_size - 2 * icon_inset + _MARGIN_PX
+        # Offsets from a quadrant's gutter edge; the margins are measured to ink.  The graph takes the height left over.
+        self.value_offset = _MARGIN_PX + self.icon_height + _MARGIN_PX
         self.range_offset = self.value_offset + self.value_height + _MARGIN_PX
         self.graph_offset = self.range_offset + self.label_ink_height + _MARGIN_PX
         self.graph_height = min(self.row_spans[0][1], self.row_spans[1][1]) - self.graph_offset
@@ -316,12 +308,10 @@ class Geometry:
 
         label_ink_height = self.label_ink_height
         # Centres the lines' ink plus the date's descenders.
-        block_height = (
-            2 * label_ink_height + self.value_height + 2 * _BADGE_LINE_GAP_PX + _DESCENDER_ROWS * label_scale
-        )
+        block_height = 2 * label_ink_height + self.value_height + 2 * _MARGIN_PX + _DESCENDER_ROWS * label_scale
         weekday_y = y_center - block_height // 2
-        time_y = weekday_y + label_ink_height + _BADGE_LINE_GAP_PX
-        date_y = time_y + self.value_height + _BADGE_LINE_GAP_PX
+        time_y = weekday_y + label_ink_height + _MARGIN_PX
+        date_y = time_y + self.value_height + _MARGIN_PX
         # Each line's text is centred in the rectangle its widest text needs; only the date descends.
         self.badge_rects = (
             (x_center - weekday_width // 2, weekday_y, weekday_width, label_ink_height),
@@ -472,17 +462,24 @@ class _Quadrant:
             geom.range_width,
             geom.range_height,
         )
-        self._icon_x = _place(x, width, right, _MARGIN_PX, geom.icon_size)
-        self._icon_y = _place(y, height, top, geom.icon_offset, geom.icon_size)
-        self._unit_x = _place(x, width, right, _MARGIN_PX + geom.icon_size + _MARGIN_PX, geom.unit_size)
-        self._unit_y = self._icon_y + (geom.icon_size - geom.unit_size) // 2 + _UNIT_DROP_PX
+        icon = self._icons[0]
+        self._icon_width = icon[0] * _ICON_SCALE
+        self._icon_height = icon[1] * _ICON_SCALE
+        unit_width = self._unit[0] * geom.label_text_scale
+        unit_height = self._unit[1] * geom.label_text_scale
+        self._icon_x = _place(x, width, right, _MARGIN_PX, self._icon_width)
+        self._icon_y = _place(
+            y, height, top, _MARGIN_PX + (geom.icon_height - self._icon_height) // 2, self._icon_height
+        )
+        self._unit_x = _place(x, width, right, _MARGIN_PX + self._icon_width + _MARGIN_PX, unit_width)
+        self._unit_y = self._icon_y + (self._icon_height - unit_height) // 2
         self._graph_y = _place(y, height, top, geom.graph_offset, geom.graph_height)
         _check_layout(
             (
                 value_rect,
                 range_rect,
-                (self._icon_x, self._icon_y, geom.icon_size, geom.icon_size),
-                (self._unit_x, self._unit_y, geom.unit_size, geom.unit_size),
+                (self._icon_x, self._icon_y, self._icon_width, self._icon_height),
+                (self._unit_x, self._unit_y, unit_width, unit_height),
                 (x, self._graph_y, width, geom.graph_height),
             ),
             (x, y, width, height),
@@ -548,9 +545,8 @@ class _Quadrant:
             pen = DARK_GRAY
         if icon is not self._icon:
             gfx = self._gfx
-            size = self._geom.icon_size
             gfx.set_pen(self._field)
-            gfx.rectangle(self._icon_x, self._icon_y, size, size)
+            gfx.rectangle(self._icon_x, self._icon_y, self._icon_width, self._icon_height)
             icons_p4.draw_icon(gfx, icon, self._icon_x, self._icon_y, _ICON_SCALE)
             self._icon = icon
             drew = True

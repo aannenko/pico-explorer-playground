@@ -64,7 +64,7 @@ def test_sensors_display_composes_from_config_and_samples_on_the_scheduler(app_m
     display = app_module._build_sensors_display(panel, tick_scheduler, _Reader(), _Clock())
     display.initialize()
     assert icons.ICON_THERMO_ORANGE in blits
-    assert ("text", ("26.0", 4, 62), {"scale": 3}) in panel.calls
+    assert ("text", ("26.0", 8, 54), {"scale": 3}) in panel.calls
 
     tick_scheduler.start()
     tick = timers[0].init_calls[0]["callback"]
@@ -72,4 +72,4 @@ def test_sensors_display_composes_from_config_and_samples_on_the_scheduler(app_m
         tick(None)
     panel.calls.clear()
     display.render()
-    assert ("rectangle", (0, 1, 119, 39), {}) in panel.calls
+    assert ("rectangle", (0, 1, 119, 23), {}) in panel.calls

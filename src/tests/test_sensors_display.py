@@ -34,7 +34,7 @@ _FIELDS = (ORANGE, PINK, SKY, GREEN)
 _SHADES = (ORANGE_SHADE, PINK_SHADE, SKY_SHADE, GREEN_SHADE)
 # (x, y, width, height) per quadrant, in metric order.
 _QUADRANTS = ((0, 0, 119, 119), (122, 0, 118, 119), (0, 122, 119, 118), (122, 122, 118, 118))
-_GRAPH_ROWS = ((1, 39), (1, 39), (201, 239), (201, 239))
+_GRAPH_ROWS = ((1, 23), (1, 23), (217, 239), (217, 239))
 _GRAPH_COLUMNS = 119
 # bitmap8 glyphs with ink in the cell's bottom row, read off pimoroni-pico's font8_data.cpp.
 _DESCENDERS = ",;gjpqy"
@@ -224,9 +224,35 @@ def test_format_badge() -> None:
 
 def test_geometry_matches_the_approved_design() -> None:
     geom = _Rig().geom
-    assert geom.graph_height == 39
-    assert geom.badge_rects == ((105, 91, 30, 14), (89, 109, 63, 21), (91, 134, 58, 16))
-    assert geom.badge_r == 48
+    assert geom.graph_height == 23
+    assert geom.badge_rects == ((105, 87, 30, 14), (89, 109, 63, 21), (91, 138, 58, 16))
+    assert geom.badge_r == 54
+
+
+def test_texts_and_icons_keep_8_px_from_each_other_the_edges_and_the_gutter(blits) -> None:
+    rig = _Rig()
+    rig.display.initialize()
+    texts = {text: (x, y) for text, x, y, _scale, _pen in _texts(rig.gfx)}
+    y = {text: text_y for text, (_x, text_y) in texts.items()}
+    blit_xy = {icon: (x, icon_y) for icon, x, icon_y, _scale in blits}
+    thermo_x, thermo_y = blit_xy[icons.ICON_THERMO_GREEN]
+    thermo_width = icons.ICON_THERMO_GREEN[0] * 2
+    thermo_height = icons.ICON_THERMO_GREEN[1] * 2
+    value_ink_rows = 7 * 3
+    label_ink_rows = 7 * 2
+
+    assert {
+        y["19.0..21.5"] - (_GRAPH_ROWS[0][1] + 1),
+        y["20.1"] - (y["19.0..21.5"] + label_ink_rows),
+        thermo_y - (y["20.1"] + value_ink_rows),
+        _QUADRANTS[0][3] - (thermo_y + thermo_height),
+        blit_xy[icons.UNIT_CELSIUS][0] - (thermo_x + thermo_width),
+        y["13:08"] - (y["Mon"] + label_ink_rows),
+        y["2 Nov"] - (y["13:08"] + value_ink_rows),
+        texts["20.1"][0],
+        thermo_x,
+        240 - (texts["1013"][0] + bitmap8_width("1013", 3)),
+    } == {8}
 
 
 def test_history_holds_the_widest_graph_and_the_narrowest_spans_24_hours() -> None:
@@ -236,7 +262,7 @@ def test_history_holds_the_widest_graph_and_the_narrowest_spans_24_hours() -> No
     assert 118 * geom.ticks_per_commit * 500 >= 24 * 3600 * 1000 > 118 * (geom.ticks_per_commit - 1) * 500
 
 
-def test_badge_clear_rects_stay_inside_the_ring_with_two_pixels_to_spare() -> None:
+def test_badge_clear_rects_stay_inside_the_ring_with_five_pixels_to_spare() -> None:
     geom = _Rig().geom
     inner_r = geom.badge_r - 4
 
@@ -244,9 +270,9 @@ def test_badge_clear_rects_stay_inside_the_ring_with_two_pixels_to_spare() -> No
         x, y, w, h = rect
         return {(px, py) for px in range(x - 1, x + w + 1) for py in range(y - 1, y + h + 1)}
 
-    inside = circle_pixels(120, 120, inner_r - 2)
+    inside = circle_pixels(120, 120, inner_r - 5)
     assert all(margin_pixels(rect) <= inside for rect in geom.badge_rects)
-    smaller = circle_pixels(120, 120, inner_r - 3)
+    smaller = circle_pixels(120, 120, inner_r - 6)
     assert not all(margin_pixels(rect) <= smaller for rect in geom.badge_rects)
 
 
@@ -299,8 +325,8 @@ def test_first_frame_paints_fields_then_the_badge_ring_and_pushes_once() -> None
     assert fields == list(_QUADRANTS)
     assert [pen for x, y, w, h, pen in _rects(rig.gfx) if (x, y, w, h) in _QUADRANTS] == list(_FIELDS)
     circles = [(args, pen) for name, args, pen in draws if name == "circle"]
-    assert circles == [((120, 120, 48), BLACK), ((120, 120, 46), DARK_GRAY), ((120, 120, 44), BLACK)]
-    assert draws.index(("circle", (120, 120, 48), BLACK)) > max(
+    assert circles == [((120, 120, 54), BLACK), ((120, 120, 52), DARK_GRAY), ((120, 120, 50), BLACK)]
+    assert draws.index(("circle", (120, 120, 54), BLACK)) > max(
         draws.index(("rectangle", quadrant, field)) for quadrant, field in zip(_QUADRANTS, _FIELDS)
     )
     assert [c for c in rig.gfx.calls if c[0] == "update"] == [("update", (), {})]
@@ -311,20 +337,20 @@ def test_first_frame_texts_align_to_their_quadrants_outer_margins() -> None:
     rig.display.initialize()
 
     def right(text: str, scale: int) -> int:
-        return 236 - bitmap8_width(text, scale)
+        return 232 - bitmap8_width(text, scale)
 
     assert set(_texts(rig.gfx)) == {
-        ("Mon", 105, 91, 2, GRAY),
+        ("Mon", 105, 87, 2, GRAY),
         ("13:08", 90, 109, 3, WHITE),
-        ("2 Nov", 97, 134, 2, GRAY),
-        ("20.1", 4, 62, 3, BLACK),
-        ("19.0..21.5", 4, 44, 2, DARK_GRAY),
-        ("1013", right("1013", 3), 62, 3, BLACK),
-        ("1011..1013", right("1011..1013", 2), 44, 2, DARK_GRAY),
-        ("47.0", 4, 158, 3, BLACK),
-        ("45.0..49.0", 4, 183, 2, DARK_GRAY),
-        ("312", right("312", 3), 158, 3, BLACK),
-        ("250..312", right("250..312", 2), 183, 2, DARK_GRAY),
+        ("2 Nov", 97, 138, 2, GRAY),
+        ("20.1", 8, 54, 3, BLACK),
+        ("19.0..21.5", 8, 32, 2, DARK_GRAY),
+        ("1013", right("1013", 3), 54, 3, BLACK),
+        ("1011..1013", right("1011..1013", 2), 32, 2, DARK_GRAY),
+        ("47.0", 8, 166, 3, BLACK),
+        ("45.0..49.0", 8, 195, 2, DARK_GRAY),
+        ("312", right("312", 3), 166, 3, BLACK),
+        ("250..312", right("250..312", 2), 195, 2, DARK_GRAY),
     }
 
 
@@ -332,14 +358,14 @@ def test_first_frame_icons_sit_on_the_outer_margin_and_units_inside_them(blits) 
     _Rig().display.initialize()
 
     assert blits == [
-        (icons.UNIT_CELSIUS, 40, 95, 2),
-        (icons.UNIT_MBAR, 184, 95, 2),
-        (icons.UNIT_PERCENT, 40, 134, 2),
-        (icons.UNIT_KOHM, 184, 134, 2),
-        (icons.ICON_THERMO_GREEN, 4, 85, 2),
-        (icons.ICON_GAUGE_HIGH, 204, 85, 2),
-        (icons.ICON_DROP_MED, 4, 124, 2),
-        (icons.ICON_MASK_GREEN, 204, 124, 2),
+        (icons.UNIT_CELSIUS, 36, 90, 2),
+        (icons.UNIT_MBAR, 180, 89, 2),
+        (icons.UNIT_PERCENT, 38, 138, 2),
+        (icons.UNIT_KOHM, 182, 137, 2),
+        (icons.ICON_THERMO_GREEN, 8, 83, 2),
+        (icons.ICON_GAUGE_HIGH, 204, 83, 2),
+        (icons.ICON_DROP_MED, 8, 130, 2),
+        (icons.ICON_MASK_GREEN, 206, 130, 2),
     ]
 
 
@@ -376,8 +402,8 @@ def test_changed_value_redraws_only_its_cell() -> None:
     rig.reader.reading = (20.2, 1013.0, 47.0, 312.0, "Stable")
     rig.display.render()
 
-    assert _rects(rig.gfx) == [(4, 62, 63, 21, ORANGE)]
-    assert _texts(rig.gfx) == [("20.2", 4, 62, 3, BLACK)]
+    assert _rects(rig.gfx) == [(8, 54, 63, 21, ORANGE)]
+    assert _texts(rig.gfx) == [("20.2", 8, 54, 3, BLACK)]
     assert rig.gfx.calls[-1] == ("update", (), {})
 
 
@@ -387,16 +413,16 @@ def test_band_crossing_swaps_only_that_quadrants_icon(blits) -> None:
 
     rig.reader.reading = (25.0, 1013.0, 47.0, 312.0, "Stable")
     rig.display.render()
-    assert blits == [(icons.ICON_THERMO_ORANGE, 4, 85, 2)]
-    assert (4, 85, 32, 32, ORANGE) in _rects(rig.gfx)
+    assert blits == [(icons.ICON_THERMO_ORANGE, 8, 83, 2)]
+    assert (8, 83, 20, 28, ORANGE) in _rects(rig.gfx)
 
     blits.clear()
     rig.reader.reading = (25.5, 1030.0, 75.0, 400.0, "Stable")
     rig.display.render()
     assert blits == [
-        (icons.ICON_GAUGE_MAX, 204, 85, 2),
-        (icons.ICON_DROP_MAX, 4, 124, 2),
-        (icons.ICON_MASK_BLUE, 204, 124, 2),
+        (icons.ICON_GAUGE_MAX, 204, 83, 2),
+        (icons.ICON_DROP_MAX, 8, 130, 2),
+        (icons.ICON_MASK_BLUE, 206, 130, 2),
     ]
 
 
@@ -404,8 +430,8 @@ def test_commit_redraws_every_graph_once() -> None:
     rig = _Rig().entered()
     rig.history.commit_count += 1
     rig.display.render()
-    graph_clears = [(x, y, w, h) for x, y, w, h, pen in _rects(rig.gfx) if w > 1 and h == 39]
-    assert graph_clears == [(0, 1, 119, 39), (122, 1, 118, 39), (0, 201, 119, 39), (122, 201, 118, 39)]
+    graph_clears = [(x, y, w, h) for x, y, w, h, pen in _rects(rig.gfx) if w > 1 and h == 23]
+    assert graph_clears == [(0, 1, 119, 23), (122, 1, 118, 23), (0, 217, 119, 23), (122, 217, 118, 23)]
 
     rig.gfx.calls.clear()
     rig.display.render()
@@ -440,7 +466,7 @@ def test_line_joins_each_point_to_the_previous_column() -> None:
 def test_steady_history_plots_mid_height() -> None:
     rig = _Rig(history=_history(temp=[21.0, 21.0, 21.0]))
     rig.display.initialize()
-    assert {top for top, _bottom in _columns(rig.gfx, ORANGE_SHADE).values()} == {20}
+    assert {top for top, _bottom in _columns(rig.gfx, ORANGE_SHADE).values()} == {12}
 
 
 def test_gas_plots_on_a_log_scale() -> None:
@@ -458,7 +484,7 @@ def test_right_quadrant_ignores_the_oldest_sample_its_narrower_graph_drops() -> 
 
     assert 0 in _columns(rig.gfx, ORANGE_SHADE)
     assert min(_columns(rig.gfx, PINK_SHADE)) == 122
-    ranges = [text for text, _x, y, _scale, _pen in _texts(rig.gfx) if y == 44]
+    ranges = [text for text, _x, y, _scale, _pen in _texts(rig.gfx) if y == 32]
     assert "20.0..30.0" in ranges
     assert not any("1100" in text for text in ranges)
 
@@ -468,7 +494,7 @@ def test_log_scale_window_without_positive_samples_draws_no_graph() -> None:
     rig.display.initialize()
 
     assert _columns(rig.gfx, GREEN_SHADE) == {}
-    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 183] == ["0.0..0.0"]
+    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 195] == ["0.0..0.0"]
 
 
 def test_points_land_within_half_a_row_of_their_exact_height() -> None:
@@ -501,18 +527,18 @@ def test_range_widens_to_a_live_reading_beyond_the_history_and_no_further() -> N
     rig = _Rig().entered()
     rig.reader.reading = (23.4, 1013.0, 47.0, 312.0, "Stable")
     rig.display.render()
-    assert ("19.0..23.4", 4, 44, 2, DARK_GRAY) in _texts(rig.gfx)
+    assert ("19.0..23.4", 8, 32, 2, DARK_GRAY) in _texts(rig.gfx)
 
     rig.gfx.calls.clear()
     rig.reader.reading = (21.0, 1013.0, 47.0, 312.0, "Stable")
     rig.display.render()
-    assert _texts(rig.gfx) == [("21.0", 4, 62, 3, BLACK)]
+    assert _texts(rig.gfx) == [("21.0", 8, 54, 3, BLACK)]
 
 
 def test_a_range_end_shows_what_its_reading_showed() -> None:
     rig = _Rig(history=_history(press=[1013.0, 1014.53, 1012.0]))
     rig.display.initialize()
-    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 44] == ["1012..1015"]
+    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 32] == ["1012..1015"]
 
 
 # Gas warm-up
@@ -523,9 +549,9 @@ def test_warming_gas_shows_placeholders_keeps_the_default_icon_and_hides_its_gra
     rig.display.initialize()
 
     texts = _texts(rig.gfx)
-    assert ("--", 215, 158, 3, DARK_GRAY) in texts
-    assert ("warming...", 148, 183, 2, DARK_GRAY) in texts
-    assert (icons.ICON_MASK_ORANGE, 204, 124, 2) in blits
+    assert ("--", 211, 166, 3, DARK_GRAY) in texts
+    assert ("warming...", 144, 195, 2, DARK_GRAY) in texts
+    assert (icons.ICON_MASK_ORANGE, 206, 130, 2) in blits
     assert _columns(rig.gfx, GREEN_SHADE) == {}
 
 
@@ -539,7 +565,7 @@ def test_gas_icon_holds_while_warming_then_catches_up(blits) -> None:
 
     rig.reader.reading = (20.1, 1013.0, 47.0, 400.0, "Stable")
     rig.display.render()
-    assert blits == [(icons.ICON_MASK_BLUE, 204, 124, 2)]
+    assert blits == [(icons.ICON_MASK_BLUE, 206, 130, 2)]
 
 
 def test_gas_turning_invalid_clears_its_graph_once() -> None:
@@ -547,8 +573,8 @@ def test_gas_turning_invalid_clears_its_graph_once() -> None:
     rig.reader.reading = _WARMING
     rig.display.render()
 
-    assert (122, 201, 118, 39, GREEN) in _rects(rig.gfx)
-    assert ("warming...", 148, 183, 2, DARK_GRAY) in _texts(rig.gfx)
+    assert (122, 217, 118, 23, GREEN) in _rects(rig.gfx)
+    assert ("warming...", 144, 195, 2, DARK_GRAY) in _texts(rig.gfx)
 
     rig.gfx.calls.clear()
     rig.history.commit_count += 1
@@ -563,7 +589,7 @@ def test_gas_turning_valid_redraws_its_graph_without_waiting_for_a_commit() -> N
     rig.display.render()
 
     assert sorted(_columns(rig.gfx, GREEN_SHADE)) == [237, 238, 239]
-    assert ("250..312", 236 - bitmap8_width("250..312", 2), 183, 2, DARK_GRAY) in _texts(rig.gfx)
+    assert ("250..312", 232 - bitmap8_width("250..312", 2), 195, 2, DARK_GRAY) in _texts(rig.gfx)
 
 
 def test_gas_turning_valid_backfills_a_nan_newest_sample_once() -> None:

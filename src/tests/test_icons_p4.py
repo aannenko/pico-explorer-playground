@@ -71,7 +71,7 @@ def test_pixels_sharing_a_slot_set_its_pen_once_even_across_a_transparent_gap() 
 def test_real_icon_decodes_within_bounds_and_palette() -> None:
     gfx = FakeGfx()
     w, h, _blob = _icons_data.ICON_THERMO_RED
-    assert (w, h) == (16, 16)
+    assert (w, h) == (10, 14)
     icons_p4.draw_icon(gfx, _icons_data.ICON_THERMO_RED, x=0, y=0, scale=2)
     pens = [c[1] for c in gfx.calls if c[0] == "set_pen"]
     rects = [c for c in gfx.calls if c[0] == "rectangle"]
