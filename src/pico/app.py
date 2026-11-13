@@ -34,7 +34,7 @@ from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.network_upkeep import NetworkUpkeep
 from services.pimoroni_bme690 import PimoroniBME690
-from services.ring_history import RingHistory
+from services.sample_history import SampleHistory
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
 from services.weather_service import WeatherService
@@ -157,8 +157,8 @@ def _build_sensors_display(
         label_text_scale=_SECONDARY_TEXT_SCALE,
         tick_period_ms=tick_scheduler.tick_period_ms,
     )
-    history = RingHistory(
-        bme690_reader.read,
+    history = SampleHistory(
+        lambda: sensors.encode_reading(bme690_reader.read()),
         metric_count=len(_SENSOR_BANDS_KEYS),
         capacity=geometry.graph_columns,
         ticks_per_commit=geometry.ticks_per_commit,

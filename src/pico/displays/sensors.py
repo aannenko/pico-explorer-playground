@@ -1,6 +1,8 @@
 import math
 import time
+from array import array
 
+import micropython
 from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
@@ -20,7 +22,7 @@ from displays.palette import (
     WHITE,
 )
 from displays.shared import _icons_data, icons_p4
-from services.ring_history import RingHistory
+from services.sample_history import MISSING, SampleHistory
 
 
 _HISTORY_MS = const(24 * 3600 * 1000)
@@ -44,6 +46,12 @@ _BADGE_RING_PX = const(2)
 _BADGE_BORDER_PX = const(2)
 _GRAPH_PAD_PCT = const(8)
 _TYPICAL_INDOOR_BAND_INDEX = const(1)
+# A linear metric's history samples count fifths of its last displayed digit (0.02 °C, 0.2 hPa), finer than a
+# graph's pixels.  Keep the count odd: then every display rounding boundary lies halfway between two samples, so a
+# range end read back from them shows what its reading showed.  On a log scale, samples count hundred-thousandths
+# of a natural log, which seldom changes a range end's last digit.
+_SAMPLES_PER_DIGIT = const(5)
+_LOG_UNITS = const(100000)
 
 # _TextCell alignments: how many halves of the spare width go left of the text.
 _ALIGN_LEFT = const(0)
@@ -159,18 +167,53 @@ def _band_index(value: float, edges: tuple[float, float, float]) -> int:
     return 3
 
 
-def _graph_bounds(lo: float, hi: float, min_span: float) -> tuple[float, float]:
+def _graph_bounds(lo: int, hi: int, min_span: int) -> tuple[int, int]:
     """Return the plotted bounds for samples spanning ``lo``..``hi``.
 
     A span under ``min_span`` widens about its middle to ``min_span``, so a steady reading plots as a level
-    line rather than magnified noise; then each end gains ``_GRAPH_PAD_PCT`` % of the span.
+    line rather than magnified noise; then each end gains ``_GRAPH_PAD_PCT`` % of the span, rounded down.
+    ``min_span`` must be positive.
     """
     span = hi - lo
     if span < min_span:
-        lo -= (min_span - span) / 2
+        lo -= (min_span - span) // 2
         span = min_span
-    pad = span * _GRAPH_PAD_PCT / 100
+    pad = span * _GRAPH_PAD_PCT // 100
     return lo - pad, lo + span + pad
+
+
+def _units(decimals: int, log_scale: bool) -> int:
+    """Return how many sample steps make one unit of a metric shown with ``decimals`` places, or one natural log on a
+    log scale."""
+    if log_scale:
+        return _LOG_UNITS
+    return _SAMPLES_PER_DIGIT * 10**decimals
+
+
+def _encode(value: float, decimals: int, log_scale: bool) -> int:
+    """Return ``value``, a reading shown with ``decimals`` places, as a history sample: ``MISSING`` for NaN, and on a
+    log scale for a non-positive value."""
+    if log_scale:
+        if not value > 0:
+            return MISSING
+        value = math.log(value)
+    elif value != value:
+        return MISSING
+    return round(value * _units(decimals, log_scale))
+
+
+def _decode(sample: int, decimals: int, log_scale: bool) -> float:
+    """Return the reading ``sample`` stands for, which ``_encode`` made with the same ``decimals`` and ``log_scale``;
+    ``sample`` must not be ``MISSING``."""
+    value = sample / _units(decimals, log_scale)
+    if log_scale:
+        return math.exp(value)
+    return value
+
+
+def encode_reading(reading: tuple[float, float, float, float, str]) -> tuple[int, int, int, int]:
+    """Return ``reading``'s metrics as the samples ``Display`` plots from its ``SampleHistory``."""
+    return tuple(_encode(reading[i], _METRICS[i][2], _METRICS[i][-1]) for i in range(len(_METRICS)))
 
 
 def _format_badge(local_epoch: int) -> tuple[str, str, str]:
@@ -380,24 +423,29 @@ class _Quadrant:
     """One metric's quadrant: field, band icon, unit, value, range and graph, and what it last drew.
 
     From the gutter outward it stacks the icon and unit, the value, the range and the graph; a right-hand
-    quadrant aligns them to the panel's right edge.  Raises ``RuntimeError`` if they overlap each other or the
-    badge, or leave the quadrant.
+    quadrant aligns them to the panel's right edge.  It plots the newest samples of ``samples``, its metric's
+    ``SampleHistory`` array of ``encode_reading`` samples.  Raises ``RuntimeError`` if its elements overlap each
+    other or the badge, or leave the quadrant, and ``ValueError`` if ``samples`` holds fewer samples than the
+    graph has columns.
     """
 
-    def __init__(self, geom: Geometry, metric_index: int, band_edges: tuple[float, float, float]) -> None:
+    def __init__(
+        self, geom: Geometry, metric_index: int, band_edges: tuple[float, float, float], samples: array
+    ) -> None:
         (
             self._unit,
             self._icons,
             self._decimals,
             self._field,
             self._shade,
-            self._min_span,
+            min_span,
             self._log_scale,
         ) = _METRICS[metric_index]
+        self._min_span = round(min_span * _units(self._decimals, self._log_scale))
         self._geom = geom
         self._gfx = geom.pico_graphics
-        self._metric_index = metric_index
         self._band_edges = band_edges
+        self._samples = samples
 
         col = metric_index & 1
         row = metric_index >> 1
@@ -407,6 +455,8 @@ class _Quadrant:
         self._y = y
         self._width = width
         self._height = height
+        if len(samples) < width:
+            raise ValueError("sensors: the history holds fewer samples than a graph has columns")
         right = col == 1
         # Offsets run from the gutter, which is a top quadrant's bottom edge.
         top = row == 0
@@ -444,7 +494,6 @@ class _Quadrant:
         self._range_cell = _TextCell(self._gfx, range_rect, geom.label_text_scale, align, self._field)
         self._icon: tuple[int, int, bytes] | None = None
         self._valid: bool | None = None
-        self._commit_count = -1
         self._range_lo: float | None = None
         self._range_hi: float | None = None
 
@@ -458,45 +507,37 @@ class _Quadrant:
         self._range_cell.forget()
         self._icon = None
         self._valid = None
-        self._commit_count = -1
         self._range_lo = None
         self._range_hi = None
 
-    def update(self, value: float, history: RingHistory, commit_count: int, reading_changed: bool) -> bool:
-        """Draw what changed for the live ``value`` and the history; return whether anything was drawn.
+    def show(self, value: float, history_changed: bool) -> bool:
+        """Draw what changed for the live ``value``, and for the history if ``history_changed``; return whether
+        anything was drawn.
 
         A NaN ``value`` means the sensor is warming up: the quadrant then shows a placeholder, keeps its icon,
-        hides its graph and says so in its range.  ``commit_count`` is ``history.commit_count``, and
-        ``reading_changed`` must be true whenever ``value`` may differ from the previous call's.
+        hides its graph and says so in its range.
         """
         valid = value == value
         drew = False
-        if valid:
-            if self._valid is not True:
+        if valid != self._valid:
+            self._valid = valid
+            drew = True
+            if valid:
                 # Backfill the newest sample once the value turns valid rather than at the next commit.
                 # Entering the view also gets here and must keep a valid committed sample.
-                newest = history.value_at(self._metric_index, 0)
-                if newest != newest:  # NaN
-                    history.update_latest(self._metric_index, value)
-                self._replace_graph(history)
-                drew = True
-            elif commit_count != self._commit_count:
-                self._replace_graph(history)
-                drew = True
-        elif self._valid is not False:
-            self._clear_graph()
-            self._range_lo = None
-            self._range_hi = None
-            self._range_cell.write(_WARMING_TEXT, DARK_GRAY)
+                samples = self._samples
+                if samples[-1] == MISSING:
+                    samples[-1] = _encode(value, self._decimals, self._log_scale)
+                self._replace_graph()
+            else:
+                self._clear_graph()
+                self._range_lo = None
+                self._range_hi = None
+                self._range_cell.write(_WARMING_TEXT, DARK_GRAY)
+        elif valid and history_changed:
+            self._replace_graph()
             drew = True
-        self._valid = valid
-        self._commit_count = commit_count
-        if reading_changed and self._write_reading(value):
-            drew = True
-        return drew
 
-    def _write_reading(self, value: float) -> bool:
-        valid = value == value
         if valid:
             icon = self._icons[_band_index(value, self._band_edges)]
             text = _format_value(value, self._decimals)
@@ -505,7 +546,6 @@ class _Quadrant:
             icon = self._icon if self._icon is not None else self._icons[_TYPICAL_INDOOR_BAND_INDEX]
             text = _PLACEHOLDER_TEXT
             pen = DARK_GRAY
-        drew = False
         if icon is not self._icon:
             gfx = self._gfx
             size = self._geom.icon_size
@@ -516,21 +556,19 @@ class _Quadrant:
             drew = True
         if self._value_cell.write(text, pen):
             drew = True
-        if valid and self._widen_range(value):
-            drew = True
-        return drew
 
-    def _widen_range(self, value: float) -> bool:
-        """Widen the range to take in ``value``: a live reading can lead the history by a commit period."""
-        lo = self._range_lo
-        hi = self._range_hi
-        if lo is not None and lo <= value <= hi:
-            return False
-        if lo is None or value < lo:
-            lo = value
-        if hi is None or value > hi:
-            hi = value
-        return self._write_range(lo, hi)
+        if valid:
+            # Widen the range to take in the reading: a live reading can lead the history by a commit period.
+            lo = self._range_lo
+            hi = self._range_hi
+            if lo is None or value < lo or value > hi:
+                if lo is None or value < lo:
+                    lo = value
+                if hi is None or value > hi:
+                    hi = value
+                if self._write_range(lo, hi):
+                    drew = True
+        return drew
 
     def _write_range(self, lo: float, hi: float) -> bool:
         self._range_lo = lo
@@ -539,74 +577,90 @@ class _Quadrant:
             _format_value(lo, self._decimals) + _RANGE_SEPARATOR + _format_value(hi, self._decimals), DARK_GRAY
         )
 
+    def _write_history_range(self, lo: int, hi: int) -> None:
+        """Show the range of history samples ``lo``..``hi``, or a blank range when ``hi`` is ``MISSING``."""
+        if hi == MISSING:
+            self._range_lo = None
+            self._range_hi = None
+            self._range_cell.write("", DARK_GRAY)
+        else:
+            decimals = self._decimals
+            log_scale = self._log_scale
+            self._write_range(_decode(lo, decimals, log_scale), _decode(hi, decimals, log_scale))
+
     def _clear_graph(self) -> None:
         self._gfx.set_pen(self._field)
         self._gfx.rectangle(self._x, self._graph_y, self._width, self._geom.graph_height)
 
-    def _replace_graph(self, history: RingHistory) -> None:
+    # Viper: the per-column work is integer-only, so it runs as machine code and allocates nothing.
+    @micropython.viper
+    def _replace_graph(self):  # -> None
         """Plot the newest samples, one per column with the newest at the right edge, and show their range.
 
-        A NaN sample, or a non-positive one on a log scale, leaves its column empty and breaks the line.
+        A ``MISSING`` sample leaves its column empty and breaks the line.
         """
         self._clear_graph()
-        index = self._metric_index
-        log_scale = self._log_scale
-        count = min(history.sample_count, self._width)
-        lo: float | None = None
-        hi: float | None = None
-        for age in range(count):
-            value = history.value_at(index, age)
-            if value != value or (log_scale and value <= 0):
-                continue
-            if lo is None or value < lo:
-                lo = value
-            if hi is None or value > hi:
-                hi = value
-        if lo is None:
-            self._range_lo = None
-            self._range_hi = None
-            self._range_cell.write("", DARK_GRAY)
+        samples = self._samples
+        missing = int(MISSING)
+        end = int(len(samples))
+        first = end - int(self._width)
+        lo = missing
+        hi = missing
+        for i in range(first, end):
+            sample = int(samples[i])
+            if sample != missing:
+                if lo == missing or sample < lo:
+                    lo = sample
+                if sample > hi:
+                    hi = sample
+        self._write_history_range(lo, hi)
+        if hi == missing:
             return
-        self._write_range(lo, hi)
 
-        if log_scale:
-            lo = math.log(lo)
-            hi = math.log(hi)
-        lo, hi = _graph_bounds(lo, hi, self._min_span)
-        top_y = self._graph_y
-        bottom_y = top_y + self._geom.graph_height - 1
-        px_per_unit = (bottom_y - top_y) / (hi - lo)
-        right_x = self._x + self._width - 1
+        bounds = _graph_bounds(lo, hi, self._min_span)
+        lo = int(bounds[0])
+        span = int(bounds[1]) - lo
+        top_y = int(self._graph_y)
+        bottom_y = top_y + int(self._geom.graph_height) - 1
+        # Viper ints are 32-bit, so span * graph height must stay below 2**31 for the y products below.
+        x = int(self._x) - first
         gfx = self._gfx
+        # All fills, then the whole line, so each pen is set once.
+        gfx.set_pen(self._shade)
+        for i in range(first, end):
+            sample = int(samples[i])
+            if sample != missing:
+                # The point sits (sample - lo) / span of the way up from bottom_y to top_y, rounded half up.
+                y = bottom_y - ((sample - lo) * (bottom_y - top_y) + (span >> 1)) // span
+                gfx.rectangle(x + i, y, 1, bottom_y - y + 1)
+        gfx.set_pen(DARK_GRAY)
         prev_y = -1
         # Oldest first, so each column's line reaches back to the previous column's point.
-        for age in range(count - 1, -1, -1):
-            value = history.value_at(index, age)
-            if value != value or (log_scale and value <= 0):
+        for i in range(first, end):
+            sample = int(samples[i])
+            if sample == missing:
                 prev_y = -1
-                continue
-            if log_scale:
-                value = math.log(value)
-            y = top_y + round((hi - value) * px_per_unit)
-            x = right_x - age
-            gfx.set_pen(self._shade)
-            gfx.rectangle(x, y, 1, bottom_y - y + 1)
-            line_top_y = y
-            line_bottom_y = y
-            if prev_y >= 0:
-                line_top_y = min(y, prev_y)
-                line_bottom_y = max(y, prev_y)
-            gfx.set_pen(DARK_GRAY)
-            gfx.rectangle(x, line_top_y, 1, line_bottom_y - line_top_y + 1)
-            prev_y = y
+            else:
+                y = bottom_y - ((sample - lo) * (bottom_y - top_y) + (span >> 1)) // span
+                line_top_y = y
+                line_bottom_y = y
+                if prev_y >= 0:
+                    if prev_y < y:
+                        line_top_y = prev_y
+                    else:
+                        line_bottom_y = prev_y
+                gfx.rectangle(x + i, line_top_y, 1, line_bottom_y - line_top_y + 1)
+                prev_y = y
 
 
 class Display(_Display):
     """Sensors view: each BME690 reading in a colour quadrant with its band icon, 24 h range and graph, around a
     date and time badge.
 
-    ``band_edges`` holds each metric's three ascending band edges, in ``get_reading()`` order.  Raises
-    ``RuntimeError`` if ``geometry`` puts a quadrant's elements over each other or the badge, or off the quadrant.
+    ``history``'s sampler must return ``encode_reading`` of a reading.  ``band_edges`` holds each metric's three
+    ascending band edges, in ``get_reading()`` order.  Raises ``RuntimeError`` if ``geometry`` puts a quadrant's
+    elements over each other or the badge, or off the quadrant, and ``ValueError`` if ``history`` holds fewer than
+    ``geometry.graph_columns`` samples per metric.
     """
 
     def __init__(
@@ -614,7 +668,7 @@ class Display(_Display):
         geometry: Geometry,
         get_reading,  # () -> tuple[float, float, float, float, str]
         get_local_time,  # () -> int
-        history: RingHistory,
+        history: SampleHistory,
         band_edges: tuple[tuple[float, float, float], ...],
     ) -> None:
         gfx = geometry.pico_graphics
@@ -623,13 +677,16 @@ class Display(_Display):
         self._get_reading = get_reading
         self._get_local_time = get_local_time
         self._history = history
-        self._quadrants = tuple(_Quadrant(geometry, i, band_edges[i]) for i in range(len(_METRICS)))
+        self._quadrants = tuple(
+            _Quadrant(geometry, i, band_edges[i], history.samples[i]) for i in range(len(_METRICS))
+        )
         self._badge_cells = tuple(
             _TextCell(gfx, geometry.badge_rects[i], geometry.badge_scales[i], _ALIGN_CENTER, BLACK)
             for i in range(len(_BADGE_PENS))
         )
         self._active = False
         self._last_reading: tuple[float, float, float, float, str] | None = None
+        self._commit_count = -1
         self._next_clock_check_ms = 0
 
     def initialize(self) -> None:
@@ -654,6 +711,7 @@ class Display(_Display):
         for cell in self._badge_cells:
             cell.forget()
         self._last_reading = None
+        self._commit_count = -1
         self._next_clock_check_ms = time.ticks_ms()
         self._draw_changes()
         gfx.update()
@@ -669,14 +727,15 @@ class Display(_Display):
         """Draw what changed since the last call; return whether anything was drawn."""
         drew = self._write_clock()
         reading = self._get_reading()
-        reading_changed = reading is not self._last_reading
-        self._last_reading = reading
-        history = self._history
-        commit_count = history.commit_count
-        quadrants = self._quadrants
-        for i in range(len(quadrants)):
-            if quadrants[i].update(reading[i], history, commit_count, reading_changed):
-                drew = True
+        commit_count = self._history.commit_count
+        history_changed = commit_count != self._commit_count
+        if history_changed or reading is not self._last_reading:
+            self._last_reading = reading
+            self._commit_count = commit_count
+            quadrants = self._quadrants
+            for i in range(len(quadrants)):
+                if quadrants[i].show(reading[i], history_changed):
+                    drew = True
         return drew
 
     def _write_clock(self) -> bool:

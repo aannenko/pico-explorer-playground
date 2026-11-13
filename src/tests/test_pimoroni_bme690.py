@@ -91,7 +91,7 @@ def test_read_maps_unstable_status() -> None:
 
 def test_gas_is_nan_while_heater_unstable() -> None:
     # Gas resistance is meaningless during heater warm-up, so it must report NaN
-    # — a real value would enter RingHistory as a spurious history column.  The
+    # — a real value would enter SampleHistory as a spurious history column.  The
     # other metrics stay valid while warming.
     FakeBreakoutBME69X.next_reading = (
         20.0, 100_000.0, 50.0,

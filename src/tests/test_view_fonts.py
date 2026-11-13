@@ -12,6 +12,7 @@ from displays.manager import DisplayManager
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
 from services.countdown_timer import DONE, PAUSED, RUNNING, CountdownTimer
+from services.sample_history import SampleHistory
 
 from _fakes import FakePicoGraphics
 
@@ -68,19 +69,6 @@ class _Reader:
         return _READING + ("Stable",)
 
 
-class _History:
-    def __init__(self, capacity: int) -> None:
-        self.capacity = capacity
-        self.commit_count = 1
-        self.sample_count = 1
-
-    def value_at(self, metric_index: int, age: int) -> float:
-        return _READING[metric_index]
-
-    def update_latest(self, metric_index: int, value: float) -> None:
-        pass
-
-
 def _build_sensors(panel: _Panel, clock: _Clock) -> sensors.Display:
     geom = sensors.Geometry(
         pico_graphics=panel,
@@ -90,11 +78,17 @@ def _build_sensors(panel: _Panel, clock: _Clock) -> sensors.Display:
         label_text_scale=2,
         tick_period_ms=500,
     )
+    reader = _Reader()
     return sensors.Display(
         geometry=geom,
-        get_reading=_Reader().read,
+        get_reading=reader.read,
         get_local_time=clock.now,
-        history=_History(geom.graph_columns),
+        history=SampleHistory(
+            lambda: sensors.encode_reading(reader.read()),
+            metric_count=4,
+            capacity=geom.graph_columns,
+            ticks_per_commit=1,
+        ),
         band_edges=((18.0, 25.0, 29.0), (1000.0, 1013.0, 1025.0), (30.0, 50.0, 70.0), (100.0, 200.0, 350.0)),
     )
 

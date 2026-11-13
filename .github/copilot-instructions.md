@@ -5,17 +5,18 @@ MicroPython app for the Pimoroni Pico Explorer (RP2040), built on PicoGraphics. 
 ## Deployment boundary
 Everything under `src/pico/` is uploaded *verbatim* to the device (MicroPico, `"micropico.syncFolder": "pico"`) and consumes flash, so keep it to runtime code the app actually imports. Everything else lives outside it: host tests → `src/tests/`, build/codegen tooling → `src/tools/`, source art → `src/assets/`, reference data and scratch docs → `src/docs/`. Packages under `src/pico/` are namespace packages (no `__init__.py`).
 
-## Runtime constraints (MicroPython 1.27.0 / RP2040, Pimoroni build)
+## Runtime constraints (MicroPython 1.29.0 / RP2040, Pimoroni v1.29.0-2 build)
 - Display: `PicoGraphics(display=DISPLAY_PICO_EXPLORER)`.
 - Avoid allocations in hot paths (render loop, timer callbacks). Reading `obj.method` as a value allocates a new bound method (calling `obj.method(...)` doesn't), so cache a ref passed repeatedly — on every `schedule(...)`, or to a timer's `init()` per activation — in `__init__` (`self._tick_ref = self._tick`). Bound methods compare and hash by `(self, method)`, not identity (verified on-device). A nested `def` or `lambda` allocates a function object each time it executes, so hot-path helpers live at module or class level, with their caller's emitter decorator (`@micropython.native`).
 - **Timer callbacks are soft** (verified on-device): `machine.Timer` defaults to `hard=False` and no timer here passes `hard=True`, so each firing is queued like a `micropython.schedule(...)` call (dropped silently when the queue is full) and runs on the main thread; it may allocate but should stay short. Firings queued behind a blocking callback (e.g. an HTTP fetch) run back-to-back once it returns, so where they should collapse rather than burst (`TickScheduler`, `PimoroniBME690`, `WifiClient`), the callback only schedules the work behind a `_pending` flag and returns early while it is set — keep that hop. It collapses a backlog; it doesn't space runs apart. `schedule()` raises `RuntimeError` when the queue is full: roll `_pending` back so one failure doesn't wedge the state machine.
 - **Single Python thread:** timer and scheduled callbacks and the main-loop button poll share one thread (no event loop, no background thread), so blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering *and* buttons until it returns. Network fetches use a tick-driven fetch machine (`services/fetch_machine.py`, owned by `services/_event_stream_service.py`) with a short `config.HTTP_TIMEOUT_SEC` per socket operation (DNS lookup isn't covered), not `asyncio`/`_thread` (lwIP isn't multi-core-safe, and rp2 `_thread` runs on core 1 without a GIL, so shared state would race).
 - Prefer `const(...)`; keep math integer where possible.
+- **Viper** (`@micropython.viper`) runs integer work as machine code without allocating, under rules from the MicroPython source and docs: `int(x)` converts only an int (a float raises `TypeError`), a viper function takes positional arguments only, annotations may only be `int`, `uint`, `bool`, `object` or `ptr…` (so a return type goes in a comment: `# -> None`), and native-int arithmetic wraps modulo 2³². `conftest.py`'s `micropython.viper` shim enforces the first two on host but not the wrapping, so bound every intermediate product. Anything else viper rejects surfaces only when the device compiles the module at import, so check it before uploading by compiling the file on the host with the firmware's version of `mpy-cross -march=armv6m` (the `.mpy` isn't deployed). The machine code lives on the GC heap and is larger than the bytecode it replaces, so keep viper to measured hot loops.
 - **Swallowed exceptions:** print them with `utilities.log.log_exception(tag, exc)`, passing a preformatted `tag`.
 - **Allocation traps (verified on-device):** the build's `time` epoch is **1970**, so `time.time()` / `TimeService.now()` exceed the 2³⁰ small-int limit (2026 ≈ 1.78e9) and **heap-allocate a big int every call** — gate wall-clock reads in per-tick / per-render paths behind the alloc-free `time.ticks_ms()`. **Floats are boxed (~16 B)** and `array('f')` re-boxes on each read, so a tuple holding float objects beats an `array('f')` when the values are read more than once. `for … in range(n)` is alloc-free (a `range` object isn't); `enumerate(...)`, list literals, tuples of non-constant values, and float arithmetic each allocate. GC is mark-sweep (no refcounting), so even transient objects accumulate until `gc.collect()` (the steady-state sawtooth).
 - **PEN_P4 framebuffer:** 4-bit indices into a 16-slot palette — half the RGB332 size, freeing the contiguous heap on-device TLS needs. A pen is just its slot index 0-15, and `displays/palette.py` is the single source of the colour language.
 - **Network memory:** HTTPS/TLS *and* large HTTP responses both hit ENOMEM on the fragmented heap (mbedtls needs a ~16 KiB contiguous block; `requests` allocates ~response-size). So Open-Meteo is fetched over **plain HTTP** (public/keyless) with a small `forecast_hours` window — the air-quality body at `forecast_days=2` (~2.5 KiB) failed "allocating 2560 bytes"; ~4 h keeps each body <1 KiB. Bound response size for any new fetch.
-- **Qstr pool (verified on-device):** the device compiles the `.py` source, so every identifier it parses — locals and `_`-prefixed `const` names included — and every str literal of up to 10 bytes is interned for good: its length + 1 bytes, plus a 6-byte slot in a pool that grows by doubling. A full boot fills about 1,120 of the first 1,260 slots, and the next pool is a single 7.7 KB block; check with `micropython.qstr_info()` after the first frame. Indexing or iterating a str interns each one-character result, so test a str with its methods (`startswith`, `isupper`) instead.
+- **Qstr pool (verified on-device):** the device compiles the `.py` source, so every identifier it parses — locals and `_`-prefixed `const` names included — and every str literal of up to 10 bytes is interned for good: its length + 1 bytes, plus a 6-byte slot in a pool that grows by doubling. A full boot fills about 1,180 of the first 1,260 slots. The next pool is a single 7.7 KB block, larger than a booted heap's largest free block (about 3.5 KB: `micropython.mem_info()`'s `max free sz` × 16 B), so crossing 1,260 can raise `MemoryError`; check with `micropython.qstr_info()` after the first frame. Indexing or iterating a str interns each one-character result, so test a str with its methods (`startswith`, `isupper`) instead.
 
 ## Virtual timer budget
 `machine.Timer(-1)` allocates a *virtual* (software) slot; the Pimoroni build has only a small fixed pool (observed ≈ 8–10) and `deinit()` lingers, so rapid create/deinit churn can exhaust it. **Reuse a long-lived `Timer` over creating one per activation; update this table when adding an owner.** If your change introduces a new `machine.Timer` owner, you MUST add a row to the Timer budget table in this file and recount the steady-state total before presenting the code.
@@ -42,7 +43,7 @@ graph TD
     app --> StatusDisplay["StatusDisplay (boot overlay)"]
 
     TickScheduler -- "periodic tick()" --> NetworkUpkeep
-    TickScheduler -- "periodic tick()" --> RingHistory
+    TickScheduler -- "periodic tick()" --> SampleHistory
     TickScheduler -- "periodic tick()" --> WeatherService
     TickScheduler -- "periodic tick()" --> AirService
     TickScheduler -- "tick() per active view" --> DisplayManager
@@ -53,8 +54,8 @@ graph TD
 
     CountdownDisplay --> CountdownTimer --> ExplorerBuzzer
     SensorsDisplay -- "get_reading" --> PimoroniBME690
-    SensorsDisplay --> RingHistory
-    RingHistory -- "sampler = bme690.read" --> PimoroniBME690
+    SensorsDisplay --> SampleHistory
+    SampleHistory -- "sampler = encode_reading(bme690.read())" --> PimoroniBME690
     SensorsDisplay -- "get_local_time" --> TimeService
     CalendarDisplay -- "get_local_time, real_remaining_sec" --> TimeService
     CalendarDisplay --> EventWindow --> scheduling["scheduling/event + event_runs + event_factory + stream"]

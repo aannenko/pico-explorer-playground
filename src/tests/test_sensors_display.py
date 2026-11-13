@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 import displays.sensors as sensors
@@ -18,7 +20,7 @@ from displays.palette import (
     WHITE,
 )
 from displays.shared import _icons_data as icons
-from services.ring_history import RingHistory
+from services.sample_history import MISSING, SampleHistory
 
 from _fakes import FakePicoGraphics, bitmap8_width, circle_pixels
 from conftest import utc_epoch
@@ -33,6 +35,7 @@ _SHADES = (ORANGE_SHADE, PINK_SHADE, SKY_SHADE, GREEN_SHADE)
 # (x, y, width, height) per quadrant, in metric order.
 _QUADRANTS = ((0, 0, 119, 119), (122, 0, 118, 119), (0, 122, 119, 118), (122, 122, 118, 118))
 _GRAPH_ROWS = ((1, 39), (1, 39), (201, 239), (201, 239))
+_GRAPH_COLUMNS = 119
 # bitmap8 glyphs with ink in the cell's bottom row, read off pimoroni-pico's font8_data.cpp.
 _DESCENDERS = ",;gjpqy"
 
@@ -55,29 +58,12 @@ class _Clock:
         return self.now_sec
 
 
-class _History:
-    """``RingHistory`` stand-in holding per-metric samples, newest first.
+def _sampler(reader: _Reader):  # -> () -> tuple[int, int, int, int]
+    return lambda: sensors.encode_reading(reader.read())
 
-    Like the real ring it reports the longest list's length for every metric; a shorter list's missing
-    samples read as NaN.
-    """
 
-    def __init__(self, *samples: list[float]) -> None:
-        self.samples = [list(metric) for metric in samples]
-        self.commit_count = 1
-        self.update_latest_calls: list[tuple[int, float]] = []
-
-    @property
-    def sample_count(self) -> int:
-        return max(len(metric) for metric in self.samples)
-
-    def value_at(self, metric_index: int, age: int) -> float:
-        metric = self.samples[metric_index]
-        return metric[age] if age < len(metric) else _NAN
-
-    def update_latest(self, metric_index: int, value: float) -> None:
-        self.update_latest_calls.append((metric_index, value))
-        self.samples[metric_index][0] = value
+def _gas_sample(kohm: float) -> int:
+    return sensors.encode_reading((20.0, 1013.0, 47.0, kohm, "Stable"))[3]
 
 
 def _history(
@@ -85,20 +71,34 @@ def _history(
     press: list[float] | None = None,
     hum: list[float] | None = None,
     gas: list[float] | None = None,
-) -> _History:
-    return _History(
+) -> SampleHistory:
+    """A history committed from per-metric samples given newest first; a shorter list's older samples are NaN."""
+    metrics = (
         temp if temp is not None else [20.1, 19.0, 21.5],
         press if press is not None else [1013.0, 1011.0, 1012.0],
         hum if hum is not None else [47.0, 45.0, 49.0],
         gas if gas is not None else [312.0, 250.0, 280.0],
     )
+    count = max(len(metric) for metric in metrics)
+    readings = iter(
+        [
+            tuple(metric[age] if age < len(metric) else _NAN for metric in metrics) + ("Stable",)
+            for age in range(count - 1, -1, -1)
+        ]
+    )
+    history = SampleHistory(
+        lambda: sensors.encode_reading(next(readings)), metric_count=4, capacity=_GRAPH_COLUMNS, ticks_per_commit=1
+    )
+    for _ in range(count - 1):
+        history.tick()
+    return history
 
 
 class _Rig:
     def __init__(
         self,
         reading: tuple[float, float, float, float, str] = _READING,
-        history: _History | RingHistory | None = None,
+        history: SampleHistory | None = None,
         reader: _Reader | None = None,
         now: int = _MONDAY_1308,
     ) -> None:
@@ -196,13 +196,21 @@ def test_band_index_puts_a_value_on_an_edge_in_the_band_above() -> None:
 
 
 def test_graph_bounds_pad_a_wide_span() -> None:
-    lo, hi = sensors._graph_bounds(10.0, 20.0, 4.0)
-    assert (lo, hi) == pytest.approx((9.2, 20.8))
+    bounds = sensors._graph_bounds(100, 200, 40)
+    assert bounds == (92, 208)
+    assert all(type(bound) is int for bound in bounds)
 
 
 def test_graph_bounds_widen_a_narrow_span_about_its_middle() -> None:
-    lo, hi = sensors._graph_bounds(20.0, 21.0, 4.0)
-    assert (lo, hi) == pytest.approx((18.18, 22.82))
+    assert sensors._graph_bounds(200, 210, 40) == (182, 228)
+
+
+def test_encode_reading_scales_each_metric_and_gives_missing_for_nan_or_non_positive_gas() -> None:
+    samples = sensors.encode_reading((-5.26, 1013.24, 47.0, 312.0, "Stable"))
+    assert samples == (-263, 5066, 2350, round(math.log(312.0) * 100000))
+    assert all(type(sample) is int for sample in samples)
+    assert sensors.encode_reading((_NAN, 1013.0, 47.0, _NAN, "Unstable"))[::3] == (MISSING, MISSING)
+    assert sensors.encode_reading((20.0, 1013.0, 47.0, 0.0, "Stable"))[3] == MISSING
 
 
 def test_format_badge() -> None:
@@ -349,8 +357,14 @@ def test_first_frame_graphs_end_at_each_quadrants_right_edge_and_fill_to_its_gra
 # Updates
 
 
-def test_render_without_changes_draws_and_pushes_nothing() -> None:
+def test_render_without_changes_draws_and_pushes_nothing(monkeypatch) -> None:
     rig = _Rig().entered()
+
+    def float_math(*_args):
+        raise AssertionError("an unchanged render converted a sample")
+
+    monkeypatch.setattr(sensors, "_encode", float_math)
+    monkeypatch.setattr(sensors, "_decode", float_math)
     rig.display.render()
     rig.reader.reading = tuple(list(_READING))
     rig.display.render()
@@ -450,17 +464,34 @@ def test_right_quadrant_ignores_the_oldest_sample_its_narrower_graph_drops() -> 
 
 
 def test_log_scale_window_without_positive_samples_draws_no_graph() -> None:
-    rig = _Rig(history=_history(gas=[0.0, -1.0]))
+    rig = _Rig(reading=(20.1, 1013.0, 47.0, 0.0, "Stable"), history=_history(gas=[0.0, -1.0]))
     rig.display.initialize()
 
     assert _columns(rig.gfx, GREEN_SHADE) == {}
-    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 183] == ["312..312"]
+    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 183] == ["0.0..0.0"]
+
+
+def test_points_land_within_half_a_row_of_their_exact_height() -> None:
+    temps = [-5.26, -0.04, _NAN, 3.15, -2.71, 0.0, 1.99, _NAN, -4.44]
+    rig = _Rig(history=_history(temp=temps))
+    rig.display.initialize()
+
+    samples = [sensors.encode_reading((t, 1013.0, 47.0, 312.0, "Stable"))[0] for t in reversed(temps)]
+    min_span = rig.display._quadrants[0]._min_span
+    lo, hi = sensors._graph_bounds(min(s for s in samples if s != MISSING), max(samples), min_span)
+    top_y, bottom_y = _GRAPH_ROWS[0]
+    fills = _columns(rig.gfx, ORANGE_SHADE)
+    first_x = 119 - len(samples)
+    assert sorted(fills) == [first_x + i for i, s in enumerate(samples) if s != MISSING]
+    for x, (y, _bottom) in fills.items():
+        exact_y = bottom_y - (samples[x - first_x] - lo) * (bottom_y - top_y) / (hi - lo)
+        assert abs(y - exact_y) <= 0.5
 
 
 def test_any_metric_turning_valid_backfills_a_nan_newest_sample() -> None:
     history = _history(temp=[_NAN, 21.0])
     _Rig(history=history).display.initialize()
-    assert history.update_latest_calls == [(0, 20.1)]
+    assert history.samples[0][-1] == sensors.encode_reading(_READING)[0]
 
 
 # Ranges
@@ -476,6 +507,12 @@ def test_range_widens_to_a_live_reading_beyond_the_history_and_no_further() -> N
     rig.reader.reading = (21.0, 1013.0, 47.0, 312.0, "Stable")
     rig.display.render()
     assert _texts(rig.gfx) == [("21.0", 4, 62, 3, BLACK)]
+
+
+def test_a_range_end_shows_what_its_reading_showed() -> None:
+    rig = _Rig(history=_history(press=[1013.0, 1014.53, 1012.0]))
+    rig.display.initialize()
+    assert [text for text, x, y, _scale, _pen in _texts(rig.gfx) if x > 120 and y == 44] == ["1012..1015"]
 
 
 # Gas warm-up
@@ -532,12 +569,13 @@ def test_gas_turning_valid_redraws_its_graph_without_waiting_for_a_commit() -> N
 def test_gas_turning_valid_backfills_a_nan_newest_sample_once() -> None:
     history = _history(gas=[_NAN])
     rig = _Rig(reading=_WARMING, history=history).entered()
-    assert history.update_latest_calls == []
+    assert history.samples[3][-1] == MISSING
 
     rig.reader.reading = (20.1, 1013.0, 47.0, 250.0, "Stable")
     rig.display.render()
+    rig.reader.reading = (20.1, 1013.0, 47.0, 260.0, "Stable")
     rig.display.render()
-    assert history.update_latest_calls == [(3, 250.0)]
+    assert history.samples[3][-1] == _gas_sample(250.0)
 
 
 def test_entering_while_valid_keeps_the_committed_sample() -> None:
@@ -546,7 +584,7 @@ def test_entering_while_valid_keeps_the_committed_sample() -> None:
     rig.display.initialize()
     rig.display.deinitialize()
     rig.display.initialize()
-    assert history.value_at(3, 0) == 180.0
+    assert history.samples[3][-1] == _gas_sample(180.0)
 
 
 def test_reentry_after_turning_valid_elsewhere_backfills_a_nan_sample() -> None:
@@ -557,22 +595,30 @@ def test_reentry_after_turning_valid_elsewhere_backfills_a_nan_sample() -> None:
 
     rig.reader.reading = (20.1, 1013.0, 47.0, 250.0, "Stable")
     rig.display.initialize()
-    assert history.value_at(3, 0) == 250.0
+    assert history.samples[3][-1] == _gas_sample(250.0)
 
 
-def test_real_history_backfills_its_newest_gas_sample_after_wrapping() -> None:
+def test_a_full_history_fed_by_the_reader_backfills_its_newest_gas_sample() -> None:
     reader = _Reader(_WARMING)
-    history = RingHistory(reader.read, metric_count=4, capacity=3, ticks_per_commit=1)
-    for _ in range(4):
+    history = SampleHistory(_sampler(reader), metric_count=4, capacity=_GRAPH_COLUMNS, ticks_per_commit=1)
+    for _ in range(_GRAPH_COLUMNS + 5):
         history.tick()
     rig = _Rig(reader=reader, history=history).entered()
 
     reader.reading = (20.1, 1013.0, 47.0, 250.0, "Stable")
     rig.display.render()
 
-    assert history.value_at(3, 0) == 250.0
-    assert history.value_at(3, 1) != history.value_at(3, 1)
+    assert history.samples[3][-1] == _gas_sample(250.0)
+    assert history.samples[3][-2] == MISSING
     assert sorted(_columns(rig.gfx, GREEN_SHADE)) == [239]
+
+
+def test_a_history_shorter_than_a_graph_is_refused() -> None:
+    gfx = FakePicoGraphics()
+    geom = sensors.Geometry(gfx, "bitmap8", 8, 3, 2, 500)
+    history = SampleHistory(_sampler(_Reader(_READING)), metric_count=4, capacity=118, ticks_per_commit=1)
+    with pytest.raises(ValueError, match="fewer samples than a graph has columns"):
+        sensors.Display(geom, _Reader(_READING).read, lambda: 0, history, _BANDS)
 
 
 # Badge
@@ -610,6 +656,7 @@ def test_badge_turns_the_date_at_midnight(fake_ticks) -> None:
 
 def _churn(rig: _Rig, fake_ticks: list[int]) -> None:
     """Drive every kind of redraw: values, bands, ranges, commits, gas warm-up and the clock."""
+    widest_samples = sensors.encode_reading((-88.8, -88.8, -88.8, -88.8, "Stable"))
     for reading in (
         (-99.9, 1100.0, 100.0, 50000.0, "Stable"),
         (-12.3, 963.0, 5.5, 75.3, "Stable"),
@@ -618,8 +665,10 @@ def _churn(rig: _Rig, fake_ticks: list[int]) -> None:
     ):
         rig.reader.reading = reading
         rig.history.commit_count += 1
-        for metric in rig.history.samples:
-            metric.insert(0, -88.8)
+        for i in range(len(widest_samples)):
+            metric = rig.history.samples[i]
+            metric[:-1] = metric[1:]
+            metric[-1] = widest_samples[i]
         fake_ticks[0] += 60_000
         rig.clock.now_sec = utc_epoch(2027, 5, 30, 23, 59, 0)
         rig.display.render()

@@ -59,6 +59,15 @@ def test_zero_pixel_drawn_when_transparent_is_nonzero() -> None:
     ]
 
 
+def test_pixels_sharing_a_slot_set_its_pen_once_even_across_a_transparent_gap() -> None:
+    gfx = FakeGfx()
+    # 4x1 icon: 5, 5, 0, 5 -> bytes 0x55 0x05
+    icons_p4.draw_icon(gfx, (4, 1, bytes([0x55, 0x05])), x=0, y=0, scale=1)
+    assert gfx.calls == [
+        ("set_pen", 5), ("rectangle", 0, 0, 1, 1), ("rectangle", 1, 0, 1, 1), ("rectangle", 3, 0, 1, 1),
+    ]
+
+
 def test_real_icon_decodes_within_bounds_and_palette() -> None:
     gfx = FakeGfx()
     w, h, _blob = _icons_data.ICON_THERMO_RED

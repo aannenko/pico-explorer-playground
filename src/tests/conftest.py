@@ -57,8 +57,43 @@ if "micropython" not in sys.modules:
         # In unit tests we default to instantaneous execution.
         callback(arg)
 
+    def _viper_int(value):
+        if not isinstance(value, int):
+            raise TypeError("can't convert %s to int" % type(value).__name__)
+        return int(value)
+
+    class _ViperGlobals(dict):
+        """A viper function's globals: its module's, with ``int`` as viper's cast."""
+
+        def __init__(self, module_globals: dict) -> None:
+            super().__init__(int=_viper_int)
+            self._module_globals = module_globals
+
+        def __missing__(self, name: str):
+            return self._module_globals[name]
+
+    def _viper(func):
+        """Run a viper function as Python, raising where the device would: on keyword arguments, a wrong
+        argument count, a non-int for an ``int`` parameter, or ``int()`` of anything but an int.  Unlike viper,
+        it doesn't wrap ints at 32 bits."""
+        code = func.__code__
+        arg_count = code.co_argcount
+        int_args = [i for i in range(arg_count) if func.__annotations__.get(code.co_varnames[i]) is int]
+        strict = types.FunctionType(code, _ViperGlobals(func.__globals__), func.__name__, None, func.__closure__)
+
+        def call(*args, **kwargs):
+            if kwargs or len(args) != arg_count:
+                raise TypeError("viper functions take exactly their positional arguments")
+            for i in int_args:
+                if not isinstance(args[i], int):
+                    raise TypeError("can't convert %s to int" % type(args[i]).__name__)
+            return strict(*args)
+
+        return call
+
     micropython_stub.const = lambda x: x
     micropython_stub.native = _native
+    micropython_stub.viper = _viper
     micropython_stub.schedule = _schedule
     micropython_stub.mem_info = lambda *_args: None
     sys.modules["micropython"] = micropython_stub
