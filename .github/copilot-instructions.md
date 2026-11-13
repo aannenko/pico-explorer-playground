@@ -3,7 +3,7 @@
 MicroPython app for the Pimoroni Pico Explorer (RP2040), built on PicoGraphics. See `README.md` for layout/setup, `ROADMAP.md` for feature state and design intent, and `src/pico/config_defaults.py` for the config schema.
 
 ## Deployment boundary
-Everything under `src/pico/` is uploaded *verbatim* to the device (MicroPico, `"micropico.syncFolder": "pico"`) and consumes flash, so keep it to runtime code the app actually imports. Everything else lives outside it: host tests → `src/tests/`, build/codegen tooling → `src/tools/`, source art → `src/assets/`, reference data and scratch docs → `src/docs/`. Packages under `src/pico/` are namespace packages (no `__init__.py`).
+Everything under `src/pico/` is uploaded *verbatim* to the device (MicroPico, `"micropico.syncFolder": "pico"`) and consumes flash, so keep it to runtime code the app actually imports. Everything else lives outside it: host tests → `src/tests/`, build/codegen tooling → `src/tools/`, source art → `src/assets/`, reference data and scratch docs → `src/docs/`, double-click launchers → `scripts/`. Packages under `src/pico/` are namespace packages (no `__init__.py`).
 
 ## Runtime constraints (MicroPython 1.29.0 / RP2040, Pimoroni v1.29.0-2 build)
 - Display: `PicoGraphics(display=DISPLAY_PICO_EXPLORER)`.
@@ -93,7 +93,7 @@ graph TD
 - **Scheduling** (`scheduling/`): `Event` is one calendar bar, `EventWindow` a row's view-model, `Stream` a row's event source with its refresh hooks, and `event_runs` builds bars from per-hour samples for the network services.
 - **Network calendar streams** (`services/`): `WeatherService` (precip + UV) and `AirService` (AQI + pollen) subclass `EventStreamService`, which owns when to fetch, backoff, freshness and publishing; a subclass supplies only `_fetch_and_parse` and its config. A row bundles metrics that rarely coincide, and per-hour conflicts resolve at fetch time (`event_runs.best_by_priority`), keeping conflict selection out of the render path.
 - **Stream providers** (`scheduling/providers/`): `work_week` and `waste` (`config.WASTE_SCHEDULE`) generate events on-device. `demo_streams.py` fills the remaining calendar rows and is temporary (see `ROADMAP.md`).
-- **Hardware / assets:** GPIO pins live in `hardware/explorer.py`. Icons are 4-bit palette-indexed blobs in `displays/shared/_icons_data.py`, generated from the per-icon PNGs in `src/assets/*.png` by `src/tools/icons-to-p4.py` and drawn by `displays/shared/icons_p4.py`. The host tools (`icons-to-p4.py`, `palette_cvd_check.py`) import `PALETTE_RGB` from `displays/palette.py` so the colours can't drift, and `palette_cvd_check.py` re-verifies CVD-distinguishability.
+- **Hardware / assets:** GPIO pins live in `hardware/explorer.py`. Icons are 4-bit palette-indexed blobs in `displays/shared/_icons_data.py`, generated from the per-icon PNGs in `src/assets/*.png` by `src/tools/icons-to-p4.py` (`scripts/update-icons.cmd` runs it with these paths) and drawn by `displays/shared/icons_p4.py`. The host tools (`icons-to-p4.py`, `palette_cvd_check.py`) import `PALETTE_RGB` from `displays/palette.py` so the colours can't drift, and `palette_cvd_check.py` re-verifies CVD-distinguishability.
 
 ## Testing
 - Host pytest: `cd src && python -m pytest -q` (no MicroPython runtime needed).
