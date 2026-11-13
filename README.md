@@ -41,3 +41,16 @@ python -m pytest -q
 
 No MicroPython runtime is required on the host; `src/tests/conftest.py`
 provides shims for `machine`, `picographics`, `pimoroni`, etc.
+
+The device compiles each `.py` when it first imports it, and its compiler
+rejects some code CPython accepts, such as a mistyped
+`@micropython.viper` function.  To catch that before uploading, compile
+each module you changed with the `mpy-cross` from `requirements.txt`
+(CI compiles every module under `src/pico/` on each push to `main`):
+
+```sh
+python -m mpy_cross -march=armv6m -o <scratch>/check.mpy pico/displays/sensors.py
+```
+
+Only the compile matters: keep `-o` outside `src/pico/`, because by
+default the `.mpy` lands beside its source and MicroPico uploads it.
