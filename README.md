@@ -19,7 +19,7 @@ by the Explorer's X/Y buttons, with A/B forwarded to the active view.
     gitignored.
 - `src/tests/` — host-side pytest suite; runs under CPython with
   MicroPython stubs from `src/tests/conftest.py`.
-- `scripts/update-icons.cmd` — on Windows, double-click it after editing
+- `src/scripts/update-icons.cmd` — on Windows, double-click it after editing
   an icon in `src/assets/` to regenerate
   `src/pico/displays/shared/_icons_data.py` and list the icons that
   changed.  It runs `src\.venv`'s Python if there is one, else

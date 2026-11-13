@@ -359,7 +359,7 @@ def test_first_frame_icons_sit_on_the_outer_margin_and_units_inside_them(blits) 
 
     assert blits == [
         (icons.UNIT_CELSIUS, 36, 90, 2),
-        (icons.UNIT_MBAR, 180, 89, 2),
+        (icons.UNIT_MBAR, 180, 90, 2),
         (icons.UNIT_PERCENT, 38, 138, 2),
         (icons.UNIT_KOHM, 182, 137, 2),
         (icons.ICON_THERMO_GREEN, 8, 83, 2),
