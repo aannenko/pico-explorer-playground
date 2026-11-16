@@ -47,8 +47,8 @@ class TickScheduler:
 
         Callbacks run from the ``schedule`` queue on the main thread, not in an
         IRQ, so they may allocate but should return quickly: blocking work
-        freezes rendering and buttons.  One that raises skips the rest of that
-        tick's callbacks.
+        freezes rendering and delays button actions.  One that raises skips
+        the rest of that tick's callbacks.
         """
         if callback not in self._subscribers:
             self._subscribers.append(callback)

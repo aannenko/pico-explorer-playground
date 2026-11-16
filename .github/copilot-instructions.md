@@ -9,7 +9,8 @@ Everything under `src/pico/` is uploaded *verbatim* to the device (MicroPico, `"
 - Display: `PicoGraphics(display=DISPLAY_PICO_EXPLORER)`.
 - Avoid allocations in hot paths (render loop, timer callbacks). Reading `obj.method` as a value allocates a new bound method (calling `obj.method(...)` doesn't), so cache a ref passed repeatedly — on every `schedule(...)`, or to a timer's `init()` per activation — in `__init__` (`self._tick_ref = self._tick`). Bound methods compare and hash by `(self, method)`, not identity (verified on-device). A nested `def` or `lambda` allocates a function object each time it executes, so hot-path helpers live at module or class level, with their caller's emitter decorator (`@micropython.native`).
 - **Timer callbacks are soft** (verified on-device): `machine.Timer` defaults to `hard=False` and no timer here passes `hard=True`, so each firing is queued like a `micropython.schedule(...)` call (dropped silently when the queue is full) and runs on the main thread; it may allocate but should stay short. Firings queued behind a blocking callback (e.g. an HTTP fetch) run back-to-back once it returns, so where they should collapse rather than burst (`TickScheduler`, `PimoroniBME690`, `WifiClient`), the callback only schedules the work behind a `_pending` flag and returns early while it is set — keep that hop. It collapses a backlog; it doesn't space runs apart. `schedule()` raises `RuntimeError` when the queue is full: roll `_pending` back so one failure doesn't wedge the state machine.
-- **Single Python thread:** timer and scheduled callbacks and the main-loop button poll share one thread (no event loop, no background thread), so blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering *and* buttons until it returns. Network fetches use a tick-driven fetch machine (`services/fetch_machine.py`, owned by `services/_event_stream_service.py`) with a short `config.HTTP_TIMEOUT_SEC` per socket operation (DNS lookup isn't covered), not `asyncio`/`_thread` (lwIP isn't multi-core-safe, and rp2 `_thread` runs on core 1 without a GIL, so shared state would race).
+- **Single Python thread:** timer and scheduled callbacks and the main loop share one thread (no event loop, no background thread), so blocking work in a `schedule(...)` callback (e.g. an HTTP fetch) freezes rendering and delays button actions until it returns. Network fetches use a tick-driven fetch machine (`services/fetch_machine.py`, owned by `services/_event_stream_service.py`) with a short `config.HTTP_TIMEOUT_SEC` per socket operation (DNS lookup isn't covered), not `asyncio`/`_thread` (lwIP isn't multi-core-safe, and rp2 `_thread` runs on core 1 without a GIL, so shared state would race).
+- **Button hard IRQs** (`services/button_dispatcher.py`) are the one exception: they preempt the main thread anywhere, with the heap locked, so they must not allocate, and any exception there disables that pin's IRQ until the next reset (a soft reset will do). They only latch presses, which the main loop dispatches through `schedule(...)`.
 - Prefer `const(...)`; keep math integer where possible.
 - **Viper** (`@micropython.viper`) runs integer work as machine code without allocating, under rules from the MicroPython source and docs: `int(x)` converts only an int (a float raises `TypeError`), a viper function takes positional arguments only, annotations may only be `int`, `uint`, `bool`, `object` or `ptr…` (so a return type goes in a comment: `# -> None`), and native-int arithmetic wraps modulo 2³². `conftest.py`'s `micropython.viper` shim enforces the first two on host but not the wrapping, so bound every intermediate product. Anything else viper rejects surfaces only when the device compiles the module at import, so run the device compile check (Testing) before uploading. The machine code lives on the GC heap and is larger than the bytecode it replaces, so keep viper to measured hot loops.
 - **Swallowed exceptions:** print them with `utilities.log.log_exception(tag, exc)`, passing a preformatted `tag`.
@@ -36,7 +37,7 @@ Steady state: 3 permanent + ≤1 transient = 4 max.
 graph TD
     main.py --> app["app.build_app"]
     app --> DisplayManager
-    app --> ButtonPoller
+    app --> ButtonDispatcher
     app --> TickScheduler
     app --> NetworkService
     app --> TimeService
@@ -79,8 +80,8 @@ graph TD
     app --> Palette["displays/palette"]
     app --> hardware["hardware/explorer (pins)"]
 
-    ButtonPoller -- "X/Y: cycle views" --> DisplayManager
-    ButtonPoller -- "A/B: forward to active view" --> DisplayManager
+    ButtonDispatcher -- "X/Y: cycle views" --> DisplayManager
+    ButtonDispatcher -- "A/B: forward to active view" --> DisplayManager
 ```
 
 **Patterns** (the non-obvious *why*; mechanics live in the code):

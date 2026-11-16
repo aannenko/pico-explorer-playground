@@ -123,6 +123,9 @@ if "machine" not in sys.modules:
             return None
 
     class _Pin:
+        IRQ_FALLING = 4
+        IRQ_RISING = 8
+
         def __init__(self, pin_id, *args, **kwargs):
             self._pin_id = pin_id
 

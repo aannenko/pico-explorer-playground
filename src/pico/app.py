@@ -28,7 +28,7 @@ from scheduling.providers import waste, work_week
 from scheduling.stream import Stream
 from services.fetch_machine import FetchCoordinator
 from services.air_service import AirService
-from services.button_poller import ButtonPoller
+from services.button_dispatcher import ButtonDispatcher
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
@@ -106,13 +106,13 @@ class App:
         self,
         display_manager: DisplayManager,
         tick_scheduler: TickScheduler,
-        button_poller: ButtonPoller,
+        button_dispatcher: ButtonDispatcher,
         network_service: NetworkService,
         network_upkeep: NetworkUpkeep,
     ) -> None:
         self.display_manager = display_manager
         self.tick_scheduler = tick_scheduler
-        self.button_poller = button_poller
+        self.button_dispatcher = button_dispatcher
         self.network_service = network_service
         self.network_upkeep = network_upkeep
 
@@ -324,16 +324,16 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     display_manager.initialize_current()
     tick_scheduler.register(display_manager.tick)
 
-    button_poller = ButtonPoller(schedule=schedule)
-    button_poller.add(Pin(BUTTON_A_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_a_ref)
-    button_poller.add(Pin(BUTTON_B_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_b_ref)
-    button_poller.add(Pin(BUTTON_X_PIN, Pin.IN, Pin.PULL_UP), display_manager.previous_ref)
-    button_poller.add(Pin(BUTTON_Y_PIN, Pin.IN, Pin.PULL_UP), display_manager.next_ref)
+    button_dispatcher = ButtonDispatcher(schedule=schedule)
+    button_dispatcher.add(Pin(BUTTON_A_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_a_ref)
+    button_dispatcher.add(Pin(BUTTON_B_PIN, Pin.IN, Pin.PULL_UP), display_manager.on_button_b_ref)
+    button_dispatcher.add(Pin(BUTTON_X_PIN, Pin.IN, Pin.PULL_UP), display_manager.previous_ref)
+    button_dispatcher.add(Pin(BUTTON_Y_PIN, Pin.IN, Pin.PULL_UP), display_manager.next_ref)
 
     return App(
         display_manager=display_manager,
         tick_scheduler=tick_scheduler,
-        button_poller=button_poller,
+        button_dispatcher=button_dispatcher,
         network_service=network_service,
         network_upkeep=network_upkeep,
     )
