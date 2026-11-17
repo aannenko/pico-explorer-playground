@@ -25,17 +25,16 @@ from scheduling.event_window import build_event_windows
 from scheduling.providers import waste
 from scheduling.stream import Stream
 from services.fetch_machine import FetchCoordinator
-from services.air_service import AirService
 from services.button_dispatcher import ButtonDispatcher
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
 from services.network_service import NetworkService
 from services.network_upkeep import NetworkUpkeep
+from services.openmeteo_service import OpenMeteoService
 from services.pimoroni_bme690 import PimoroniBME690
 from services.sample_history import SampleHistory
 from services.tick_scheduler import TickScheduler
 from services.time_service import TimeService
-from services.weather_service import WeatherService
 from services.wifi_client import WifiClient
 
 
@@ -49,7 +48,6 @@ _NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
 
 _STREAM_REFRESH_MS = const(30 * 60 * 1000)
 
-# Fetched up to the calendar's horizon; the air-quality client caps its own at the API's maximum.
 _STREAM_FORECAST_HOURS = calendar.HORIZON_SEC // _SEC_PER_HOUR
 # So a warning already in progress shows when it began, if that was within a day.
 _STREAM_PAST_HOURS = const(24)
@@ -250,26 +248,11 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     fetch_coordinator = FetchCoordinator()
     calendar_geometry = _build_calendar_geometry(pico_graphics)
     stream_event_cap = _stream_event_cap(calendar_geometry)
-    weather_service = WeatherService(
+    openmeteo_service = OpenMeteoService(
         latitude=config.LATITUDE,
         longitude=config.LONGITUDE,
         prob_threshold_pct=config.PRECIP_PROB_THRESHOLD_PCT,
         uv_thresholds=config.UV_THRESHOLDS,
-        wifi=wifi_client,
-        coordinator=fetch_coordinator,
-        schedule=schedule,
-        interval_ms=_STREAM_REFRESH_MS,
-        forecast_hours=_STREAM_FORECAST_HOURS,
-        past_hours=_STREAM_PAST_HOURS,
-        utc_offset_sec=time_service.utc_offset_sec,
-        max_events=stream_event_cap,
-        timeout_sec=config.HTTP_TIMEOUT_SEC,
-        tick_scheduler=tick_scheduler,
-    )
-
-    air_service = AirService(
-        latitude=config.LATITUDE,
-        longitude=config.LONGITUDE,
         aqi_thresholds=config.AQI_THRESHOLDS,
         pollen_thresholds=config.POLLEN_THRESHOLDS,
         wifi=wifi_client,
@@ -286,9 +269,7 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
 
     countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
     # Warnings tie in this order: precipitation, UV, AQI, pollen.
-    calendar_display = _build_calendar_display(
-        calendar_geometry, time_service, weather_service.build_streams() + air_service.build_streams()
-    )
+    calendar_display = _build_calendar_display(calendar_geometry, time_service, openmeteo_service.build_streams())
 
     display_manager = DisplayManager(
         displays=[sensors_display, countdown_display, calendar_display],

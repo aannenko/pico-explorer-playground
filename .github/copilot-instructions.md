@@ -45,8 +45,7 @@ graph TD
 
     TickScheduler -- "periodic tick()" --> NetworkUpkeep
     TickScheduler -- "periodic tick()" --> SampleHistory
-    TickScheduler -- "periodic tick()" --> WeatherService
-    TickScheduler -- "periodic tick()" --> AirService
+    TickScheduler -- "periodic tick()" --> OpenMeteoService
     TickScheduler -- "tick() per active view" --> DisplayManager
 
     DisplayManager --> CountdownDisplay
@@ -68,14 +67,10 @@ graph TD
     NetworkService --> WifiClient
     TimeService -- "on_progress (bootstrap only)" --> StatusDisplay
     TimeService --> ntp["utilities/ntp"]
-    WeatherService -- "precip + UV" --> WifiClient
-    AirService -- "AQI + pollen" --> WifiClient
-    WeatherService -- "utc_offset_sec" --> TimeService
-    AirService -- "utc_offset_sec" --> TimeService
-    WeatherService --> EventStreamService["EventStreamService base (fetch_machine: FetchMachine + FetchCoordinator)"]
-    AirService --> EventStreamService
-    WeatherService -- "precip, UV Streams" --> CalendarDisplay
-    AirService -- "AQI, pollen Streams" --> CalendarDisplay
+    OpenMeteoService -- "forecast + air-quality requests" --> WifiClient
+    OpenMeteoService -- "utc_offset_sec" --> TimeService
+    OpenMeteoService --> EventStreamService["EventStreamService base (fetch_machine: FetchMachine + FetchCoordinator)"]
+    OpenMeteoService -- "precip, UV, AQI, pollen Streams" --> CalendarDisplay
 
     app --> providers["scheduling/providers/waste"]
     app --> Palette["displays/palette"]
@@ -94,7 +89,7 @@ graph TD
 - **Time frame:** calendar and event instants are local-epoch seconds. MicroPython's `time.mktime` / `gmtime` have no time zone, so they map local fields to local epoch and back directly; only `TimeService` converts to and from UTC (the RTC holds UTC).
 - **Services** (`services/`) are long-lived, created at startup, independent of display lifecycle. Explorer- / Pimoroni-specific ones use `Explorer*` / `Pimoroni*` names to avoid shadowing built-in MP modules.
 - **Scheduling** (`scheduling/`): `Event` is one calendar event, `EventWindow` a stream's view-model, `Stream` a stream's event source with its refresh hooks, and `event_runs.RunBuilder` joins per-hour warnings into events for the network services, in UTC so hours stay adjacent across DST, converting each event to local time once.
-- **Network calendar streams** (`services/`): `WeatherService` (precipitation, UV) and `AirService` (AQI, pollen) subclass `EventStreamService`, which owns when to fetch, backoff and publishing; a subclass supplies only `_fetch_and_parse`, returning one event list per stream, and its config. One fetch serves several streams (`build_streams()`), which share its generation. Each metric is its own stream coloured by warning level (`palette.STREAM_SEVERITY`), so metrics never compete for an hour. A stream keeps the events not over at the fetch, at most twice the calendar's slot count (`app._stream_event_cap`), as one event an hour would otherwise fill the heap.
+- **Network calendar streams** (`services/`): `OpenMeteoService` (precipitation, UV, AQI, pollen) subclasses `EventStreamService`, which owns when to fetch, backoff and publishing; a subclass supplies only `_fetch_and_parse`, returning one event list per stream, and its config. One fetch serves several streams (`build_streams()`), which share its generation. `OpenMeteoService` serves both Open-Meteo APIs from one instance, as each service instance costs heap, so its two requests share one fetch: either failing publishes nothing. Each metric is its own stream coloured by warning level (`palette.STREAM_SEVERITY`), so metrics never compete for an hour. A stream keeps the events not over at the fetch, at most twice the calendar's slot count (`app._stream_event_cap`), as one event an hour would otherwise fill the heap.
 - **Stream providers** (`scheduling/providers/`): `waste` (`config.WASTE_SCHEDULE`) generates events on-device.
 - **Hardware / assets:** GPIO pins live in `hardware/explorer.py`. Icons are 4-bit palette-indexed blobs in `displays/shared/_icons_data.py`, generated from the per-icon PNGs in `src/assets/*.png` by `src/tools/icons-to-p4.py` (`src/scripts/update-icons.cmd` runs it with these paths) and drawn by `displays/shared/icons_p4.py`. The tool trims each icon to its ink, so layouts align the ink itself and an icon's blank canvas border doesn't matter. The host tools (`icons-to-p4.py`, `palette_cvd_check.py`) import `PALETTE_RGB` from `displays/palette.py` so the colours can't drift, and `palette_cvd_check.py` re-verifies CVD-distinguishability.
 

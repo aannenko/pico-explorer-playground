@@ -30,8 +30,10 @@ leaves them ambiguous.
   - **Waste collection** — a local generator driven by `config`.
   - **Precipitation**, **UV**, **air quality** (European AQI) and **pollen**
     (the dominant species) — warning levels for the past day and the week
-    ahead from two Open-Meteo fetches, adjacent hours of one warning joined at
-    their highest level; disabled until coordinates are set in `config.py`.
+    ahead from Open-Meteo's forecast and air-quality APIs, fetched together,
+    adjacent hours of one warning joined at their highest level; if either
+    request fails, all four keep their last warnings until a retry succeeds.
+    Disabled until coordinates are set in `config.py`.
 
 - **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
   gas resistance) in four colour quadrants around a date and time badge.
