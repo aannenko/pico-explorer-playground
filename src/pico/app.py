@@ -5,12 +5,10 @@ from machine import Pin
 from picographics import PicoGraphics  # type: ignore
 
 import config
-import demo_streams
 from displays import calendar, countdown, ring, sensors
 from displays.manager import DisplayManager
 from displays.palette import (
     BLACK,
-    DARK_GRAY,
     GRAY,
     ORANGE,
     STREAM_COLORS,
@@ -23,8 +21,8 @@ from hardware.explorer import (
     BUTTON_X_PIN,
     BUTTON_Y_PIN,
 )
-from scheduling.event_window import EventWindow, build_event_windows
-from scheduling.providers import waste, work_week
+from scheduling.event_window import build_event_windows
+from scheduling.providers import waste
 from scheduling.stream import Stream
 from services.fetch_machine import FetchCoordinator
 from services.air_service import AirService
@@ -50,21 +48,11 @@ _SECONDARY_TEXT_SCALE = const(2)
 _NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
 
 _STREAM_REFRESH_MS = const(30 * 60 * 1000)
-# Forecast slack beyond the calendar window: covers scroll plus failed retries.
-_STREAM_SLACK_REFRESHES = const(2)
 
-# Derived here because app.py is the one place that sees both the calendar's
-# future window (owned by displays.calendar) and the fetch cadence above.  The
-# extra hour absorbs Open-Meteo's forecast_hours starting at the current hour.
-_STREAM_HORIZON_SEC = (
-    calendar.WINDOW_FUTURE_SEC
-    + _STREAM_SLACK_REFRESHES * (_STREAM_REFRESH_MS // 1000)
-    + _SEC_PER_HOUR
-)
-_STREAM_FORECAST_HOURS = (_STREAM_HORIZON_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
-
-# Without past_hours, that start could leave part of the calendar's past window empty.
-_STREAM_PAST_HOURS = (calendar.WINDOW_PAST_SEC + _SEC_PER_HOUR - 1) // _SEC_PER_HOUR
+# Fetched up to the calendar's horizon; the air-quality client caps its own at the API's maximum.
+_STREAM_FORECAST_HOURS = calendar.HORIZON_SEC // _SEC_PER_HOUR
+# So a warning already in progress shows when it began, if that was within a day.
+_STREAM_PAST_HOURS = const(24)
 
 
 _SENSOR_BANDS_KEYS = (
@@ -173,40 +161,31 @@ def _build_sensors_display(
     )
 
 
-def _build_calendar_display(
-    pico_graphics: PicoGraphics, time_service: TimeService, network_streams: list[Stream]
-) -> calendar.Display:
-    streams = [
-        work_week.build_stream(time_service),
-        waste.build_stream(time_service, config.WASTE_SCHEDULE),
-    ]
-    streams.extend(network_streams)
-    streams.extend(
-        demo_streams.build_demo_streams(time_service, calendar.WINDOW_PAST_SEC)[: calendar.MAX_ROWS - len(streams)]
+def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
+    return calendar.Geometry(
+        pico_graphics=pico_graphics,
+        font=config.FONT,
+        font_height=config.FONT_HEIGHT_PX,
+        header_text_scale=config.TEXT_SCALE,
+        label_text_scale=_SECONDARY_TEXT_SCALE,
     )
 
-    windows = build_event_windows(STREAM_COLORS, streams)
 
+def _stream_event_cap(geometry: calendar.Geometry) -> int:
+    """Return how many events a network stream keeps: the calendar shows at most ``slot_count`` of one stream, and
+    as many more can end before the next fetch replaces them."""
+    return 2 * geometry.slot_count
+
+
+def _build_calendar_display(
+    geometry: calendar.Geometry, time_service: TimeService, warning_streams: list[Stream]
+) -> calendar.Display:
     return calendar.Display(
-        renderer=calendar.Renderer(
-            geometry=calendar.Geometry(
-                pico_graphics=pico_graphics,
-                header_font=config.FONT,
-                header_font_height=config.FONT_HEIGHT_PX,
-                header_text_scale=config.TEXT_SCALE,
-                bar_font=config.FONT,
-                bar_font_height=config.FONT_HEIGHT_PX,
-                bar_text_scale=_SECONDARY_TEXT_SCALE,
-            ),
-            colors=calendar.Colors(
-                background=BLACK,
-                header_text=WHITE,
-                axis_text=WHITE,
-                empty_row=DARK_GRAY,
-                now_line=WHITE,
-            ),
+        geometry=geometry,
+        # The waste stream first, so its events come before warnings that start with them.
+        windows=build_event_windows(
+            STREAM_COLORS, [waste.build_stream(time_service, config.WASTE_SCHEDULE)] + warning_streams
         ),
-        event_windows=windows,
         get_local_time=time_service.now,
         real_remaining_sec=time_service.real_remaining_sec,
     )
@@ -269,6 +248,8 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     )
 
     fetch_coordinator = FetchCoordinator()
+    calendar_geometry = _build_calendar_geometry(pico_graphics)
+    stream_event_cap = _stream_event_cap(calendar_geometry)
     weather_service = WeatherService(
         latitude=config.LATITUDE,
         longitude=config.LONGITUDE,
@@ -280,20 +261,15 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
+        utc_offset_sec=time_service.utc_offset_sec,
+        max_events=stream_event_cap,
         timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,
-    )
-    weather_stream = Stream(
-        weather_service.iter_events(),
-        events_iter_factory=weather_service.iter_events,
-        get_generation=lambda: weather_service.generation,
-        get_status=lambda: weather_service.status,
     )
 
     air_service = AirService(
         latitude=config.LATITUDE,
         longitude=config.LONGITUDE,
-        species=config.POLLEN_SPECIES,
         aqi_thresholds=config.AQI_THRESHOLDS,
         pollen_thresholds=config.POLLEN_THRESHOLDS,
         wifi=wifi_client,
@@ -302,19 +278,16 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
+        utc_offset_sec=time_service.utc_offset_sec,
+        max_events=stream_event_cap,
         timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,
     )
-    air_stream = Stream(
-        air_service.iter_events(),
-        events_iter_factory=air_service.iter_events,
-        get_generation=lambda: air_service.generation,
-        get_status=lambda: air_service.status,
-    )
 
     countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
+    # Warnings tie in this order: precipitation, UV, AQI, pollen.
     calendar_display = _build_calendar_display(
-        pico_graphics, time_service, [weather_stream, air_stream]
+        calendar_geometry, time_service, weather_service.build_streams() + air_service.build_streams()
     )
 
     display_manager = DisplayManager(

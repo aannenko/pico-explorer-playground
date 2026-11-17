@@ -1,349 +1,281 @@
-import micropython
 import time
 
 from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
-from displays.palette import LABEL_FOR_SLOT
-from displays.shared.header import format_header_time, header_fits
+from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, WHITE
+from displays.shared.header import (
+    WEEKDAY_NAMES,
+    WIDEST_TIME_TEXT,
+    format_header_time,
+    header_date_x,
+    header_fits,
+    widest_name,
+)
+from scheduling.event import Event
 from scheduling.event_window import EventWindow
-from scheduling.stream import FRESH
 
-WINDOW_PAST_SEC = const(30 * 60)
-WINDOW_FUTURE_SEC = const(90 * 60)
-WINDOW_TOTAL_SEC = const(WINDOW_PAST_SEC + WINDOW_FUTURE_SEC)
-MAX_ROWS = const(5)
+HORIZON_SEC = const(7 * 24 * 3600)
 
-_HEADER_MARGIN_PX = const(6)
-_AXIS_MARGIN_PX = const(3)
-_BAR_TEXT_MARGIN_PX = const(2)
-_BAR_SEAM_PX = const(1)
-_MIN_LABEL_PX = const(14)
+_SEC_PER_MIN = const(60)
+_SEC_PER_DAY = const(24 * 3600)
+_MIN_PER_HOUR = const(60)
+_HOURS_PER_DAY = const(24)
+_MS_PER_SEC = const(1000)
 
-_SEC_PER_HOUR = const(3600)
-_SEC_PER_QUARTER = const(900)
-_TICK_MARK_HEIGHT_PX = const(4)
-_STATUS_GLYPH_PX = const(4)
+_BODY_MARGIN_PX = const(3)
+# bitmap8's bottom cell row holds only descenders, which labels never use.
+_DESCENDER_ROWS = const(1)
+# Above and below a field's text.
+_FIELD_PAD_PX = const(4)
+# From a field's edges to its texts, and between them.
+_TEXT_INSET_PX = const(6)
+_BAR_PX = const(4)
+_SLOT_GAP_PX = const(5)
+_RAIL_PX = const(2)
+_DOT_R_PX = const(5)
+# Either side of a dot: to the start times and to the fields.
+_DOT_GAP_PX = const(4)
+_NO_WINDOW = const(-1)
 
 
-def _format_remaining(sec: int) -> str:
-    h = sec // 3600
-    m = sec % 3600 // 60
-    return f"-{h:02}:{m:02}"
+def _format_duration(sec: int) -> str:
+    """Return ``sec``, rounded up to whole minutes, as minutes under an hour (``"48m"``), hours and minutes under a
+    day (``"9h48"``), else days and hours (``"2d08"``); zero or less is ``"0m"``."""
+    # Rounded up: a redraw lands just after its minute starts, so a whole-minute time is that many minutes away on
+    # the header's clock.
+    minutes = (sec + _SEC_PER_MIN - 1) // _SEC_PER_MIN if sec > 0 else 0
+    if minutes < _MIN_PER_HOUR:
+        return str(minutes) + "m"
+    hours = minutes // _MIN_PER_HOUR
+    if hours < _HOURS_PER_DAY:
+        return f"{hours}h{minutes % _MIN_PER_HOUR:02}"
+    return f"{hours // _HOURS_PER_DAY}d{hours % _HOURS_PER_DAY:02}"
 
 
-class Colors:
-    """Pens for the Calendar view, except event bars and their labels."""
-
-    def __init__(
-        self,
-        background: int,
-        header_text: int,
-        axis_text: int,
-        empty_row: int,
-        now_line: int,
-    ) -> None:
-        self.background = background
-        self.header_text = header_text
-        self.axis_text = axis_text
-        self.empty_row = empty_row
-        self.now_line = now_line
+def _fitting_prefix(gfx: PicoGraphics, text: str, room_px: int, text_scale: int) -> str:
+    """Return the longest prefix of ``text``, in whole characters, that fits ``room_px``; it may be empty."""
+    # Slices only when text doesn't fit, as each slice is a new str.
+    length = len(text)
+    while length and gfx.measure_text(text, scale=text_scale) > room_px:
+        length -= 1
+        text = text[:length]
+    return text
 
 
 class Geometry:
-    """Pixel layout of the Calendar view: a header, ``MAX_ROWS`` rows and a time axis.
+    """Pixel layout of the Calendar view: a header over ``slot_count`` equal slots, each a colour field with room
+    for a progress bar under it, right of a rail with the start times left of it.
 
-    Raises ``RuntimeError`` if the header doesn't fit the panel width.
+    Raises ``RuntimeError`` if the widest header doesn't fit the panel width or fewer than two slots fit under it.
     """
 
     def __init__(
         self,
         pico_graphics: PicoGraphics,
-        header_font: str,
-        header_font_height: int,
+        font: str,
+        font_height: int,
         header_text_scale: int,
-        bar_font: str,
-        bar_font_height: int,
-        bar_text_scale: int,
+        label_text_scale: int,
     ) -> None:
         self.pico_graphics = pico_graphics
         self.width, self.height = pico_graphics.get_bounds()
+        self.font = font
 
-        self.header_font = header_font
+        if not header_fits(pico_graphics, font, header_text_scale, self.width):
+            raise RuntimeError("calendar geometry: no room for header (font/scale too large)")
         self.header_text_scale = header_text_scale
-        self.header_height = header_font_height * header_text_scale
-        self.header_y = 0
+        self.date_x = header_date_x(pico_graphics, font, header_text_scale)
+        self.label_text_scale = label_text_scale
 
-        if not header_fits(pico_graphics, header_font, header_text_scale, self.width):
-            raise RuntimeError(
-                "calendar geometry: no room for header (font/scale too large)"
-            )
+        # A start time, or the weekday of an event in progress since before today, ends at time_right.
+        self.time_right = max(
+            pico_graphics.measure_text(WIDEST_TIME_TEXT, scale=label_text_scale),
+            pico_graphics.measure_text(widest_name(pico_graphics, WEEKDAY_NAMES, label_text_scale),
+                                       scale=label_text_scale),
+        )
+        self.rail_x = self.time_right + _DOT_GAP_PX + _DOT_R_PX
+        self.field_x = self.rail_x + _DOT_R_PX + _DOT_GAP_PX
 
-        self.bar_font = bar_font
-        self.bar_text_scale = bar_text_scale
-        self.bar_text_height = bar_font_height * bar_text_scale
-
-        self.axis_height = bar_font_height * bar_text_scale
-        self.axis_y = self.height - self.axis_height
-
-        body_top = self.header_height + _HEADER_MARGIN_PX
-        body_bottom = self.axis_y - _AXIS_MARGIN_PX
-        body_height = body_bottom - body_top
-
-        cell_height = body_height // MAX_ROWS
-        gap = max(3, cell_height // 5)
-        bar_height = cell_height - gap
-
-        self.row_count = MAX_ROWS
-        self.row_y: list[int] = []
-        self.bar_height = bar_height
-        self.gap_y: list[int] = []
-        self.gap_height = gap
-
-        for i in range(MAX_ROWS):
-            row_top = body_top + i * cell_height
-            self.row_y.append(row_top)
-            self.gap_y.append(row_top + bar_height)
-
-        self.now_x = WINDOW_PAST_SEC * self.width // WINDOW_TOTAL_SEC
-
-
-class Renderer:
-    """Times are local epoch seconds."""
-
-    def __init__(self, geometry: Geometry, colors: Colors) -> None:
-        self._geom = geometry
-        self._gfx = geometry.pico_graphics
-        self._colors = colors
-        self._last_header = ""
-
-    def reset(self) -> None:
-        """Clear the screen to empty rows and forget the drawn header."""
-        self._last_header = ""
-        gfx = self._gfx
-        geom = self._geom
-
-        gfx.set_pen(self._colors.background)
-        gfx.clear()
-
-        gfx.set_pen(self._colors.empty_row)
-        for row_idx in range(geom.row_count):
-            gfx.rectangle(0, geom.row_y[row_idx], geom.width, geom.bar_height)
-
-    def write_header(self, text: str) -> None:
-        """Draw ``text`` in the header strip unless it is already shown."""
-        if text == self._last_header:
-            return
-        self._last_header = text
-
-        geom = self._geom
-        gfx = self._gfx
-
-        gfx.set_pen(self._colors.background)
-        gfx.rectangle(0, 0, geom.width, geom.header_height)
-
-        if text:
-            gfx.set_font(geom.header_font)
-            gfx.set_pen(self._colors.header_text)
-            gfx.text(text, 0, geom.header_y, scale=geom.header_text_scale)
-
-    @micropython.native
-    def draw_rows(
-        self,
-        event_windows: list[EventWindow],
-        window_start: int,
-        window_end: int,
-        real_remaining_sec,  # (int) -> int
-    ) -> None:
-        geom = self._geom
-        gfx = self._gfx
-        width = geom.width
-
-        gfx.set_font(geom.bar_font)
-
-        for row_idx in range(len(event_windows)):
-            row_top = geom.row_y[row_idx]
-            bar_h = geom.bar_height
-
-            gfx.set_pen(self._colors.empty_row)
-            gfx.rectangle(0, row_top, width, bar_h)
-
-            window = event_windows[row_idx]
-            visible = window.get_visible(window_start, window_end)
-            n_visible = len(visible)
-
-            for i in range(n_visible):
-                event, pen = visible[i]
-                ev_start = event.start_timestamp
-                ev_end = ev_start + event.wall_clock_duration_sec
-
-                # Prevent overlapping bars from stacking; this also hides the
-                # remaining time of a clipped bar.
-                if i + 1 < n_visible:
-                    next_start = visible[i + 1][0].start_timestamp
-                    if next_start < ev_end:
-                        ev_end = next_start
-
-                x0 = max(0, (ev_start - window_start) * width // WINDOW_TOTAL_SEC)
-                x1 = min(width, (ev_end - window_start) * width // WINDOW_TOTAL_SEC)
-
-                if x1 <= x0:
-                    continue
-
-                gfx.set_pen(pen)
-                gfx.rectangle(x0, row_top, x1 - x0, bar_h)
-
-                # Seams keep adjacent bars distinct, same colour or not.
-                gfx.set_pen(self._colors.empty_row)
-                if x0 - _BAR_SEAM_PX >= 0:
-                    gfx.rectangle(x0 - _BAR_SEAM_PX, row_top, _BAR_SEAM_PX, bar_h)
-                gfx.rectangle(x1 - _BAR_SEAM_PX, row_top, _BAR_SEAM_PX, bar_h)
-
-                bar_px = x1 - x0
-                text_y = row_top + (bar_h - geom.bar_text_height) // 2 + 2
-                label_right = x0
-                usable_px = bar_px - 2 * _BAR_TEXT_MARGIN_PX
-
-                if usable_px >= _MIN_LABEL_PX and event.label:
-                    label = event.label.upper()
-                    text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
-
-                    # Binary search for longest fitting prefix
-                    if text_w > usable_px:
-                        lo, hi = 1, len(label) - 1
-                        while lo < hi:
-                            mid = (lo + hi + 1) // 2
-                            if gfx.measure_text(label[:mid], scale=geom.bar_text_scale) <= usable_px:
-                                lo = mid
-                            else:
-                                hi = mid - 1
-                        label = label[:lo]
-                        text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
-
-                    if text_w <= usable_px:
-                        gfx.set_pen(LABEL_FOR_SLOT[pen])
-                        gfx.text(label, x0 + _BAR_TEXT_MARGIN_PX, text_y, scale=geom.bar_text_scale)
-                        label_right = x0 + _BAR_TEXT_MARGIN_PX + text_w
-
-                if ev_end > window_end:
-                    remaining = real_remaining_sec(ev_end)
-                    if remaining > 0:
-                        rem_text = _format_remaining(remaining)
-                        rem_w = gfx.measure_text(rem_text, scale=geom.bar_text_scale)
-                        rem_x = x1 - rem_w - _BAR_TEXT_MARGIN_PX
-                        if rem_x > label_right + 1:
-                            gfx.set_pen(LABEL_FOR_SLOT[pen])
-                            gfx.text(rem_text, rem_x, text_y, scale=geom.bar_text_scale)
-
-            status = window.status()
-            if status is not None and status != FRESH:
-                gfx.set_pen(self._colors.now_line)
-                gfx.rectangle(width - _STATUS_GLYPH_PX, row_top, _STATUS_GLYPH_PX, _STATUS_GLYPH_PX)
-
-    @micropython.native
-    def draw_time_axis(self, window_start: int, window_end: int) -> None:
-        """Redraw the time axis: quarter-hour ticks and hour labels."""
-        geom = self._geom
-        gfx = self._gfx
-        width = geom.width
-
-        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
-        tick_bottom = baseline_y + _TICK_MARK_HEIGHT_PX
-
-        gfx.set_pen(self._colors.background)
-        gfx.rectangle(0, baseline_y + 1, width, geom.axis_y + geom.axis_height - baseline_y - 1)
-
-        gfx.set_font(geom.bar_font)
-
-        first_q = (window_start // _SEC_PER_QUARTER) * _SEC_PER_QUARTER
-        if first_q < window_start:
-            first_q += _SEC_PER_QUARTER
-
-        t = first_q
-        while t < window_end:
-            x = (t - window_start) * width // WINDOW_TOTAL_SEC
-
-            if 0 <= x < width:
-                gfx.set_pen(self._colors.now_line)
-                gfx.line(x, baseline_y, x, tick_bottom)
-
-                if t % _SEC_PER_HOUR == 0:
-                    hour = time.gmtime(t)[3]
-                    label = str(hour)
-                    gfx.set_pen(self._colors.axis_text)
-                    text_w = gfx.measure_text(label, scale=geom.bar_text_scale)
-                    label_x = x - text_w // 2
-                    if 0 <= label_x and label_x + text_w <= width:
-                        gfx.text(label, label_x, geom.axis_y, scale=geom.bar_text_scale)
-
-            t += _SEC_PER_QUARTER
-
-    def draw_static_overlay(self) -> None:
-        """Draw the parts that never move: the now-line and the axis baseline."""
-        geom = self._geom
-        gfx = self._gfx
-
-        gfx.set_pen(self._colors.now_line)
-        x = geom.now_x
-
-        for i in range(geom.row_count):
-            gap_top = geom.gap_y[i]
-            gfx.line(x, gap_top, x, gap_top + geom.gap_height - 1)
-
-        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
-        gfx.line(0, baseline_y, geom.width - 1, baseline_y)
-
-    def update(self) -> None:
-        """Push the framebuffer to the panel."""
-        self._gfx.update()
+        self.field_height = (font_height - _DESCENDER_ROWS) * label_text_scale + 2 * _FIELD_PAD_PX
+        self.slot_pitch = self.field_height + _BAR_PX + _SLOT_GAP_PX
+        self.body_top = font_height * header_text_scale + _BODY_MARGIN_PX
+        # A day header takes a slot, and the event after it another.
+        self.slot_count = (self.height - self.body_top + _SLOT_GAP_PX) // self.slot_pitch
+        if self.slot_count < 2:
+            raise RuntimeError("calendar geometry: no room for two slots (font/scale too large)")
 
 
 class Display(_Display):
-    """Calendar view: a timeline of event rows that scrolls with the clock.
+    """Calendar view: an agenda of every window's events in start order, from those in progress to those starting
+    within ``HORIZON_SEC``, redrawn as each minute starts.
 
-    ``event_windows`` must hold at most ``MAX_ROWS`` rows, ``get_local_time``
-    must return epoch seconds, and ``real_remaining_sec(local_epoch)`` the real
-    seconds from now until ``local_epoch``.
+    Each event fills a slot: those in progress come first, each with a progress bar, and the first event of each
+    later day follows a day header in a slot of its own.  Events beyond the last slot aren't shown, and events
+    starting together keep their windows' order.  Labels are drawn as given, cut to fit.
+
+    ``get_local_time`` must return local epoch seconds, and ``real_remaining_sec(local_epoch)`` the real seconds
+    from now until ``local_epoch``.
     """
-
-    refresh_period_ms = 60_000
 
     def __init__(
         self,
-        renderer: Renderer,
-        event_windows: list[EventWindow],
+        geometry: Geometry,
+        windows: list[EventWindow],
         get_local_time,  # () -> int
         real_remaining_sec,  # (int) -> int
     ) -> None:
-        self._renderer = renderer
-        self._event_windows = event_windows
+        self._geom = geometry
+        self._gfx = geometry.pico_graphics
+        self._windows = windows
+        # Each window's visible events, and the index of the next one to show, for the current redraw.  An unshown
+        # window holds the shared empty tuple, where an empty list would be allocated.
+        self._visible: list[list[tuple[Event, int]] | tuple[()]] = [()] * len(windows)
+        self._cursors = [0] * len(windows)
         self._get_local_time = get_local_time
         self._real_remaining_sec = real_remaining_sec
         self._active = False
-
-    def _redraw(self) -> None:
-        now = self._get_local_time()
-        window_start = now - WINDOW_PAST_SEC
-        window_end = now + WINDOW_FUTURE_SEC
-
-        self._renderer.write_header(format_header_time(now))
-        self._renderer.draw_rows(self._event_windows, window_start, window_end, self._real_remaining_sec)
-        self._renderer.draw_time_axis(window_start, window_end)
-        self._renderer.update()
-
-    def render(self) -> None:
-        self._redraw()
+        self._next_redraw_ms = 0
 
     def initialize(self) -> None:
         if self._active:
             return
         self._active = True
-        self._renderer.reset()
-        self._renderer.draw_static_overlay()
         self._redraw()
 
     def deinitialize(self) -> None:
-        if not self._active:
-            return
         self._active = False
+        # Unseen, a window would keep an older network snapshot alive beside the service's current one.
+        for i in range(len(self._windows)):
+            self._windows[i].release()
+            self._visible[i] = ()
+
+    def render(self) -> None:
+        # The wall-clock read allocates, so wait for the minute to change on the alloc-free ticks.
+        if time.ticks_diff(time.ticks_ms(), self._next_redraw_ms) >= 0:
+            self._redraw()
+
+    def _redraw(self) -> None:
+        now = self._get_local_time()
+        # Set before drawing, so a redraw that raises is retried at the next minute, not on every render.
+        self._next_redraw_ms = time.ticks_add(time.ticks_ms(), (_SEC_PER_MIN - now % _SEC_PER_MIN) * _MS_PER_SEC)
+        window_end = now + HORIZON_SEC
+        windows = self._windows
+        for i in range(len(windows)):
+            self._visible[i] = windows[i].get_visible(now, window_end)
+            self._cursors[i] = 0
+
+        geom = self._geom
+        gfx = self._gfx
+        gfx.set_font(geom.font)
+        gfx.set_pen(BLACK)
+        gfx.clear()
+        self._draw_header(now)
+        gfx.set_pen(DARK_GRAY)
+        gfx.rectangle(geom.rail_x - _RAIL_PX // 2, geom.body_top, _RAIL_PX, geom.height - geom.body_top)
+
+        today = now // _SEC_PER_DAY
+        day = today
+        slot = 0
+        while slot < geom.slot_count:
+            window_index = self._next_window_index(window_end)
+            if window_index == _NO_WINDOW:
+                break
+            event, pen = self._visible[window_index][self._cursors[window_index]]
+            self._cursors[window_index] += 1
+            start = event.start_timestamp
+            in_progress = start <= now < start + event.wall_clock_duration_sec
+            if not in_progress and start // _SEC_PER_DAY != day:
+                day = start // _SEC_PER_DAY
+                if slot + 1 == geom.slot_count:
+                    break
+                self._draw_day_header(slot, start, today)
+                slot += 1
+            self._draw_event(slot, event, pen, now, in_progress, today)
+            slot += 1
+        gfx.update()
+
+    def _next_window_index(self, window_end: int) -> int:
+        """Return the index of the window whose next event starts first, before ``window_end``, or ``_NO_WINDOW``."""
+        # window_end bounds it as well: after the clock steps back, a window can hold events past it.
+        best_index = _NO_WINDOW
+        best_start = window_end
+        visible = self._visible
+        cursors = self._cursors
+        for i in range(len(visible)):
+            events = visible[i]
+            if cursors[i] < len(events):
+                start = events[cursors[i]][0].start_timestamp
+                if start < best_start:
+                    best_index = i
+                    best_start = start
+        return best_index
+
+    def _draw_header(self, now: int) -> None:
+        geom = self._geom
+        gfx = self._gfx
+        time_text, date_text = format_header_time(now)
+        gfx.set_pen(WHITE)
+        gfx.text(time_text, 0, 0, scale=geom.header_text_scale)
+        gfx.set_pen(GRAY)
+        gfx.text(date_text, geom.date_x, 0, scale=geom.header_text_scale)
+
+    def _draw_day_header(self, slot: int, start: int, today: int) -> None:
+        geom = self._geom
+        if start // _SEC_PER_DAY == today + 1:
+            text = "Tomorrow"
+        else:
+            text = format_header_time(start)[1]
+        self._gfx.set_pen(GRAY)
+        self._gfx.text(
+            text, geom.field_x, geom.body_top + slot * geom.slot_pitch + _FIELD_PAD_PX, scale=geom.label_text_scale
+        )
+
+    def _draw_event(self, slot: int, event: Event, pen: int, now: int, in_progress: bool, today: int) -> None:
+        """Draw ``event`` in ``slot``: its dot, field, label, time left or to go, progress bar and start time."""
+        geom = self._geom
+        gfx = self._gfx
+        scale = geom.label_text_scale
+        y = geom.body_top + slot * geom.slot_pitch
+        text_y = y + _FIELD_PAD_PX
+        field_width = geom.width - geom.field_x
+        start = event.start_timestamp
+
+        gfx.set_pen(pen)
+        gfx.circle(geom.rail_x, y + geom.field_height // 2, _DOT_R_PX)
+        gfx.rectangle(geom.field_x, y, field_width, geom.field_height)
+
+        # Only today's events say how soon they start: a later day's header dates them.
+        if in_progress:
+            note = _format_duration(self._real_remaining_sec(start + event.wall_clock_duration_sec)) + " left"
+        elif start // _SEC_PER_DAY == today:
+            note = "in " + _format_duration(self._real_remaining_sec(start))
+        else:
+            note = ""
+        label_x = geom.field_x + _TEXT_INSET_PX
+        label_end = geom.width - _TEXT_INSET_PX
+        if note:
+            note_x = label_end - gfx.measure_text(note, scale=scale)
+            label_end = note_x - _TEXT_INSET_PX
+        gfx.set_pen(LABEL_FOR_SLOT[pen])
+        gfx.text(_fitting_prefix(gfx, event.label, label_end - label_x, scale), label_x, text_y, scale=scale)
+        if note:
+            gfx.text(note, note_x, text_y, scale=scale)
+
+        if in_progress:
+            elapsed_px = field_width * (now - start) // event.wall_clock_duration_sec
+            bar_y = y + geom.field_height
+            gfx.set_pen(WHITE)
+            gfx.rectangle(geom.field_x, bar_y, elapsed_px, _BAR_PX)
+            gfx.set_pen(DARK_GRAY)
+            gfx.rectangle(geom.field_x + elapsed_px, bar_y, field_width - elapsed_px, _BAR_PX)
+
+        fields = time.gmtime(start)
+        if in_progress and start // _SEC_PER_DAY < today:
+            weekday_start = 3 * fields[6]
+            time_text = WEEKDAY_NAMES[weekday_start:weekday_start + 3]
+        else:
+            time_text = f"{fields[3]:02}:{fields[4]:02}"
+        gfx.set_pen(WHITE if in_progress else GRAY)
+        gfx.text(time_text, geom.time_right - gfx.measure_text(time_text, scale=scale), text_y, scale=scale)

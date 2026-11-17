@@ -1,27 +1,22 @@
-"""Tests for the weather forecast service (precipitation + UV)."""
-
-import time
+"""Tests for the weather forecast service (precipitation and UV streams)."""
 
 import pytest
 
 from displays.palette import (
     STREAM_COLORS,
-    STREAM_GREEN,
+    STREAM_ORANGE,
     STREAM_RED,
     STREAM_YELLOW,
 )
 from scheduling.event_window import build_event_windows
-from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
 from services.fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
-from services.weather_service import (
-    WeatherService,
-    _build_events,
-    _precip_rank_and_color,
-    _precip_label,
-)
+from services.weather_service import WeatherService, _precip_label, _WeatherHours
 
-_UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
+_UV = (6, 8, 11)  # UV thresholds used across the suite
+_T0 = 1_794_855_600
+_HOUR = 3600
+_CET_SEC = 3600
 
 
 # ---------------------------------------------------------------------------
@@ -34,239 +29,147 @@ _UV = (6, 8)  # (warning, severe) UV thresholds used across the suite
     [
         (51, "RAIN"), (61, "RAIN"), (67, "RAIN"), (80, "RAIN"), (82, "RAIN"),
         (71, "SNOW"), (75, "SNOW"), (77, "SNOW"), (85, "SNOW"), (86, "SNOW"),
-        (95, "STORM"), (99, "STORM"),
+        (95, "STORM"), (99, "STORM"), (61.0, "RAIN"),
         (0, None), (3, None), (45, None), (50, None), (68, None), (70, None),
-        (78, None), (79, None), (83, None), (84, None), (87, None), (94, None), (100, None),
+        (78, None), (79, None), (83, None), (84, None), (87, None), (94, None), (100, None), (None, None),
     ],
 )
 def test_precip_label_mapping(wmo_code, expected):
     assert _precip_label(wmo_code) == expected
 
 
-@pytest.mark.parametrize(
-    "mm, expected",
-    [
-        (0.0, (1, STREAM_GREEN)),
-        (2.49, (1, STREAM_GREEN)),
-        (2.5, (2, STREAM_YELLOW)),
-        (7.59, (2, STREAM_YELLOW)),
-        (7.6, (3, STREAM_RED)),
-        (20.0, (3, STREAM_RED)),
-    ],
-)
-def test_precip_rank_and_color(mm, expected):
-    assert _precip_rank_and_color(mm) == expected
-
-
 # ---------------------------------------------------------------------------
-# _build_events
+# _WeatherHours
 # ---------------------------------------------------------------------------
 
 
-def _payload(*hours, uv=None) -> dict:
-    """Open-Meteo-shaped payload from (iso, prob, mm, code) tuples.
-
-    ``uv`` (a list aligned with the hours) is added only when given, so the
-    precip-only tests exercise the missing-uv_index path.
-    """
-    hourly = {
-        "time": [h[0] for h in hours],
-        "precipitation_probability": [h[1] for h in hours],
-        "precipitation": [h[2] for h in hours],
-        "weathercode": [h[3] for h in hours],
-    }
-    if uv is not None:
-        hourly["uv_index"] = uv
-    return {"hourly": hourly}
+def _hours(*rows, threshold=30, max_events=10):
+    """Feed hourly ``(prob, mm, code, uv)`` rows from ``_T0``; return the precipitation and UV events."""
+    hours = _WeatherHours(threshold, _UV, lambda utc: _CET_SEC, max_events, 0)
+    for i, row in enumerate(rows):
+        hours.add_hour(_T0 + i * _HOUR, list(row))
+    return hours.precip.events(), hours.uv.events()
 
 
-_T0 = "2026-06-04T10:00"
-_T1 = "2026-06-04T11:00"
-_T2 = "2026-06-04T12:00"
-_EPOCH0 = time.mktime((2026, 6, 4, 10, 0, 0, 0, 0))
-_HOUR = 3600
+def _precip(*rows, threshold=30):
+    return _hours(*rows, threshold=threshold)[0]
 
 
-def _be(payload, threshold=30):
-    return _build_events(payload, threshold, _UV)
+def _uv(*rows):
+    return _hours(*rows)[1]
 
 
 # --- precipitation ---------------------------------------------------------
 
 
 def test_below_threshold_hours_emit_nothing():
-    assert _be(_payload((_T0, 10, 1.0, 61), (_T1, 0, 0.0, 0))) == []
+    assert _precip((10, 1.0, 61, 0), (0, 0.0, 0, 0)) == []
 
 
 def test_prob_equal_threshold_emits():
-    assert len(_be(_payload((_T0, 30, 1.0, 61)))) == 1
+    assert len(_precip((30, 1.0, 61, 0))) == 1
 
 
-def test_non_precip_code_emits_no_bar_even_above_threshold():
-    assert _be(_payload((_T0, 90, 0.0, 0))) == []
+@pytest.mark.parametrize("row", [(None, 1.0, 61, 0), (90, 1.0, None, 0), (90, 0.0, 0, 0)])
+def test_a_missing_probability_or_a_non_precipitation_code_emits_nothing(row):
+    assert _precip(row) == []
 
 
-def test_empty_time_array_yields_no_events():
-    payload = {"hourly": {"time": [], "precipitation_probability": [],
-                          "precipitation": [], "weathercode": []}}
-    assert _be(payload) == []
+def test_single_qualifying_hour_emits_one_local_event():
+    events = _precip((50, 1.0, 61, 0))
 
-
-def test_mismatched_array_lengths_raise():
-    payload = {
-        "hourly": {
-            "time": [_T0, _T1],
-            "precipitation_probability": [80],
-            "precipitation": [1.0],
-            "weathercode": [61],
-        }
-    }
-    with pytest.raises(ValueError):
-        _be(payload)
-
-
-def test_single_qualifying_hour_emits_one_event():
-    events = _be(_payload((_T0, 50, 1.0, 61)))
-
-    assert len(events) == 1
-    ev = events[0]
-    assert ev.label == "RAIN"
-    assert ev.start_timestamp == _EPOCH0
-    assert ev.wall_clock_duration_sec == _HOUR
-    assert ev.color_index == STREAM_GREEN
+    assert [(e.label, e.start_timestamp, e.wall_clock_duration_sec, e.color_index) for e in events] == [
+        ("RAIN", _T0 + _CET_SEC, _HOUR, STREAM_YELLOW)
+    ]
 
 
 @pytest.mark.parametrize(
     "mm, expected_index",
-    [(1.0, STREAM_GREEN), (5.0, STREAM_YELLOW), (10.0, STREAM_RED)],
+    [
+        (0.0, STREAM_YELLOW),
+        (2.49, STREAM_YELLOW),
+        (2.5, STREAM_ORANGE),
+        (7.59, STREAM_ORANGE),
+        (7.6, STREAM_RED),
+        (20.0, STREAM_RED),
+    ],
 )
-def test_all_three_intensity_bands_emit(mm, expected_index):
-    assert _be(_payload((_T0, 80, mm, 61)))[0].color_index == expected_index
+def test_amount_sets_the_level(mm, expected_index):
+    assert _precip((80, mm, 61, 0))[0].color_index == expected_index
 
 
-def test_contiguous_equal_runs_merge():
-    events = _be(_payload(
-        (_T0, 80, 1.0, 61), (_T1, 80, 1.2, 61), (_T2, 80, 0.8, 61),
-    ))
-    assert len(events) == 1
-    assert events[0].wall_clock_duration_sec == 3 * _HOUR
-    assert events[0].start_timestamp == _EPOCH0
+def test_none_precipitation_amount_still_warns_at_level_1():
+    assert _precip((80, None, 61, 0))[0].color_index == STREAM_YELLOW
 
 
-def test_intensity_band_change_splits_run():
-    events = _be(_payload((_T0, 80, 1.0, 61), (_T1, 80, 5.0, 61)))
-    assert [e.color_index for e in events] == [STREAM_GREEN, STREAM_YELLOW]
+def test_contiguous_hours_merge_at_their_highest_level():
+    events = _precip((80, 1.0, 61, 0), (80, 5.0, 61, 0), (80, 0.8, 61, 0))
+
+    assert [(e.wall_clock_duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
 
 
-def test_type_change_splits_run_even_at_same_intensity():
-    events = _be(_payload((_T0, 80, 1.0, 61), (_T1, 80, 1.0, 71)))
-    assert [e.label for e in events] == ["RAIN", "SNOW"]
+def test_type_change_splits_run_even_at_same_level():
+    assert [e.label for e in _precip((80, 1.0, 61, 0), (80, 1.0, 71, 0))] == ["RAIN", "SNOW"]
 
 
 def test_gap_hour_breaks_the_run():
-    events = _be(_payload(
-        (_T0, 80, 1.0, 61), (_T1, 0, 0.0, 0), (_T2, 80, 1.0, 61),
-    ))
-    assert len(events) == 2
-    assert events[1].start_timestamp == _EPOCH0 + 2 * _HOUR
+    events = _precip((80, 1.0, 61, 0), (0, 0.0, 0, 0), (80, 1.0, 61, 0))
+
+    assert [e.start_timestamp - _CET_SEC for e in events] == [_T0, _T0 + 2 * _HOUR]
 
 
-def test_time_discontinuity_does_not_merge_into_wide_bar():
-    events = _be(_payload((_T0, 80, 1.0, 61), (_T2, 80, 1.0, 61)))  # 2h jump
-    assert len(events) == 2
-    assert all(e.wall_clock_duration_sec == _HOUR for e in events)
-    assert events[1].start_timestamp == _EPOCH0 + 2 * _HOUR
+def test_each_stream_keeps_at_most_max_events():
+    precip, _ = _hours((80, 1.0, 61, 0), (80, 1.0, 71, 0), (80, 1.0, 61, 0), max_events=2)
+
+    assert [e.label for e in precip] == ["RAIN", "SNOW"]
 
 
-def test_none_precipitation_amount_treated_as_zero():
-    assert _be(_payload((_T0, 80, None, 61)))[0].color_index == STREAM_GREEN
+# --- UV --------------------------------------------------------------------
 
 
-# --- UV + conflict policy (A: severity-honest) -----------------------------
+@pytest.mark.parametrize(
+    "uv_index, expected_index",
+    [(6, STREAM_YELLOW), (7.9, STREAM_YELLOW), (8, STREAM_ORANGE), (10.9, STREAM_ORANGE), (11, STREAM_RED)],
+)
+def test_uv_index_sets_the_level(uv_index, expected_index):
+    assert [(e.label, e.color_index) for e in _uv((0, 0.0, 0, uv_index))] == [("UV", expected_index)]
 
 
-def test_uv_renders_when_no_precip():
-    # Low precip probability, high UV -> a UV bar.
-    events = _be(_payload((_T0, 0, 0.0, 0), uv=[7]))
-    assert len(events) == 1
-    assert events[0].label == "UV"
-    assert events[0].color_index == STREAM_YELLOW  # warning
+@pytest.mark.parametrize("uv_index", [5.9, None])
+def test_uv_below_threshold_or_missing_emits_nothing(uv_index):
+    assert _uv((0, 0.0, 0, uv_index)) == []
 
 
-def test_severe_uv_maps_to_red():
-    assert _be(_payload((_T0, 0, 0.0, 0), uv=[9]))[0].color_index == STREAM_RED
+def test_precipitation_and_uv_in_the_same_hour_both_emit():
+    precip, uv = _hours((80, 1.0, 61, 9))
 
-
-def test_severe_uv_beats_light_precip():
-    # Green drizzle (rank 1) collides with severe UV (level 2) -> UV wins.
-    events = _be(_payload((_T0, 80, 1.0, 61), uv=[9]))
-    assert events[0].label == "UV"
-    assert events[0].color_index == STREAM_RED
-
-
-def test_precip_wins_tie_over_warning_uv():
-    # Green drizzle (rank 1) vs warning UV (level 1) -> tie -> precip first.
-    events = _be(_payload((_T0, 80, 1.0, 61), uv=[7]))
-    assert events[0].label == "RAIN"
-
-
-def test_heavier_precip_wins_over_severe_uv():
-    # Moderate rain (rank 2) ties severe UV (level 2) -> precip first wins.
-    events = _be(_payload((_T0, 80, 5.0, 61), uv=[9]))
-    assert events[0].label == "RAIN"
-    assert events[0].color_index == STREAM_YELLOW
-
-
-def test_uv_below_threshold_emits_nothing():
-    assert _be(_payload((_T0, 0, 0.0, 0), uv=[3])) == []
-
-
-def test_malformed_uv_index_precip_still_renders():
-    # A non-list uv_index must not fail the whole fetch — precip still shows.
-    payload = _payload((_T0, 80, 1.0, 61))
-    payload["hourly"]["uv_index"] = None
-    events = _be(payload)
-    assert [e.label for e in events] == ["RAIN"]
-
-
-def test_short_uv_index_precip_still_renders():
-    payload = _payload((_T0, 80, 1.0, 61), (_T1, 80, 1.0, 61))
-    payload["hourly"]["uv_index"] = [9]  # wrong length -> UV suppressed
-    events = _be(payload)
-    assert all(e.label == "RAIN" for e in events)
-
-
-def test_non_list_uv_index_precip_still_renders():
-    # A non-list uv_index that happens to have len()==n (e.g. a string) must
-    # not break level() / fail the fetch — precip still shows.
-    payload = _payload((_T0, 80, 1.0, 61))
-    payload["hourly"]["uv_index"] = "9"
-    events = _be(payload)
-    assert [e.label for e in events] == ["RAIN"]
-
-
-def test_uv_index_with_non_numeric_element_precip_still_renders():
-    # A correctly-sized uv_index list carrying a stray non-numeric element must
-    # not reach level() and crash the fetch — that hour's UV is dropped silently
-    # and precip still renders.
-    payload = _payload((_T0, 80, 1.0, 61))
-    payload["hourly"]["uv_index"] = ["oops"]
-    events = _be(payload)
-    assert [e.label for e in events] == ["RAIN"]
+    assert [(e.label, e.start_timestamp) for e in precip] == [("RAIN", _T0 + _CET_SEC)]
+    assert [(e.label, e.start_timestamp) for e in uv] == [("UV", _T0 + _CET_SEC)]
 
 
 def test_emitted_color_indices_are_valid_palette_indices():
-    payload = _payload(
-        (_T0, 80, 1.0, 61), (_T1, 80, 5.0, 71), (_T2, 80, 10.0, 95),
-        uv=[3, 3, 3],
-    )
-    for ev in _be(payload):
+    precip, uv = _hours((80, 1.0, 61, 7), (80, 5.0, 71, 9), (80, 10.0, 95, 12))
+
+    for ev in precip + uv:
         assert 0 <= ev.color_index < len(STREAM_COLORS)
 
 
 # ---------------------------------------------------------------------------
 # Service integration
 # ---------------------------------------------------------------------------
+
+_HEADER = b"time,precipitation_probability (%),precipitation (mm),weathercode (wmo code),uv_index ()"
+_QUIET_ROW = b"0,0.00,0,0.00"
+# past_hours + forecast_hours of the harness.
+_ROW_COUNT = 5
+
+
+def _csv(*rows: bytes, row_count: int = _ROW_COUNT) -> list[bytes]:
+    """A CSV body of hourly rows from ``_T0``, padded with quiet hours to ``row_count``."""
+    rows += (_QUIET_ROW,) * (row_count - len(rows))
+    return [b"latitude,longitude", b"50.0,14.0", b"", _HEADER] + [
+        b"%d,%s" % (_T0 + i * _HOUR, row) for i, row in enumerate(rows)
+    ]
 
 
 class _FakeWifi:
@@ -296,9 +199,10 @@ class _Harness:
         self.wifi = _FakeWifi(connected)
         self.schedule = _FakeSchedule()
         self.coord = FetchCoordinator()
-        self.payload = _payload((_T0, 80, 1.0, 61))
+        self.lines = _csv(b"80,1.0,61,0")
         self.raise_exc = None
         self.get_calls: list[tuple] = []
+        self.utc_now = _T0
         self.service = WeatherService(
             latitude=lat,
             longitude=lon,
@@ -308,30 +212,38 @@ class _Harness:
             coordinator=self.coord,
             schedule=self.schedule,
             get_ticks_ms=lambda: self.clock_val,
-            http_get=self._http_get,
+            http_get_lines=self._http_get_lines,
             interval_ms=1000,
             forecast_hours=4,
             past_hours=1,
+            utc_offset_sec=lambda utc: _CET_SEC,
+            max_events=10,
+            get_utc_time=lambda: self.utc_now,
         )
-        stream = Stream(
-            self.service.iter_events(),
-            events_iter_factory=self.service.iter_events,
-            get_generation=lambda: self.service.generation,
-            get_status=lambda: self.service.status,
-        )
-        self.window = build_event_windows(((1, 2),) * len(STREAM_COLORS), [stream])[0]
+        self.windows = build_event_windows(((1, 2),) * len(STREAM_COLORS), self.service.build_streams())
 
-    def _http_get(self, url, timeout_sec=None):
+    def _http_get_lines(self, url, on_line, timeout_sec=None):
         self.get_calls.append((url, timeout_sec))
         if self.raise_exc is not None:
             raise self.raise_exc
-        return self.payload
+        for line in self.lines:
+            on_line(line)
+
+    def fetch(self) -> None:
+        self.service.tick()
+        self.schedule.run_all()
+        self.service.tick()  # harvest
 
     def advance(self, ms: int) -> None:
         self.clock_val += ms
 
-    def visible_names(self) -> list[str]:
-        return [e.label for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
+    def visible(self, stream_index: int = 0) -> list[tuple[str, int]]:
+        window = self.windows[stream_index]
+        local_t0 = _T0 + _CET_SEC
+        return [(e.label, e.start_timestamp) for e, _ in window.get_visible(local_t0, local_t0 + 100 * _HOUR)]
+
+    def visible_names(self, stream_index: int = 0) -> list[str]:
+        return [label for label, _ in self.visible(stream_index)]
 
 
 def test_disabled_when_coordinates_unset():
@@ -341,63 +253,62 @@ def test_disabled_when_coordinates_unset():
         h.service.tick()
 
     assert h.get_calls == []
-    assert h.service.status == DISABLED
-    assert h.window.status() == DISABLED
 
 
-def test_fetch_publishes_events_and_goes_fresh():
+def test_fetch_publishes_local_events():
     h = _Harness()
 
     h.service.tick()
     assert h.get_calls == []
-    assert h.service.status == STALE
 
     h.schedule.run_all()
     assert len(h.get_calls) == 1
 
     h.service.tick()  # harvest: publish the parsed snapshot
     assert h.service.generation == 1
-    assert h.visible_names() == ["RAIN"]
-    assert h.service.status == FRESH
+    assert h.visible() == [("RAIN", _T0 + _CET_SEC)]
 
 
-def test_url_includes_coordinates_uv_and_timeout():
+def test_url_includes_coordinates_metrics_and_timeout():
     h = _Harness(lat=50.5, lon=14.25)
-    h.service.tick()
-    h.schedule.run_all()
+    h.fetch()
 
     url, timeout = h.get_calls[0]
     assert url.startswith("http://")  # HTTP on purpose, not HTTPS
-    assert "latitude=50.5" in url
-    assert "longitude=14.25" in url
-    assert "timezone=auto" in url
-    assert "past_hours=1" in url
-    assert "hourly=precipitation_probability" in url
-    assert "uv_index" in url
+    for part in ("latitude=50.5", "longitude=14.25", "format=csv", "forecast_hours=4", "past_hours=1",
+                 "hourly=precipitation_probability,precipitation,weathercode,uv_index"):
+        assert part in url
     assert timeout == 3
 
 
-def test_uv_renders_through_the_service():
+def test_one_fetch_publishes_precipitation_and_uv_to_their_own_streams():
     h = _Harness()
-    h.payload = _payload((_T0, 0, 0.0, 0), uv=[9])  # no precip, severe UV
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest
-    assert h.visible_names() == ["UV"]
+    h.lines = _csv(b"80,1.0,61,0", b"0,0.0,0,9")
+    h.fetch()
+
+    assert h.visible_names(0) == ["RAIN"]
+    assert h.visible_names(1) == ["UV"]
+
+
+def test_warnings_over_by_the_fetch_are_not_published():
+    h = _Harness()
+    h.lines = _csv(b"80,1.0,61,0", b"0,0.0,0,0", b"80,1.0,71,0")
+    h.utc_now = _T0 + 2 * _HOUR
+
+    h.fetch()
+
+    assert h.service._events[0][0].label == "SNOW"
+    assert len(h.service._events[0]) == 1
 
 
 def test_second_fetch_refreshes_window():
     h = _Harness()
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest
+    h.fetch()
     assert h.visible_names() == ["RAIN"]
 
-    h.payload = _payload((_T0, 80, 1.0, 71))  # now SNOW
+    h.lines = _csv(b"80,1.0,71,0")
     h.advance(1000)
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest
+    h.fetch()
 
     assert h.service.generation == 2
     assert h.visible_names() == ["SNOW"]
@@ -411,50 +322,30 @@ def test_wifi_down_holds_without_fetching():
 
     assert h.get_calls == []
     assert h.schedule.queue == []
-    assert h.service.status == STALE
 
 
 def test_http_error_backs_off_and_keeps_prior_snapshot():
     h = _Harness()
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest -> ["RAIN"]
+    h.fetch()
     assert h.visible_names() == ["RAIN"]
 
     h.raise_exc = HttpConnectError("down")
     h.advance(1000)
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest the failure -> backoff
+    h.fetch()
 
     assert h.service._failures == 1
     assert h.service.generation == 1
     assert h.visible_names() == ["RAIN"]
 
 
-def test_malformed_payload_backs_off_without_publishing():
+def test_truncated_body_backs_off_and_keeps_prior_snapshot():
     h = _Harness()
-    h.payload = {"unexpected": "shape"}
+    h.fetch()
 
-    h.service.tick()
-    h.schedule.run_all()
-    assert len(h.get_calls) == 1
+    h.lines = _csv(b"80,1.0,71,0")[:-1]
+    h.advance(1000)
+    h.fetch()
 
-    h.service.tick()  # harvest the parse failure -> backoff
     assert h.service._failures == 1
-    assert h.service.generation == 0
-    assert h.visible_names() == []
-
-
-def test_error_status_after_repeated_failures():
-    h = _Harness()
-    h.raise_exc = HttpConnectError("down")
-
-    for _ in range(3):
-        h.advance(700_000)
-        h.service.tick()
-        h.schedule.run_all()
-        h.service.tick()  # harvest records the failure
-
-    assert h.service.status == ERROR
-    assert h.window.status() == ERROR
+    assert h.service.generation == 1
+    assert h.visible_names() == ["RAIN"]

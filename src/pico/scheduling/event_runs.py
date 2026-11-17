@@ -1,4 +1,4 @@
-"""Building calendar ``Event`` bars from per-hour samples."""
+"""Building calendar ``Event`` runs from per-hour warnings."""
 
 from micropython import const
 
@@ -7,56 +7,76 @@ from scheduling.event import Event
 _SEC_PER_HOUR = const(3600)
 
 
-def level(value: float | None, warn: int, severe: int) -> int:
-    """Severity level of ``value``: 2 at or above ``severe``, 1 at or above ``warn``, else 0.
+def level(value: float | None, thresholds: tuple[float, float, float]) -> int:
+    """Warning level of ``value``: how many of the ascending ``thresholds`` it reaches.
 
     ``None``, a missing value, is level 0.
     """
     if value is None:
         return 0
-    if value >= severe:
-        return 2
-    if value >= warn:
-        return 1
-    return 0
+    reached = 0
+    for threshold in thresholds:
+        if value >= threshold:
+            reached += 1
+    return reached
 
 
-def best_by_priority(candidates: list[tuple[int, str, int]]) -> tuple[str, int] | None:
-    """Pick the highest-``priority`` candidate; ties keep the earliest listed.
+class RunBuilder:
+    """Joins hourly warnings into events: adjacent hours with one label form one event, coloured by the highest of
+    their levels.
 
-    Each candidate is ``(priority, label, color_index)``.  Returns the
-    winner's ``(label, color_index)``, or ``None`` for an empty list.
+    Hours are UTC and must be added in ascending order.  Each event's start and end are converted to local time with
+    ``utc_offset_sec``, so its wall-clock duration may differ from its real one across a DST change.
+    ``level_colors[level - 1]`` is a level's ``color_index``.  Events over by ``now_utc`` are dropped, and hours after
+    the first ``max_events`` events that aren't are ignored.
     """
-    best = None
-    best_priority = 0
-    for priority, label, color_index in candidates:
-        if best is None or priority > best_priority:
-            best = (label, color_index)
-            best_priority = priority
-    return best
 
+    def __init__(
+        self,
+        level_colors: tuple[int, int, int],
+        utc_offset_sec,  # (int) -> int
+        max_events: int,
+        now_utc: int,
+    ) -> None:
+        self._level_colors = level_colors
+        self._utc_offset_sec = utc_offset_sec
+        self._max_events = max_events
+        self._now_utc = now_utc
+        self._events: list[Event] = []
+        self._label: str | None = None
+        self._level = 0
+        self._start_utc = 0
+        self._end_utc = 0
 
-def merge_runs(emitted: list[tuple[int, str, int]]) -> list[Event]:
-    """Merge hourly ``(epoch, label, color_index)`` entries into ``Event`` bars.
+    def add(self, utc_epoch: int, label: str | None, level: int) -> None:
+        """Add the hour starting at ``utc_epoch``; level 0 or a ``None`` label means no warning that hour."""
+        if self._label is not None and (not level or label != self._label or utc_epoch != self._end_utc):
+            self._close_run()
+        if not level or label is None or len(self._events) == self._max_events:
+            return
+        if self._label is None:
+            self._label = label
+            self._level = level
+            self._start_utc = utc_epoch
+        elif level > self._level:
+            self._level = level
+        self._end_utc = utc_epoch + _SEC_PER_HOUR
 
-    Requires ``emitted`` in ascending epoch order.
+    def events(self) -> list[Event]:
+        """Return every event in start order, after ending the run in progress."""
+        self._close_run()
+        return self._events
 
-    Only adjacent hours with equal label and color_index merge into one ``Event``.
-    """
-    events: list[Event] = []
-    run: list | None = None  # [label, color_index, start_epoch, end_epoch]
-    for epoch, label, color_index in emitted:
-        if run is not None and run[0] == label and run[1] == color_index and run[3] == epoch:
-            run[3] = epoch + _SEC_PER_HOUR
-        else:
-            if run is not None:
-                events.append(_event_from_run(run))
-            run = [label, color_index, epoch, epoch + _SEC_PER_HOUR]
-    if run is not None:
-        events.append(_event_from_run(run))
-    return events
-
-
-def _event_from_run(run: list) -> Event:
-    label, color_index, start_epoch, end_epoch = run
-    return Event(label, start_epoch, end_epoch - start_epoch, color_index=color_index)
+    def _close_run(self) -> None:
+        label = self._label
+        if label is None:
+            return
+        self._label = None
+        # A run in progress keeps its past hours, but one already over would only take the place of a later one.
+        if self._end_utc <= self._now_utc:
+            return
+        start = self._start_utc + self._utc_offset_sec(self._start_utc)
+        end = self._end_utc + self._utc_offset_sec(self._end_utc)
+        # Local end can come no later than local start as the clocks go back, e.g. for a one-hour run.
+        duration_sec = end - start if end > start else 0
+        self._events.append(Event(label, start, duration_sec, color_index=self._level_colors[self._level - 1]))

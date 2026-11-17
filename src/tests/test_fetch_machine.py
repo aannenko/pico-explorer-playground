@@ -1,6 +1,6 @@
 """Tests for the stateless fetch machine + the single-in-flight gate.
 
-Scheduling / backoff / freshness now live on ``EventStreamService`` and are
+Scheduling and backoff now live on ``EventStreamService`` and are
 covered end-to-end in ``test_stub_service.py``; this file covers only the
 ``FetchMachine`` transition mechanics and the ``FetchCoordinator`` gate.
 """

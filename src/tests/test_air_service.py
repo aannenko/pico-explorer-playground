@@ -1,178 +1,160 @@
-"""Tests for the outdoor air-quality service (AQI + pollen)."""
-
-import time
+"""Tests for the outdoor air-quality service (AQI and pollen streams)."""
 
 import pytest
 
-from displays.palette import STREAM_COLORS, STREAM_RED, STREAM_YELLOW
+from displays.palette import STREAM_COLORS, STREAM_ORANGE, STREAM_RED, STREAM_YELLOW
 from scheduling.event_window import build_event_windows
-from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
+from services.air_service import AirService, _AirHours
 from services.fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError
-from services.air_service import (
-    AirService,
-    _build_events,
-    _dominant_pollen,
-)
 
-_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
-_AQI_THR = (60, 80)
-_POLLEN_THR = (50, 100)
-
-_T0 = "2026-06-04T10:00"
-_T1 = "2026-06-04T11:00"
-_T2 = "2026-06-04T12:00"
-_EPOCH0 = time.mktime((2026, 6, 4, 10, 0, 0, 0, 0))
+_POLLEN_THR = [
+    ("alder", (1, 11, 101)),
+    ("birch", (1, 11, 51)),
+    ("grass", (1, 6, 31)),
+    ("mugwort", (1, 6, 11)),
+    ("ragweed", (1, 6, 11)),
+]
+_SPECIES = [species for species, _ in _POLLEN_THR]
+_AQI_THR = (60, 80, 100)
+_T0 = 1_794_855_600
 _HOUR = 3600
-
-
-def _aq_payload(times, aqi, **pollen) -> dict:
-    """Air-quality-shaped payload; absent species default to all-zero hours."""
-    hourly = {"time": list(times), "european_aqi": list(aqi)}
-    for sp in _SPECIES:
-        hourly[sp + "_pollen"] = list(pollen.get(sp, [0] * len(times)))
-    return {"hourly": hourly}
-
-
-def _events(aq):
-    return _build_events(aq, _SPECIES, _AQI_THR, _POLLEN_THR)
+_CET_SEC = 3600
 
 
 # ---------------------------------------------------------------------------
-# _dominant_pollen (bespoke: tie by highest count, not list order)
+# _AirHours
 # ---------------------------------------------------------------------------
 
 
-def test_dominant_pollen_all_below_returns_none_label():
-    assert _dominant_pollen(("GRASS", "BIRCH"), [10, 20], 50, 100) == (0, None)
+def _row(aqi, **pollen) -> list:
+    """One hour's values: the AQI, then each species' count, absent species 0."""
+    return [aqi] + [pollen.get(species, 0) for species in _SPECIES]
 
 
-def test_dominant_pollen_highest_severity_wins():
-    assert _dominant_pollen(("GRASS", "BIRCH"), [55, 120], 50, 100) == (2, "BIRCH")
+def _hours(*rows, pollen_thresholds=_POLLEN_THR, max_events=10):
+    """Feed hourly rows from ``_T0``; return the AQI and pollen events."""
+    hours = _AirHours(_AQI_THR, pollen_thresholds, lambda utc: _CET_SEC, max_events, 0)
+    for i, row in enumerate(rows):
+        hours.add_hour(_T0 + i * _HOUR, row)
+    return hours.aqi.events(), hours.pollen.events()
 
 
-def test_dominant_pollen_tie_broken_by_count_not_order():
-    # Both warning-level; the higher raw count wins even though it is listed 2nd.
-    assert _dominant_pollen(("GRASS", "MUGW"), [55, 70], 50, 100) == (1, "MUGW")
+def _aqi(*rows):
+    return _hours(*rows)[0]
 
 
-def test_dominant_pollen_skips_none_values():
-    assert _dominant_pollen(("GRASS", "BIRCH"), [None, 55], 50, 100) == (1, "BIRCH")
-
-
-# ---------------------------------------------------------------------------
-# _build_events
-# ---------------------------------------------------------------------------
+def _pollen(*rows):
+    return _hours(*rows)[1]
 
 
 def test_below_threshold_hours_emit_nothing():
-    assert _events(_aq_payload([_T0], [10])) == []
+    assert _hours(_row(10)) == ([], [])
 
 
 def test_none_values_emit_nothing():
-    assert _events(_aq_payload([_T0], [None], grass=[None])) == []
+    assert _hours(_row(None, grass=None)) == ([], [])
 
 
-def test_empty_payload_yields_no_events():
-    assert _events(_aq_payload([], [])) == []
+def test_single_aqi_hour_is_one_local_event():
+    events = _aqi(_row(60))
+
+    assert [(e.label, e.start_timestamp, e.wall_clock_duration_sec, e.color_index) for e in events] == [
+        ("AQI", _T0 + _CET_SEC, _HOUR, STREAM_YELLOW)
+    ]
 
 
-def test_single_aqi_warning_hour():
-    events = _events(_aq_payload([_T0], [60]))
-
-    assert len(events) == 1
-    ev = events[0]
-    assert ev.label == "AQI"
-    assert ev.color_index == STREAM_YELLOW
-    assert ev.start_timestamp == _EPOCH0
-    assert ev.wall_clock_duration_sec == _HOUR
+@pytest.mark.parametrize(
+    "aqi, expected_index",
+    [(60, STREAM_YELLOW), (79, STREAM_YELLOW), (80, STREAM_ORANGE), (99, STREAM_ORANGE), (100, STREAM_RED)],
+)
+def test_aqi_sets_the_level(aqi, expected_index):
+    assert _aqi(_row(aqi))[0].color_index == expected_index
 
 
-def test_severe_maps_to_red():
-    assert _events(_aq_payload([_T0], [80]))[0].color_index == STREAM_RED
+@pytest.mark.parametrize(
+    "grains, expected_index", [(1, STREAM_YELLOW), (11, STREAM_ORANGE), (51, STREAM_RED)]
+)
+def test_pollen_level_uses_the_species_thresholds(grains, expected_index):
+    assert [(e.label, e.color_index) for e in _pollen(_row(10, birch=grains))] == [("BIRCH", expected_index)]
 
 
-def test_pollen_label_is_uppercased_species_name():
-    assert _events(_aq_payload([_T0], [10], birch=[120]))[0].label == "BIRCH"
+def test_dominant_pollen_compares_levels_by_each_species_thresholds():
+    # 20 grass grains is level 2, while 12 mugwort grains is already level 3.
+    assert [(e.label, e.color_index) for e in _pollen(_row(0, grass=20, mugwort=12))] == [("MUGWORT", STREAM_RED)]
 
 
-def test_aqi_wins_tie_over_pollen():
-    # Equal level AQI vs pollen -> AQI wins (listed first).
-    events = _events(_aq_payload([_T0], [60], grass=[55]))
-    assert events[0].label == "AQI"
+def test_dominant_pollen_tie_goes_to_the_first_listed_not_the_higher_count():
+    assert [e.label for e in _pollen(_row(0, grass=7, mugwort=10))] == ["GRASS"]
 
 
-def test_pollen_wins_when_strictly_higher():
-    events = _events(_aq_payload([_T0], [60], grass=[120]))
-    assert events[0].label == "GRASS"
-    assert events[0].color_index == STREAM_RED
+def test_dominant_pollen_skips_none_values():
+    assert [e.label for e in _pollen(_row(0, grass=None, mugwort=2))] == ["MUGWORT"]
 
 
-def test_contiguous_same_metric_and_level_merge():
-    events = _events(_aq_payload([_T0, _T1], [60, 65]))
-    assert len(events) == 1
-    assert events[0].wall_clock_duration_sec == 2 * _HOUR
+def test_aqi_and_pollen_in_the_same_hour_both_emit():
+    aqi, pollen = _hours(_row(60, grass=40))
+
+    assert [(e.label, e.color_index) for e in aqi] == [("AQI", STREAM_YELLOW)]
+    assert [(e.label, e.color_index) for e in pollen] == [("GRASS", STREAM_RED)]
 
 
-def test_severity_change_splits_run():
-    events = _events(_aq_payload([_T0, _T1], [60, 80]))
-    assert [e.color_index for e in events] == [STREAM_YELLOW, STREAM_RED]
+def test_contiguous_hours_merge_at_their_highest_level():
+    events = _aqi(_row(60), _row(85), _row(65))
+
+    assert [(e.wall_clock_duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
 
 
-def test_metric_change_splits_run_even_at_same_level():
-    events = _events(_aq_payload([_T0, _T1], [60, 10], grass=[0, 55]))
-    assert [e.label for e in events] == ["AQI", "GRASS"]
-    assert [e.color_index for e in events] == [STREAM_YELLOW, STREAM_YELLOW]
+def test_species_change_splits_run_even_at_same_level():
+    events = _pollen(_row(0, grass=2), _row(0, birch=2))
+
+    assert [(e.label, e.color_index) for e in events] == [("GRASS", STREAM_YELLOW), ("BIRCH", STREAM_YELLOW)]
 
 
 def test_gap_hour_breaks_the_run():
-    events = _events(_aq_payload([_T0, _T1, _T2], [60, 10, 60]))
-    assert len(events) == 2
-    assert events[1].start_timestamp == _EPOCH0 + 2 * _HOUR
+    events = _aqi(_row(60), _row(10), _row(60))
+
+    assert [e.start_timestamp - _CET_SEC for e in events] == [_T0, _T0 + 2 * _HOUR]
 
 
-def test_time_discontinuity_does_not_merge_into_wide_bar():
-    events = _events(_aq_payload([_T0, _T2], [60, 60]))  # 2h jump
-    assert len(events) == 2
-    assert all(e.wall_clock_duration_sec == _HOUR for e in events)
-    assert events[1].start_timestamp == _EPOCH0 + 2 * _HOUR
+def test_no_species_is_aqi_only():
+    aqi, pollen = _hours([60], pollen_thresholds=[])
+
+    assert [e.label for e in aqi] == ["AQI"]
+    assert pollen == []
 
 
-def test_mismatched_array_lengths_raise():
-    payload = {
-        "hourly": {
-            "time": [_T0, _T1],
-            "european_aqi": [60],
-            "grass_pollen": [0, 0], "birch_pollen": [0, 0], "alder_pollen": [0, 0],
-            "mugwort_pollen": [0, 0], "ragweed_pollen": [0, 0],
-        }
-    }
-    with pytest.raises(ValueError):
-        _events(payload)
+def test_each_stream_keeps_at_most_max_events():
+    _, pollen = _hours(_row(0, grass=2), _row(0, birch=2), _row(0, grass=2), max_events=2)
 
-
-def test_missing_pollen_key_raises():
-    payload = {"hourly": {"time": [_T0], "european_aqi": [10]}}
-    with pytest.raises(KeyError):
-        _events(payload)
-
-
-def test_empty_species_is_aqi_only():
-    aq = {"hourly": {"time": [_T0], "european_aqi": [60]}}
-    events = _build_events(aq, [], _AQI_THR, _POLLEN_THR)
-    assert len(events) == 1
-    assert events[0].label == "AQI"
+    assert [e.label for e in pollen] == ["GRASS", "BIRCH"]
 
 
 def test_emitted_color_indices_are_valid_palette_indices():
-    for ev in _events(_aq_payload([_T0, _T1], [60, 80])):
-        assert ev.color_index in (STREAM_YELLOW, STREAM_RED)
+    aqi, pollen = _hours(_row(60, grass=2), _row(100, grass=40))
+
+    for ev in aqi + pollen:
         assert 0 <= ev.color_index < len(STREAM_COLORS)
 
 
 # ---------------------------------------------------------------------------
 # Service integration
 # ---------------------------------------------------------------------------
+
+_HEADER = b"time,european_aqi (EAQI)," + b",".join(
+    species.encode() + b"_pollen (grains/m\xc2\xb3)" for species in _SPECIES
+)
+_QUIET_ROW = b"10,0.0,0.0,0.0,0.0,0.0"
+# past_hours + forecast_hours of the harness.
+_ROW_COUNT = 5
+
+
+def _csv(*rows: bytes, row_count: int = _ROW_COUNT) -> list[bytes]:
+    """A CSV body of hourly rows from ``_T0``, padded with quiet hours to ``row_count``."""
+    rows += (_QUIET_ROW,) * (row_count - len(rows))
+    return [b"latitude,longitude", b"50.0,14.0", b"", _HEADER] + [
+        b"%d,%s" % (_T0 + i * _HOUR, row) for i, row in enumerate(rows)
+    ]
 
 
 class _FakeWifi:
@@ -202,43 +184,50 @@ class _Harness:
         self.wifi = _FakeWifi(connected)
         self.schedule = _FakeSchedule()
         self.coord = FetchCoordinator()
-        self.payload = _aq_payload([_T0], [60])  # AQI warning
+        self.lines = _csv(b"60,0.0,0.0,0.0,0.0,0.0")  # AQI warning
         self.raise_exc = None
         self.get_calls: list[tuple] = []
         self.service = AirService(
             latitude=lat,
             longitude=lon,
-            species=_SPECIES,
             aqi_thresholds=_AQI_THR,
             pollen_thresholds=_POLLEN_THR,
             wifi=self.wifi,
             coordinator=self.coord,
             schedule=self.schedule,
             get_ticks_ms=lambda: self.clock_val,
-            http_get=self._http_get,
+            http_get_lines=self._http_get_lines,
             interval_ms=1000,
             forecast_hours=4,
             past_hours=1,
+            utc_offset_sec=lambda utc: _CET_SEC,
+            max_events=10,
+            get_utc_time=lambda: _T0,
         )
-        stream = Stream(
-            self.service.iter_events(),
-            events_iter_factory=self.service.iter_events,
-            get_generation=lambda: self.service.generation,
-            get_status=lambda: self.service.status,
-        )
-        self.window = build_event_windows(((1, 2),) * len(STREAM_COLORS), [stream])[0]
+        self.windows = build_event_windows(((1, 2),) * len(STREAM_COLORS), self.service.build_streams())
 
-    def _http_get(self, url, timeout_sec=None):
+    def _http_get_lines(self, url, on_line, timeout_sec=None):
         self.get_calls.append((url, timeout_sec))
         if self.raise_exc is not None:
             raise self.raise_exc
-        return self.payload
+        for line in self.lines:
+            on_line(line)
+
+    def fetch(self) -> None:
+        self.service.tick()
+        self.schedule.run_all()
+        self.service.tick()  # harvest
 
     def advance(self, ms: int) -> None:
         self.clock_val += ms
 
-    def visible_names(self) -> list[str]:
-        return [e.label for e, _ in self.window.get_visible(_EPOCH0 - _HOUR, _EPOCH0 + 100 * _HOUR)]
+    def visible(self, stream_index: int = 0) -> list[tuple[str, int]]:
+        window = self.windows[stream_index]
+        local_t0 = _T0 + _CET_SEC
+        return [(e.label, e.start_timestamp) for e, _ in window.get_visible(local_t0, local_t0 + 100 * _HOUR)]
+
+    def visible_names(self, stream_index: int = 0) -> list[str]:
+        return [label for label, _ in self.visible(stream_index)]
 
 
 def test_disabled_when_coordinates_unset():
@@ -248,67 +237,64 @@ def test_disabled_when_coordinates_unset():
         h.service.tick()
 
     assert h.get_calls == []
-    assert h.service.status == DISABLED
-    assert h.window.status() == DISABLED
 
 
-def test_fetch_publishes_events_and_goes_fresh():
+def test_fetch_publishes_local_events():
     h = _Harness()
 
     h.service.tick()
     assert h.get_calls == []
-    assert h.service.status == STALE
 
     h.schedule.run_all()
     assert len(h.get_calls) == 1
 
     h.service.tick()  # harvest: publish the parsed snapshot
     assert h.service.generation == 1
-    assert h.visible_names() == ["AQI"]
-    assert h.service.status == FRESH
+    assert h.visible() == [("AQI", _T0 + _CET_SEC)]
 
 
 def test_url_is_air_quality_with_species_and_timeout():
     h = _Harness(lat=50.5, lon=14.25)
-    h.service.tick()
-    h.schedule.run_all()
+    h.fetch()
 
     url, timeout = h.get_calls[0]
     assert url.startswith("http://air-quality-api.open-meteo.com")  # HTTP on purpose, not HTTPS
     assert "latitude=50.5" in url
     assert "past_hours=1" in url
-    assert "hourly=european_aqi,grass_pollen,birch_pollen,alder_pollen,mugwort_pollen,ragweed_pollen" in url
+    assert "hourly=european_aqi,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen" in url
     assert "uv_index" not in url
     assert timeout == 3
 
 
+def test_one_fetch_publishes_aqi_and_pollen_to_their_own_streams():
+    h = _Harness()
+    h.lines = _csv(b"60,0.0,0.0,0.0,0.0,0.0", b"0,0.0,0.0,0.0,0.0,3.0")
+    h.fetch()
+
+    assert h.visible_names(0) == ["AQI"]
+    assert h.visible_names(1) == ["RAGWEED"]
+
+
 def test_http_error_backs_off_and_keeps_prior_snapshot():
     h = _Harness()
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest -> ["AQI"]
+    h.fetch()
     assert h.visible_names() == ["AQI"]
 
     h.raise_exc = HttpConnectError("down")
     h.advance(1000)
-    h.service.tick()
-    h.schedule.run_all()
-    h.service.tick()  # harvest the failure -> backoff
+    h.fetch()
 
     assert h.service._failures == 1
     assert h.service.generation == 1
     assert h.visible_names() == ["AQI"]
 
 
-def test_malformed_payload_backs_off_without_publishing():
+def test_truncated_body_backs_off_without_publishing():
     h = _Harness()
-    h.payload = {"unexpected": "shape"}
+    h.lines = h.lines[:-1]
 
-    h.service.tick()
-    h.schedule.run_all()
-    assert len(h.get_calls) == 1
+    h.fetch()
 
-    h.service.tick()  # harvest the parse failure -> backoff
     assert h.service._failures == 1
     assert h.service.generation == 0
     assert h.visible_names() == []
@@ -322,18 +308,3 @@ def test_wifi_down_holds_without_fetching():
 
     assert h.get_calls == []
     assert h.schedule.queue == []
-    assert h.service.status == STALE
-
-
-def test_error_status_after_repeated_failures():
-    h = _Harness()
-    h.raise_exc = HttpConnectError("down")
-
-    for _ in range(3):
-        h.advance(700_000)
-        h.service.tick()
-        h.schedule.run_all()
-        h.service.tick()  # harvest records the failure
-
-    assert h.service.status == ERROR
-    assert h.window.status() == ERROR

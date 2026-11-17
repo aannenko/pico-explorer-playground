@@ -16,22 +16,22 @@ leaves them ambiguous.
   ticking (and the buzzer keeps firing) while the user is on a different
   view.
 
-- **Calendar view** — horizontal timeline (time flows left-to-right) with a
-  2-hour sliding window (30 min past, 90 min future) and a "now" marker.
-  Shows up to 5 event-stream rows as colored bars; per-event color encodes
-  meaning (e.g. precipitation intensity, UV / air-quality severity) rather
-  than mere row striping. Bar labels and right-aligned remaining-time markers
-  adapt to bar width. Auto-scrolling, no button interaction.
+- **Calendar view** — an agenda of every stream's events in start order, from
+  those in progress to those starting within a week, under the time and date;
+  redrawn as each minute starts, no button interaction. Each event is a colour
+  field beside a dot on a rail, with its start time on the left; events in
+  progress come first, each with the time left and a progress bar under its
+  field, today's later events say how soon they start, and a header names
+  each later day. Every row is the same height, so events beyond the last
+  row are just not shown.
 
-- **Calendar streams** — built-in rows that work out of the box, each a
+- **Calendar streams** — built-in streams that work out of the box, each a
   long-lived data source the calendar reads passively:
-  - **Work week** and **waste collection** — local generators driven by
-    `config`.
-  - **Weather** (precipitation + UV) and **air quality** (European AQI +
-    pollen) — fetched from Open-Meteo; disabled until coordinates are set in
-    `config.py`.
-  Rows left over are filled by temporary demo streams until bus departures
-  and web configuration land.
+  - **Waste collection** — a local generator driven by `config`.
+  - **Precipitation**, **UV**, **air quality** (European AQI) and **pollen**
+    (the dominant species) — warning levels for the past day and the week
+    ahead from two Open-Meteo fetches, adjacent hours of one warning joined at
+    their highest level; disabled until coordinates are set in `config.py`.
 
 - **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
   gas resistance) in four colour quadrants around a date and time badge.
@@ -46,16 +46,16 @@ leaves them ambiguous.
   realtime via Golemio: one configured stop plus an optional destination
   filter. Blocked on transport — the API is HTTPS-only and on-device TLS
   exhausts the RP2040 heap, so it needs a local HTTPS proxy (which can also
-  hold the API token) or an offline GTFS-static fallback. A demo stream
-  holds its row until then.
+  hold the API token) or an offline GTFS-static fallback. The calendar has no
+  bus stream until then.
 
 ## Planned
 
 - **Web configuration** — a tiny web server to define one-shot and
   repeated (daily / weekly / …) timers. One-shot timers map to a single
   event; repeated timers map to multiple events repeating in a circle
-  (similar to the current ring timer behavior). Will replace
-  `demo_streams.py` as the source of stream definitions (up to 5).
+  (similar to the current ring timer behavior). Will add user-defined
+  calendar streams, such as a work schedule.
 
 - **Integer UI scaling** — one integer scale factor so the same views can
   drive a larger panel (e.g. a planned e-ink screen) with crisp bitmap text

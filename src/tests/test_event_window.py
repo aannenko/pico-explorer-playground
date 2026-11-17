@@ -2,7 +2,7 @@ import pytest
 
 from scheduling.event import Event
 from scheduling.event_window import EventWindow, build_event_windows
-from scheduling.stream import ERROR, FRESH, STALE, Stream
+from scheduling.stream import Stream
 
 
 def _make_event(label: str, start: int, duration: int, color_index: int = 0) -> Event:
@@ -130,7 +130,7 @@ class TestGetVisible:
         )
         assert ew._next[0].start_timestamp == later + 7200
 
-    def test_long_event_does_not_pin_expired_overlapping_history(self):
+    def test_long_event_stays_while_the_ended_events_after_it_are_dropped(self):
         later = 30 * 24 * 3600
 
         def events():
@@ -144,7 +144,15 @@ class TestGetVisible:
 
         visible = ew.get_visible(later, later + 7200)
 
-        assert [event.label for event, _ in visible] == ["current"]
+        assert [event.label for event, _ in visible] == ["long", "current"]
+
+    def test_an_event_in_progress_outlives_a_later_one_that_ended(self):
+        ew = EventWindow(_iter_events(("A", 0, 1000), ("B", 100, 100)), stream_colors=[1])
+        ew.get_visible(0, 500)
+
+        visible = ew.get_visible(300, 500)
+
+        assert [e.label for e, _ in visible] == ["A"]
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +284,16 @@ class TestBoundaryConditions:
         # start + duration = 100 > 50, so A is included
         assert any(e.label == "A" for e, _ in visible)
 
+    @pytest.mark.parametrize("prime", [False, True])
+    def test_events_starting_exactly_at_window_start_stay_even_with_zero_duration(self, prime):
+        # Same-instant departures both keep their minute's column until the window moves past it.
+        ew = EventWindow(_iter_events(("A", 100, 0), ("B", 100, 0), ("C", 160, 0)), stream_colors=[1])
+        if prime:
+            ew.get_visible(40, 300)
+
+        assert [e.label for e, _ in ew.get_visible(100, 300)] == ["A", "B", "C"]
+        assert [e.label for e, _ in ew.get_visible(101, 300)] == ["C"]
+
     def test_single_long_event_spanning_entire_window(self):
         events = _iter_events(("A", 0, 10000),)
         ew = EventWindow(events, stream_colors=[1])
@@ -365,29 +383,6 @@ class TestReplace:
 
 
 # ---------------------------------------------------------------------------
-# Stream colors
-# ---------------------------------------------------------------------------
-
-class TestStreamColors:
-    def test_stream_colors_stored(self):
-        ew = EventWindow(iter([]), stream_colors=[10, 12])
-        assert ew.stream_colors == [10, 12]
-
-    def test_stream_colors_are_read_only(self):
-        ew = EventWindow(iter([]), stream_colors=[10, 11])
-        with pytest.raises(AttributeError):
-            ew.stream_colors = [1, 2]
-
-    def test_replace_preserves_stream_colors(self):
-        ew = EventWindow(_iter_events(("A", 0, 100)), stream_colors=[10, 12])
-        ew.get_visible(0, 200)
-
-        ew.replace(_iter_events(("B", 0, 100)))
-
-        assert ew.stream_colors == [10, 12]
-
-
-# ---------------------------------------------------------------------------
 # build_event_windows — windows sharing one stream_colors list
 # ---------------------------------------------------------------------------
 
@@ -404,15 +399,6 @@ class TestBuildEventWindows:
 
         assert len(windows) == 2
         assert all(isinstance(w, EventWindow) for w in windows)
-
-    def test_all_windows_share_the_same_stream_colors(self):
-        streams = [Stream(_iter_events(("A", 0, 100))) for _ in range(3)]
-
-        windows = build_event_windows(self._STREAM_COLORS, streams)
-
-        # The same stream_colors object is handed to every row.
-        for w in windows:
-            assert w.stream_colors is self._STREAM_COLORS
 
     def test_window_wraps_its_stream_iterator(self):
         streams = [
@@ -475,17 +461,16 @@ class TestOverlapFill:
 
 
 # ---------------------------------------------------------------------------
-# Status + generation-driven refresh (network-backed rows)
+# Generation-driven refresh (network-backed streams)
 # ---------------------------------------------------------------------------
 
 
 class _FakeSource:
-    """Stand-in for a network service: a mutable snapshot + generation/status."""
+    """Stand-in for a network service: a mutable snapshot + generation."""
 
-    def __init__(self, specs, generation: int = 0, status: int = FRESH) -> None:
+    def __init__(self, specs, generation: int = 0) -> None:
         self.specs = specs
         self.generation = generation
-        self.status = status
         self.iter_calls = 0
 
     def iter_events(self):  # -> Iterator[Event]
@@ -495,32 +480,13 @@ class _FakeSource:
     def gen(self) -> int:
         return self.generation
 
-    def stat(self) -> int:
-        return self.status
-
     def _window(self, stream_colors=None) -> EventWindow:
         return EventWindow(
             self.iter_events(),
             stream_colors=stream_colors if stream_colors is not None else [1],
             events_iter_factory=self.iter_events,
             get_generation=self.gen,
-            get_status=self.stat,
         )
-
-
-class TestStatus:
-    def test_status_none_without_get_status(self):
-        ew = EventWindow(iter([]), stream_colors=[1])
-
-        assert ew.status() is None
-
-    def test_status_delegates_to_get_status(self):
-        box = {"v": FRESH}
-        ew = EventWindow(iter([]), stream_colors=[1], get_status=lambda: box["v"])
-
-        assert ew.status() == FRESH
-        box["v"] = ERROR
-        assert ew.status() == ERROR
 
 
 class TestGenerationRefresh:
@@ -554,20 +520,38 @@ class TestGenerationRefresh:
         assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
         assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
 
+    def test_release_drops_the_events_until_the_latest_snapshot_refills_them(self):
+        src = _FakeSource([("A", 0, 100)], generation=0)
+        ew = src._window()
+        ew.get_visible(0, 1000)
+        calls_before = src.iter_calls
+
+        ew.release()
+
+        assert ew._buffer == []
+        assert [e.label for e, _ in ew.get_visible(0, 1000)] == ["A"]
+        assert src.iter_calls == calls_before + 1
+
+    def test_release_keeps_a_static_windows_events(self):
+        ew = EventWindow(_iter_events(("A", 0, 100), ("B", 2000, 100)), stream_colors=[1])
+        ew.get_visible(0, 1000)
+
+        ew.release()
+
+        assert [e.label for e, _ in ew.get_visible(0, 3000)] == ["A", "B"]
+
 
 class TestBuildEventWindowsThreading:
-    def test_status_and_refresh_thread_from_stream(self):
-        src = _FakeSource([("A", 0, 100)], generation=0, status=STALE)
+    def test_refresh_threads_from_stream(self):
+        src = _FakeSource([("A", 0, 100)], generation=0)
         stream = Stream(
             src.iter_events(),
             events_iter_factory=src.iter_events,
             get_generation=src.gen,
-            get_status=src.stat,
         )
 
         window = build_event_windows([1], [stream])[0]
 
-        assert window.status() == STALE
         assert [e.label for e, _ in window.get_visible(0, 1000)] == ["A"]
 
         src.specs = [("B", 0, 100)]

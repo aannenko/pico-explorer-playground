@@ -12,7 +12,7 @@ def build_stream(
 ) -> Stream:
     """Build the waste-collection stream from ``pickups``.
 
-    Occurrences of all pickups are yielded in start-time order; a pickup with
+    Occurrences of all pickups are yielded in start-time order, labels upper-cased; a pickup with
     a non-positive ``period_weeks`` occurs once.
     """
     return Stream(events_iter=_waste_loop(time_service, pickups))
@@ -31,7 +31,7 @@ def _waste_loop(
         if period_sec > 0:
             while start + dur_sec <= now:
                 start += period_sec
-        cursors.append([start, label, color_index, dur_sec, period_sec])
+        cursors.append([start, label.upper(), color_index, dur_sec, period_sec])
 
     while cursors:
         earliest = 0

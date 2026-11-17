@@ -1,6 +1,6 @@
 import time
 
-from displays.palette import STREAM_YELLOW, STREAM_RED
+from displays.palette import STREAM_SEVERITY
 from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
@@ -8,70 +8,50 @@ from services._event_stream_service import EventStreamService
 from services.fetch_machine import FetchCoordinator
 from services.tick_scheduler import TickScheduler
 
-_LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
+class _AirHours:
+    """The AQI and pollen events of an air-quality forecast, built an hour at a time.
 
-def _dominant_pollen(
-    labels: tuple[str, ...], values: list[float | None], warn: int, severe: int
-) -> tuple[int, str | None]:
-    """Return ``(level, label)`` for one hour.
-
-    Highest severity wins; ties go to the highest raw count.  ``(0, None)`` when
-    no species reaches warning.
+    An hour's pollen warning is the species with the highest level, each measured against its own thresholds, so raw
+    counts aren't compared: a tie goes to the species listed first.
     """
-    best_level = 0
-    best_label = None
-    best_value = -1.0
-    for i in range(len(values)):
-        v = values[i]
-        if v is None:
-            continue
-        lvl = event_runs.level(v, warn, severe)
-        if lvl == 0:
-            continue
-        if lvl > best_level or (lvl == best_level and v > best_value):
-            best_level = lvl
-            best_label = labels[i]
-            best_value = v
-    return best_level, best_label
 
+    def __init__(
+        self,
+        aqi_thresholds: tuple[float, float, float],
+        pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
+        utc_offset_sec,  # (int) -> int
+        max_events: int,
+        now_utc: int,
+    ) -> None:
+        self._aqi_thresholds = aqi_thresholds
+        self._pollen_labels = tuple(species.upper() for species, _ in pollen_thresholds)
+        self._species_thresholds = tuple(edges for _, edges in pollen_thresholds)
+        self.aqi = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
+        self.pollen = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
 
-def _build_events(
-    aq_payload: dict, species: tuple[str, ...], aqi_thresholds: tuple[int, int], pollen_thresholds: tuple[int, int]
-) -> list[Event]:
-    """Return the air bars from an air-quality payload.
-
-    Each hour the more severe of AQI and pollen wins; AQI wins ties.
-    """
-    pollen_keys = tuple(s + "_pollen" for s in species)
-    arrays = openmeteo_client.extract_hourly(aq_payload, ("time", "european_aqi") + pollen_keys)
-    times = arrays[0]
-    aqi_arr = arrays[1]
-    pollen_arrs = arrays[2:]
-    pollen_labels = tuple(s.upper() for s in species)
-    aqi_warn, aqi_severe = aqi_thresholds
-
-    emitted: list[tuple[int, str, int]] = []
-    for i in range(len(times)):
-        candidates = []
-        aqi_lvl = event_runs.level(aqi_arr[i], aqi_warn, aqi_severe)
-        if aqi_lvl:
-            candidates.append((aqi_lvl, "AQI", _LEVEL_COLOR[aqi_lvl]))
-        pol_lvl, pol_label = _dominant_pollen(
-            pollen_labels, [arr[i] for arr in pollen_arrs], pollen_thresholds[0], pollen_thresholds[1]
-        )
-        if pol_lvl:
-            candidates.append((pol_lvl, pol_label, _LEVEL_COLOR[pol_lvl]))
-
-        win = event_runs.best_by_priority(candidates)
-        if win is not None:
-            emitted.append((openmeteo_client.parse_iso_local(times[i]), win[0], win[1]))
-
-    return event_runs.merge_runs(emitted)
+    def add_hour(self, utc_epoch: int, values: list[float | None]) -> None:
+        """Add one hour's values: the AQI, then each species' count in ``pollen_thresholds`` order."""
+        self.aqi.add(utc_epoch, "AQI", event_runs.level(values[0], self._aqi_thresholds))
+        # Inline, rather than a helper taking values[1:], as that slice and a returned tuple would cost two
+        # allocations a row.
+        thresholds = self._species_thresholds
+        best_level = 0
+        best_index = 0
+        for i in range(len(thresholds)):
+            species_level = event_runs.level(values[i + 1], thresholds[i])
+            if species_level > best_level:
+                best_level = species_level
+                best_index = i
+        self.pollen.add(utc_epoch, self._pollen_labels[best_index] if best_level else None, best_level)
 
 
 class AirService(EventStreamService):
-    """Air row (European AQI + pollen) over one Open-Meteo air-quality fetch.
+    """European AQI and pollen streams over one Open-Meteo air-quality fetch, coloured by warning level.
+
+    ``pollen_thresholds`` lists ``(species, levels)``: an Open-Meteo pollen name without its ``_pollen``
+    suffix, and the ascending grains/m³ that start levels 1-3.  Event times are local, by ``utc_offset_sec``; each
+    stream keeps at most ``max_events`` events not over by the fetch, at ``get_utc_time``.
 
     Stays disabled unless ``openmeteo_client.is_location_set(latitude, longitude)``.
     """
@@ -80,33 +60,37 @@ class AirService(EventStreamService):
         self,
         latitude: float,
         longitude: float,
-        species: list[str],
-        aqi_thresholds: tuple[int, int],
-        pollen_thresholds: tuple[int, int],
+        aqi_thresholds: tuple[float, float, float],
+        pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
         wifi,  # has is_connected() -> bool
         coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
+        utc_offset_sec,  # (int) -> int
+        max_events: int,
+        get_utc_time=time.time,  # () -> int
         get_ticks_ms=time.ticks_ms,  # () -> int
-        http_get=http_client.get_json,  # (url, timeout_sec) -> dict
+        http_get_lines=http_client.get_lines,  # (url, on_line, timeout_sec) -> None
         timeout_sec: int = 3,
         tick_scheduler: TickScheduler | None = None,
     ) -> None:
         self._lat = latitude
         self._lon = longitude
-        self._species = tuple(species)
         self._aqi_thresholds = aqi_thresholds
         self._pollen_thresholds = pollen_thresholds
-        self._http_get = http_get
+        self._http_get_lines = http_get_lines
         self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
-        self._metrics = ",".join(["european_aqi"] + [s + "_pollen" for s in self._species])
+        self._utc_offset_sec = utc_offset_sec
+        self._max_events = max_events
+        self._get_utc_time = get_utc_time
+        self._metrics = ",".join(["european_aqi"] + [species + "_pollen" for species, _ in pollen_thresholds])
         enabled = openmeteo_client.is_location_set(latitude, longitude)
         super().__init__(
-            wifi, coordinator, schedule, interval_ms, "air", enabled,
+            wifi, coordinator, schedule, interval_ms, "air", enabled, stream_count=2,
             get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,
         )
         if enabled:
@@ -114,10 +98,14 @@ class AirService(EventStreamService):
         else:
             print("[air] disabled: set LATITUDE/LONGITUDE in config.py")
 
-    def _fetch_and_parse(self) -> list[Event]:
+    def _fetch_and_parse(self) -> tuple[list[Event], list[Event]]:
         print("[air] fetching lat=%s lon=%s" % (self._lat, self._lon))
-        payload = openmeteo_client.fetch_air_quality(
-            self._http_get, self._lat, self._lon, self._metrics, self._timeout_sec,
-            self._forecast_hours, self._past_hours,
+        hours = _AirHours(
+            self._aqi_thresholds, self._pollen_thresholds, self._utc_offset_sec, self._max_events,
+            self._get_utc_time(),
         )
-        return _build_events(payload, self._species, self._aqi_thresholds, self._pollen_thresholds)
+        openmeteo_client.fetch_air_quality(
+            self._http_get_lines, self._lat, self._lon, self._metrics, self._timeout_sec,
+            self._forecast_hours, self._past_hours, hours.add_hour,
+        )
+        return hours.aqi.events(), hours.pollen.events()

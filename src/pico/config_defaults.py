@@ -49,31 +49,38 @@ SENSOR_PRESSURE_BANDS = (1000.0, 1013.0, 1025.0)  # hPa: low -> high
 SENSOR_HUMIDITY_BANDS = (30.0, 50.0, 70.0)        # %RH: dry -> very humid
 SENSOR_GAS_BANDS = (100.0, 200.0, 350.0)          # kΩ: polluted -> clean
 
-# Calendar: Weather forecast + UV row (Open-Meteo).
-# The weather row mixes precipitation and UV (they rarely coincide).
-# LATITUDE/LONGITUDE 0.0/0.0 disables fetching and showing weather and AQI.
+# Calendar: precipitation and UV streams (Open-Meteo forecast).
+# LATITUDE/LONGITUDE 0.0/0.0 disables fetching and showing weather and air quality.
 # Precipitation is shown if probability >= PRECIP_PROB_THRESHOLD_PCT.
-# UV_THRESHOLDS according to WHO UV index ``(warning, severe)``.
+# Warnings have 3 levels, shown yellow / orange / red.  Each threshold tuple
+# holds the 3 ascending values at which levels 1, 2 and 3 start.
+# UV_THRESHOLDS: WHO UV index high / very high / extreme.
 LATITUDE = 0.0
 LONGITUDE = 0.0
 PRECIP_PROB_THRESHOLD_PCT = const(30)
-UV_THRESHOLDS = (6, 8)
+UV_THRESHOLDS = (6, 8, 11)
 
-# Calendar: air quality (Euro AQI scale) + pollen grains/m³ row (Open-Meteo).
-# Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps the row disabled).
-# Each threshold tuple is ``(warning, severe)``: at/above the first edge
-# shows a yellow bar, at/above the second a red one.
-# POLLEN_SPECIES is variadic — add/remove Open-Meteo pollen names, without
-# the ``_pollen`` suffix.
-AQI_THRESHOLDS = (60, 80)
-POLLEN_SPECIES = ["grass", "birch", "alder", "mugwort", "ragweed"]
-POLLEN_THRESHOLDS = (50, 100)
+# Calendar: air quality and pollen streams (Open-Meteo air quality).
+# Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps both streams disabled).
+# AQI_THRESHOLDS: European AQI poor / very poor / extremely poor.
+# POLLEN_THRESHOLDS: per Open-Meteo pollen species (without the ``_pollen``
+# suffix), grains/m³ for DWD's low / medium / high burden.  Add or remove
+# species freely; when species share the highest level, the first listed is shown.
+AQI_THRESHOLDS = (60, 80, 100)
+POLLEN_THRESHOLDS = [
+    ("alder",   (1, 11, 101)),
+    ("birch",   (1, 11, 51)),
+    ("grass",   (1, 6, 31)),
+    ("mugwort", (1, 6, 11)),
+    ("ragweed", (1, 6, 11)),
+]
 
 # Calendar: waste collection schedule.  Each entry:
 #   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
-# label is shown on the bar; color_index picks the bar color, 0-based:
+# label is shown on its field; color_index picks the field color, 0-based:
 #   0=orange 1=sky 2=yellow 3=pink 4=blue 5=brown 6=gray 7=green 8=red 9=dark gray
-# period_weeks: 1=weekly, 2=biweekly, 0=once.  Set to [] to disable the row.
+# period_weeks: 1=weekly, 2=biweekly, 0=once.  Set to [] to disable the stream.
+# Labels are shown upper-cased.
 WASTE_SCHEDULE = [
     ("BIO",   5, (2026, 6,  4), 8, 0, 120, 2),
     ("PLAST", 2, (2026, 6,  5), 8, 0, 120, 2),

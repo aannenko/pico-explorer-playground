@@ -36,9 +36,8 @@ APP = build_app(PICO_GRAPHICS, micropython.schedule)
 log_memory("[boot] memory after the first frame:")
 APP.tick_scheduler.start()
 
-# Not machine.idle(): it returns on every interrupt, about 2,500 times a second
-# here, far more often than presses need checking. sleep_ms still runs
-# scheduled callbacks while it waits.
+# time.sleep_ms() allows scheduled callbacks to run while it waits.
+# machine.idle() could be used instead, but it would wake the CPU too frequently.
 _DISPATCH_INTERVAL_MS = const(10)
 while True:
     time.sleep_ms(_DISPATCH_INTERVAL_MS)

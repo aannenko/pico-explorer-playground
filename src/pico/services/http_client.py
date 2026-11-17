@@ -1,4 +1,7 @@
 import gc
+import time
+
+from micropython import const
 
 from utilities.log import log_exception
 
@@ -14,6 +17,11 @@ try:
 except ImportError:
     _ETIMEDOUT = 110
     _EAGAIN = 11
+
+_READ_BYTES = const(256)
+# The air-quality CSV header is 158 B with five pollen species, and about 27 B longer per extra species.
+_MAX_LINE_BYTES = const(512)
+_DEADLINE_MS = const(10_000)
 
 
 class HttpError(Exception):
@@ -37,11 +45,11 @@ class HttpStatusError(HttpError):
 
 
 class HttpParseError(HttpError):
-    """The body isn't valid JSON, or isn't a JSON object."""
+    """The body isn't what the caller expects, e.g. a line is too long."""
 
 
 class HttpProtocolError(HttpError):
-    """The reply isn't a usable HTTP response, e.g. from a captive portal."""
+    """The reply isn't a usable HTTP response, e.g. from a captive portal or cut short."""
 
 
 def _classify_oserror(exc: OSError) -> HttpError:
@@ -51,14 +59,24 @@ def _classify_oserror(exc: OSError) -> HttpError:
     return HttpConnectError(str(exc))
 
 
-def get_json(url: str, headers: dict | None = None, timeout_sec: int = 3) -> dict:
-    """GET ``url`` and return the parsed JSON body as a dict.
+def get_lines(
+    url: str,
+    on_line,  # (bytes) -> None
+    timeout_sec: int = 3,
+    max_line_bytes: int = _MAX_LINE_BYTES,
+    deadline_ms: int = _DEADLINE_MS,
+) -> None:
+    """GET ``url`` and pass each line of its body to ``on_line``, as bytes without its ``\\n`` or ``\\r\\n``.
 
-    Raises an ``HttpError`` subclass for transport, status, protocol and JSON
-    failures; anything else (e.g. ``MemoryError``) is logged and re-raised.
+    Streams the body, holding at most one read and one line, so its size doesn't matter.  ``timeout_sec`` bounds
+    each socket operation, and ``deadline_ms`` the body, checked between reads of up to 256 bytes: a peer that
+    trickles bytes can stretch one read well beyond it.  Raises an ``HttpError`` subclass for transport, status and
+    protocol failures, ``HttpParseError`` for a line longer than ``max_line_bytes`` and ``HttpTimeoutError`` past the
+    deadline; whatever ``on_line`` raises propagates, and anything else (e.g. ``MemoryError``) is logged and
+    re-raised.
     """
     try:
-        return _get_json(url, headers, timeout_sec)
+        _get_lines(url, on_line, timeout_sec, max_line_bytes, deadline_ms)
     except HttpError:
         raise
     except Exception as exc:
@@ -66,33 +84,58 @@ def get_json(url: str, headers: dict | None = None, timeout_sec: int = 3) -> dic
         raise
 
 
-def _get_json(url: str, headers: dict | None, timeout_sec: int) -> dict:
+def _get_lines(url: str, on_line, timeout_sec: int, max_line_bytes: int, deadline_ms: int) -> None:
     gc.collect()  # reduces fragmented-heap allocation failures
     response = None
     try:
         try:
-            response = _requests.get(url, headers=headers or {}, timeout=timeout_sec)
+            response = _requests.get(url, timeout=timeout_sec)
         except OSError as exc:
             raise _classify_oserror(exc)
         except (ValueError, NotImplementedError) as exc:
-            # urequests raises these for a bad status line or an unsupported scheme,
-            # chunked transfer encoding or redirect status.
+            # requests raises these for a bad status line, an unsupported scheme or a redirect it can't follow.
             raise HttpProtocolError(str(exc))
 
         status = response.status_code
         if status < 200 or status > 299:
             raise HttpStatusError(status)
 
-        try:
-            result = response.json()
-        except ValueError:
-            raise HttpParseError("invalid JSON body")
-        except OSError as exc:
-            raise _classify_oserror(exc)
-
-        if not isinstance(result, dict):
-            raise HttpParseError("JSON body is not an object")
-        return result
+        # A chunked or sized body is a BodyStream, which has no readline(), so lines are split here.  Reading into
+        # one buffer saves the n-byte bytearray and its slice that each BodyStream.read(n) allocates.
+        body = response.raw
+        buf = bytearray(_READ_BYTES)
+        view = memoryview(buf)
+        start_ms = time.ticks_ms()
+        pending = b""
+        while True:
+            if time.ticks_diff(time.ticks_ms(), start_ms) > deadline_ms:
+                raise HttpTimeoutError("body read deadline")
+            try:
+                got = body.readinto(buf)
+            except OSError as exc:
+                raise _classify_oserror(exc)
+            except ValueError as exc:
+                # A BodyStream raises this for a body cut short.
+                raise HttpProtocolError(str(exc))
+            if not got:
+                break
+            # The concatenation copies, so the next read can reuse buf.
+            lines = (pending + view[:got]).split(b"\n")
+            pending = lines.pop()
+            for line in lines:
+                _deliver(line, on_line, max_line_bytes)
+            if len(pending) > max_line_bytes:
+                raise HttpParseError("line too long")
+        if pending:
+            _deliver(pending, on_line, max_line_bytes)
     finally:
         if response is not None:
             response.close()
+
+
+def _deliver(line: bytes, on_line, max_line_bytes: int) -> None:
+    if line.endswith(b"\r"):
+        line = line[:-1]
+    if len(line) > max_line_bytes:
+        raise HttpParseError("line too long")
+    on_line(line)

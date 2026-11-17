@@ -1,699 +1,383 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 import displays.calendar as calendar
+from displays.palette import (
+    BLACK,
+    BROWN,
+    DARK_GRAY,
+    GRAY,
+    SKY,
+    STREAM_BROWN,
+    STREAM_COLORS,
+    STREAM_RED,
+    STREAM_SKY,
+    STREAM_YELLOW,
+    WHITE,
+    YELLOW,
+)
 from scheduling.event import Event
 from scheduling.event_window import EventWindow
-from scheduling.stream import DISABLED, ERROR, STALE
 
-from _fakes import bitmap8_width
-from conftest import RecordingRenderer
+from _fakes import bitmap8_width, circle_pixels
 
-
-# ---------------------------------------------------------------------------
-# Fakes / helpers
-# ---------------------------------------------------------------------------
-
-def _make_event(label: str, start: int, duration: int, color_index: int = 0) -> Event:
-    return Event(
-        label=label,
-        start_timestamp=start,
-        wall_clock_duration_sec=duration,
-        color_index=color_index,
-    )
+_BASE = time.mktime((2026, 6, 4, 0, 0, 0, 0, 0))  # Thursday
+_DAY = 24 * 3600
 
 
-def _make_stream(*specs, stream_colors=None) -> EventWindow:
-    return EventWindow(
-        iter([_make_event(*spec) for spec in specs]),
-        stream_colors=stream_colors if stream_colors is not None else [1],
-    )
+def _at(hour: int, minute: int, second: int = 0, day: int = 0) -> int:
+    return _BASE + day * _DAY + hour * 3600 + minute * 60 + second
 
 
-def _mk_display(event_windows=None, now: int = 0, real_remaining_sec=None):  # real_remaining_sec: (int) -> int
-    """Build a calendar.Display with a RecordingRenderer and a fixed-now clock."""
-    renderer = RecordingRenderer()
-    d = calendar.Display(
-        renderer=renderer,
-        event_windows=event_windows if event_windows is not None else [],
-        get_local_time=lambda: now,
-        real_remaining_sec=real_remaining_sec or (lambda local_epoch: local_epoch - now),
-    )
-    return d, renderer
+_NOW = _at(9, 12)
+_SLOT_COUNT = 7
+_RAIL_X = 50  # the rail's left column
+_FIELD_X = 60
+_FIELD_HEIGHT = 22
 
 
-@pytest.fixture(autouse=True)
-def _patch_header(monkeypatch):
-    """Patch `format_header_time` to a deterministic stand-in for every test."""
-    monkeypatch.setattr(calendar, "format_header_time", lambda t: f"HDR:{t}")
+def _slot_y(slot: int) -> int:
+    return 27 + 31 * slot
 
 
-# ---------------------------------------------------------------------------
-# Display lifecycle
-# ---------------------------------------------------------------------------
+class _Raster:
+    """A 240×240 ``PicoGraphics`` that paints: rectangles and circles fill with the current pen, as the firmware's
+    do, and each text is recorded and painted as its ink box."""
 
-class TestDisplayLifecycle:
-    def test_initialize_renders_and_calls_update(self):
-        stream = _make_stream(("work", 0, 100_000))
-        d, renderer = _mk_display(event_windows=[stream], now=50_000)
-
-        d.initialize()
-
-        assert d._active is True
-        call_names = [c[0] for c in renderer.calls]
-        assert "reset" in call_names
-        assert "draw_static_overlay" in call_names
-        assert "write_header" in call_names
-        assert "draw_rows" in call_names
-        assert "draw_time_axis" in call_names
-        assert renderer.update_calls == 1
-
-    def test_initialize_is_idempotent(self):
-        d, renderer = _mk_display()
-
-        d.initialize()
-        renderer.calls.clear()
-        renderer.update_calls = 0
-
-        d.initialize()
-
-        assert renderer.calls == []
-        assert renderer.update_calls == 0
-
-    def test_deinitialize_sets_inactive(self):
-        d, _ = _mk_display()
-
-        d.initialize()
-        d.deinitialize()
-
-        assert d._active is False
-
-    def test_deinitialize_is_idempotent(self):
-        d, _ = _mk_display()
-
-        d.deinitialize()
-        assert d._active is False
-
-
-# ---------------------------------------------------------------------------
-# render()
-# ---------------------------------------------------------------------------
-
-class TestRender:
-    def test_render_redraws(self):
-        d, renderer = _mk_display(now=100_000)
-
-        d.initialize()
-        renderer.calls.clear()
-        renderer.update_calls = 0
-
-        d.render()
-
-        assert renderer.update_calls == 1
-        assert ("write_header", ("HDR:100000",), {}) in renderer.calls
-
-
-# ---------------------------------------------------------------------------
-# Window calculation
-# ---------------------------------------------------------------------------
-
-class TestWindowCalculation:
-    def test_window_passes_correct_range(self):
-        now_val = 100_000
-        d, renderer = _mk_display(
-            event_windows=[_make_stream(("work", 0, 200_000))],
-            now=now_val,
-        )
-
-        d.initialize()
-
-        # Find the draw_rows call and check the window
-        draw_rows_calls = [c for c in renderer.calls if c[0] == "draw_rows"]
-        assert len(draw_rows_calls) == 1
-
-        _, (streams, window_start, window_end, _real_remaining_sec), _ = draw_rows_calls[0]
-        assert window_start == now_val - 1800  # 30 min past
-        assert window_end == now_val + 5400    # 90 min future
-
-    def test_rows_get_the_injected_real_remaining_sec(self):
-        def real_remaining_sec(local_epoch: int) -> int:
-            return 0
-
-        d, renderer = _mk_display(real_remaining_sec=real_remaining_sec)
-
-        d.initialize()
-
-        (draw_rows_call,) = [c for c in renderer.calls if c[0] == "draw_rows"]
-        assert draw_rows_call[1][3] is real_remaining_sec
-
-
-# ---------------------------------------------------------------------------
-# Header formatting
-# ---------------------------------------------------------------------------
-
-class TestHeaderFormatting:
-    def test_header_uses_format_header_time(self, monkeypatch):
-        captured = []
-        monkeypatch.setattr(
-            calendar, "format_header_time", lambda t: (captured.append(t), f"T:{t}")[1]
-        )
-
-        now_val = 42_000
-        d, renderer = _mk_display(now=now_val)
-
-        d.initialize()
-
-        assert captured == [now_val]
-        header_calls = [c for c in renderer.calls if c[0] == "write_header"]
-        assert header_calls[0][1] == (f"T:{now_val}",)
-
-
-# ---------------------------------------------------------------------------
-# _format_remaining helper
-# ---------------------------------------------------------------------------
-
-class TestFmtRemaining:
-    def test_zero(self):
-        assert calendar._format_remaining(0) == "-00:00"
-
-    def test_minutes_only(self):
-        assert calendar._format_remaining(30 * 60) == "-00:30"
-
-    def test_hours_and_minutes(self):
-        assert calendar._format_remaining(2 * 3600 + 15 * 60) == "-02:15"
-
-    def test_large_hours(self):
-        assert calendar._format_remaining(25 * 3600) == "-25:00"
-
-    def test_seconds_are_truncated(self):
-        assert calendar._format_remaining(3661) == "-01:01"
-
-
-# ---------------------------------------------------------------------------
-# Remaining time rendering in draw_rows
-# ---------------------------------------------------------------------------
-
-class FakeGfx:
-    """Minimal PicoGraphics fake for Renderer-level tests."""
-    def __init__(self, width: int = 240, height: int = 240) -> None:
-        self._bounds = (width, height)
-        self.text_calls: list[tuple[str, int, int, int]] = []
-        self.line_calls: list[tuple[int, int, int, int]] = []
-        self.rect_calls: list[tuple[int | None, int, int, int, int]] = []
-        self.current_pen: int | None = None
+    def __init__(self) -> None:
+        self.pixels = [[None] * 240 for _ in range(240)]
+        self.pen = None
+        self.font = None
+        self.texts: list[tuple[str, int, int, int]] = []
+        self.updates = 0
 
     def get_bounds(self) -> tuple[int, int]:
-        return self._bounds
-
-    def set_font(self, font: str) -> None:
-        pass
+        return (240, 240)
 
     def set_pen(self, pen: int) -> None:
-        self.current_pen = pen
+        self.pen = pen
+
+    def set_font(self, font: str) -> None:
+        self.font = font
 
     def clear(self) -> None:
-        pass
+        self.texts.clear()
+        self.rectangle(0, 0, 240, 240)
 
     def rectangle(self, x: int, y: int, w: int, h: int) -> None:
-        self.rect_calls.append((self.current_pen, x, y, w, h))
+        for row in range(max(y, 0), min(y + h, 240)):
+            for col in range(max(x, 0), min(x + w, 240)):
+                self.pixels[row][col] = self.pen
 
-    def line(self, x1: int, y1: int, x2: int, y2: int) -> None:
-        self.line_calls.append((x1, y1, x2, y2))
-
-    def measure_text(self, text: str, *, scale: int) -> int:
-        return bitmap8_width(text, scale)
+    def circle(self, x: int, y: int, r: int) -> None:
+        for col, row in circle_pixels(x, y, r):
+            if 0 <= col < 240 and 0 <= row < 240:
+                self.pixels[row][col] = self.pen
 
     def text(self, text: str, x: int, y: int, *, scale: int) -> None:
-        self.text_calls.append((text, x, y, scale))
+        self.texts.append((text, x, y, self.pen))
+        self.rectangle(x, y, bitmap8_width(text, scale), 7 * scale)
+
+    def measure_text(self, text: str, scale: int) -> int:
+        return bitmap8_width(text, scale)
 
     def update(self) -> None:
-        pass
+        self.updates += 1
+
+    def at(self, x: int, y: int) -> int | None:
+        return self.pixels[y][x]
+
+    def body_texts(self) -> list[tuple[str, int, int, int]]:
+        return [entry for entry in self.texts if entry[2] > 0]
+
+    def body_strings(self) -> list[str]:
+        return [text for text, *_ in self.body_texts()]
 
 
-def _make_renderer(gfx: FakeGfx | None = None) -> tuple[calendar.Renderer, FakeGfx]:
-    if gfx is None:
-        gfx = FakeGfx()
-    geom = calendar.Geometry(
-        pico_graphics=gfx,
-        header_font="bitmap8",
-        header_font_height=8,
-        header_text_scale=3,
-        bar_font="bitmap8",
-        bar_font_height=8,
-        bar_text_scale=2,
+def _ev(label: str, start: int, duration_min: int = 60, color_index: int = STREAM_SKY) -> Event:
+    return Event(label, start, duration_min * 60, color_index=color_index)
+
+
+def _display(*streams, now: int = _NOW, real_remaining_sec=None):
+    """Each stream is a list of events."""
+    gfx = _Raster()
+    geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
+    windows = [EventWindow(iter(events), stream_colors=STREAM_COLORS) for events in streams]
+    clock = [now]
+    display = calendar.Display(
+        geometry,
+        windows,
+        get_local_time=lambda: clock[0],
+        real_remaining_sec=real_remaining_sec or (lambda local_epoch: local_epoch - clock[0]),
     )
-    colors = calendar.Colors(
-        background=0,
-        header_text=1,
-        axis_text=2,
-        empty_row=3,
-        now_line=4,
-    )
-    return calendar.Renderer(geom, colors), gfx
+    return display, gfx, clock
 
 
-def _wall_clock_remaining(window_start: int):  # -> (int) -> int
-    """Stand-in for ``TimeService.real_remaining_sec`` with no DST transition ahead."""
-    now = window_start + calendar.WINDOW_PAST_SEC
-    return lambda local_epoch: local_epoch - now
+def _drawn(*streams, **kwargs) -> _Raster:
+    display, gfx, _clock = _display(*streams, **kwargs)
+    display.initialize()
+    return gfx
 
 
-class TestHeaderGuard:
-    def test_shipped_font_and_scale_build_cleanly(self):
-        """bitmap8/scale 3 is 219 px on the 240 px panel — must not trip."""
-        _renderer, _gfx = _make_renderer()
+def _right_x(text: str) -> int:
+    return 240 - 6 - bitmap8_width(text, 2)
 
-    def test_raises_when_header_too_wide(self):
-        """The calendar header is drawn unmeasured at x=0, so an over-wide font
-        or scale must fail at boot rather than clip the date silently."""
+
+# ---------------------------------------------------------------------------
+# Durations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sec, text",
+    [
+        (-30, "0m"), (0, "0m"), (1, "1m"), (60, "1m"), (61, "2m"), (59 * 60, "59m"), (59 * 60 + 1, "1h00"),
+        (9 * 3600 + 48 * 60, "9h48"), (_DAY - 60, "23h59"), (_DAY, "1d00"), (2 * _DAY + 8 * 3600, "2d08"),
+    ],
+)
+def test_durations_round_up_to_whole_minutes(sec, text):
+    assert calendar._format_duration(sec) == text
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle and cadence
+# ---------------------------------------------------------------------------
+
+
+class TestLifecycle:
+    def test_initialize_draws_one_frame_and_is_idempotent(self):
+        display, gfx, _clock = _display([_ev("RAIN", _at(11, 0))])
+
+        display.initialize()
+        display.initialize()
+
+        assert gfx.updates == 1
+
+    def test_reentry_draws_again(self):
+        display, gfx, _clock = _display([_ev("RAIN", _at(11, 0))])
+
+        display.initialize()
+        display.deinitialize()
+        display.initialize()
+
+        assert gfx.updates == 2
+
+    def test_leaving_releases_a_refreshed_window_and_reentry_refills_it(self):
+        snapshot = [_ev("RAIN", _at(11, 0))]
+        window = EventWindow(
+            iter(snapshot), stream_colors=STREAM_COLORS, events_iter_factory=lambda: iter(snapshot),
+            get_generation=lambda: 1,
+        )
+        gfx = _Raster()
+        display = calendar.Display(
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2), [window], get_local_time=lambda: _NOW,
+            real_remaining_sec=lambda local_epoch: local_epoch - _NOW,
+        )
+        display.initialize()
+
+        display.deinitialize()
+
+        assert window._buffer == []
+        assert display._visible == [()]
+        display.initialize()
+        assert "RAIN" in gfx.body_strings()
+
+    def test_redraws_only_once_the_minute_changes(self, fake_ticks):
+        display, gfx, clock = _display([_ev("RAIN", _at(11, 0))], now=_at(9, 12, 20))
+        display.initialize()
+
+        fake_ticks[0] = 39_999
+        clock[0] = _at(9, 12, 59)
+        display.render()
+        assert gfx.updates == 1
+
+        fake_ticks[0] = 40_000
+        clock[0] = _at(9, 13)
+        display.render()
+        assert gfx.updates == 2
+        assert ("09:13", 0, 0, WHITE) in gfx.texts
+        assert ("in 1h47", _right_x("in 1h47"), _slot_y(0) + 4, BLACK) in gfx.texts
+
+    def test_too_wide_a_header_fails_at_construction(self):
         with pytest.raises(RuntimeError, match="no room for header"):
-            calendar.Geometry(
-                pico_graphics=FakeGfx(),
-                header_font="bitmap8",
-                header_font_height=8,
-                header_text_scale=4,  # 292 px on a 240 px panel
-                bar_font="bitmap8",
-                bar_font_height=8,
-                bar_text_scale=2,
-            )
+            calendar.Geometry(_Raster(), "bitmap8", 8, 4, 2)
 
-    def test_wider_panel_accepts_the_larger_scale(self):
-        """The guard is a function of panel width, not a hardcoded scale cap —
-        the same scale that fails at 240 px succeeds on a wider panel."""
-        geom = calendar.Geometry(
-            pico_graphics=FakeGfx(width=320, height=240),
-            header_font="bitmap8",
-            header_font_height=8,
-            header_text_scale=4,
-            bar_font="bitmap8",
-            bar_font_height=8,
-            bar_text_scale=2,
-        )
-
-        assert geom.width == 320
-
-
-class TestRemainingTime:
-    def test_remaining_shown_when_event_extends_beyond_window(self):
-        renderer, gfx = _make_renderer()
-        now = 100_000
-        window_start = now - 1800
-        window_end = now + 5400
-
-        # Event: started 10 min ago, lasts 3 hours (end well beyond window)
-        ev_duration = 3 * 3600
-        stream = _make_stream(("work", now - 600, ev_duration), stream_colors=[10])
-        stream.get_visible(window_start, window_end)  # prime the buffer
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        # Should find a text call with the remaining time format.
-        # Event started 10 min ago, lasts 3 h → remaining = 2 h 50 min.
-        expected_text = "-02:50"
-        rem_texts = [t for t, *_ in gfx.text_calls if t == expected_text]
-        assert len(rem_texts) == 1
-
-    def test_remaining_counts_real_seconds_to_the_bar_end(self):
-        renderer, gfx = _make_renderer()
-        now = 100_000
-        window_start, window_end = now - 1800, now + 5400
-        stream = _make_stream(("work", now - 600, 3 * 3600), stream_colors=[10])
-        stream.get_visible(window_start, window_end)
-        asked: list[int] = []
-
-        def real_remaining_sec(local_epoch: int) -> int:
-            asked.append(local_epoch)
-            return local_epoch - now + 3600  # a fall-back lies ahead
-
-        renderer.draw_rows([stream], window_start, window_end, real_remaining_sec)
-
-        assert asked == [now - 600 + 3 * 3600]
-        assert "-03:50" in [t for t, *_ in gfx.text_calls]
-
-    def test_remaining_not_shown_when_event_ends_within_window(self):
-        renderer, gfx = _make_renderer()
-        now = 100_000
-        window_start = now - 1800
-        window_end = now + 5400
-
-        # Event: started 10 min ago, lasts 30 min (ends within window)
-        stream = _make_stream(("short", now - 600, 1800), stream_colors=[10])
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        # No remaining-time text (only the name label if any)
-        rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
-        assert len(rem_texts) == 0
-
-    def test_remaining_not_shown_when_bar_too_narrow_for_both(self):
-        renderer, gfx = _make_renderer()
-        now = 100_000
-        window_start = now - 1800
-        window_end = now + 5400
-
-        stream = _make_stream(
-            ("AVERYLONGEVENTNAME", now + 4800, 7200),
-            stream_colors=[10],
-        )
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
-        assert len(rem_texts) == 0
+    def test_too_few_slots_fail_at_construction(self):
+        with pytest.raises(RuntimeError, match="no room for two slots"):
+            calendar.Geometry(_Raster(), "bitmap8", 8, 3, 14)
 
 
 # ---------------------------------------------------------------------------
-# Bar colors (renderer paints the pen resolved by the window)
+# Header and rail
 # ---------------------------------------------------------------------------
 
-class TestBarColors:
-    """``draw_rows`` is pure geometry: it paints each bar with the pen the
-    window resolved at fill time (``stream_colors[color_index]``).
 
-    The stream color pens are distinct from the renderer's ``empty_row`` pen
-    (3), so filtering recorded rectangles to stream color pens isolates the
-    event bars from the per-row background fill.
-    """
+class TestFrame:
+    def test_header_shows_time_in_white_and_date_in_gray_at_a_fixed_x(self):
+        gfx = _drawn([])
 
-    # Two categories — in-range palette slots (pen == slot under PEN_P4, so the
-    # bar pen also indexes LABEL_FOR_SLOT for the label colour).
-    _STREAM_COLORS = [10, 8]
-    _PENS = (10, 8)
+        assert ("09:12", 0, 0, WHITE) in gfx.texts
+        assert ("Thu 4 Jun", 75, 0, GRAY) in gfx.texts
 
-    def _bar_pens(self, gfx: FakeGfx) -> list[int]:
-        return [pen for (pen, *_rest) in gfx.rect_calls if pen in self._PENS]
+    def test_empty_agenda_is_the_rail_alone(self):
+        gfx = _drawn([], [])
 
-    def test_color_index_selects_category(self):
-        renderer, gfx = _make_renderer()
-        window_start, window_end = 0, 7200
-        stream = EventWindow(
-            iter([
-                _make_event("p", 0, 1800, color_index=0),       # -> 10
-                _make_event("q", 1800, 1800, color_index=1),    # -> 8
-            ]),
-            stream_colors=self._STREAM_COLORS,
-        )
-        stream.get_visible(window_start, window_end)
+        assert gfx.body_texts() == []
+        assert all(gfx.at(x, y) == DARK_GRAY for x in (_RAIL_X, _RAIL_X + 1) for y in range(27, 240))
+        assert [gfx.at(x, 100) for x in (_RAIL_X - 1, _RAIL_X + 2, 150)] == [BLACK, BLACK, BLACK]
+        assert gfx.at(_RAIL_X, 26) == BLACK
 
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
+    def test_rail_runs_on_beside_a_day_header(self):
+        gfx = _drawn([_ev("PAPER", _at(8, 0, day=1))])
 
-        assert self._bar_pens(gfx) == [10, 8]
-
-    def test_same_category_renders_one_colour(self):
-        renderer, gfx = _make_renderer()
-        window_start, window_end = 0, 7200
-        stream = EventWindow(
-            iter([
-                _make_event("r", 0, 1800),
-                _make_event("r", 1800, 1800),
-            ]),
-            stream_colors=[10],
-        )
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        assert self._bar_pens(gfx) == [10, 10]
-
-    def test_out_of_range_color_index_clamps_to_last_entry(self):
-        renderer, gfx = _make_renderer()
-        window_start, window_end = 0, 7200
-        stream = EventWindow(
-            iter([_make_event("x", 0, 1800, color_index=99)]),
-            stream_colors=self._STREAM_COLORS,
-        )
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        assert self._bar_pens(gfx) == [8]  # last stream_colors entry (clamped)
+        assert ("Tomorrow", _FIELD_X, _slot_y(0) + 4, GRAY) in gfx.texts
+        assert all(gfx.at(_RAIL_X, y) == DARK_GRAY for y in range(_slot_y(0), _slot_y(1)))
 
 
 # ---------------------------------------------------------------------------
-# Bar seams — every bar is bracketed by 1px empty-row separators
+# Slots
 # ---------------------------------------------------------------------------
 
-class TestBarSeams:
-    """draw_rows brackets every bar with 1px empty-row seams — at x0-1 and the
-    bar's last column x1-1 — so adjacent / overlapping bars never merge.  The
-    row-background fill is full-width, so the only 1px-wide empty-row rectangles
-    are seams.
 
-    Geometry: window 0..7200 over 240 px → 1 px per 30 s.
-    """
+class TestSlots:
+    def test_an_upcoming_event_fills_its_field_beside_its_dot(self):
+        gfx = _drawn([_ev("RAIN", _at(16, 0), color_index=STREAM_YELLOW)])
+        y = _slot_y(0)
 
-    _EMPTY = 3  # empty_row pen in _make_renderer's Colors
+        assert [gfx.at(_FIELD_X - 1, y + 2), gfx.at(_FIELD_X, y), gfx.at(239, y + 21)] == [BLACK, YELLOW, YELLOW]
+        assert gfx.at(_FIELD_X, y + 22) == BLACK
+        assert [gfx.at(51, y + 11), gfx.at(46, y + 11), gfx.at(45, y + 11)] == [YELLOW, YELLOW, BLACK]
+        assert ("16:00", 42 - bitmap8_width("16:00", 2), y + 4, GRAY) in gfx.texts
+        assert ("RAIN", 66, y + 4, BLACK) in gfx.texts
+        assert ("in 6h48", _right_x("in 6h48"), y + 4, BLACK) in gfx.texts
 
-    def _seam_xs(self, gfx: FakeGfx) -> list[int]:
-        return sorted(x for (p, x, _y, w, _h) in gfx.rect_calls if p == self._EMPTY and w == 1)
+    def test_slots_follow_one_another_at_a_fixed_pitch(self):
+        gfx = _drawn([_ev("A", _at(10, 0)), _ev("B", _at(11, 0)), _ev("C", _at(12, 0))])
 
-    def test_isolated_bar_seam_at_last_column(self):
-        renderer, gfx = _make_renderer()
-        # One event 0..1800 → x0=0, x1=60.  x0-1=-1 is off-screen (skipped),
-        # x1-1=59 is drawn.
-        stream = EventWindow(iter([_make_event("a", 0, 1800)]), stream_colors=[10])
-        stream.get_visible(0, 7200)
+        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x == 66] == [
+            ("A", _slot_y(0) + 4), ("B", _slot_y(1) + 4), ("C", _slot_y(2) + 4)
+        ]
+        assert [gfx.at(100, _slot_y(1) - 1), gfx.at(100, _slot_y(1))] == [BLACK, SKY]
 
-        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
+    def test_an_event_in_progress_has_a_progress_bar_under_its_field(self):
+        gfx = _drawn([_ev("BIO", _at(8, 0), 120, STREAM_BROWN)])
+        y = _slot_y(0)
+        # 72 of 120 minutes gone: 108 of the field's 180 px.
+        elapsed_end = _FIELD_X + 108
 
-        assert self._seam_xs(gfx) == [59]
+        assert gfx.at(100, y + 21) == BROWN
+        assert all(gfx.at(x, y + row) == WHITE for x in (_FIELD_X, elapsed_end - 1) for row in range(22, 26))
+        assert all(gfx.at(x, y + row) == DARK_GRAY for x in (elapsed_end, 239) for row in range(22, 26))
+        assert gfx.at(_FIELD_X, y + 26) == BLACK
+        assert ("08:00", 0, y + 4, WHITE) in gfx.texts
+        assert ("BIO", 66, y + 4, WHITE) in gfx.texts
+        assert ("48m left", _right_x("48m left"), y + 4, WHITE) in gfx.texts
 
-    def test_adjacent_bars_share_a_seam_at_the_boundary(self):
-        renderer, gfx = _make_renderer()
-        # a: 0..1800 (x0=0, x1=60); b: 1800..3600 (x0=60, x1=120).
-        stream = EventWindow(
-            iter([_make_event("a", 0, 1800, 0), _make_event("b", 1800, 1800, 1)]),
-            stream_colors=[10, 11],
+    def test_events_in_progress_come_first_in_start_order_across_windows(self):
+        gfx = _drawn(
+            [_ev("BIO", _at(8, 0), 120, STREAM_BROWN), _ev("PLAST", _at(10, 0), 60, STREAM_YELLOW)],
+            [_ev("GRASS", _at(7, 0), 12 * 60, STREAM_RED), _ev("UV", _at(11, 0), 300, STREAM_RED)],
         )
-        stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["GRASS", "BIO", "PLAST", "UV"]
+        assert [gfx.at(_FIELD_X, _slot_y(slot) + 22) for slot in range(4)] == [WHITE, WHITE, BLACK, BLACK]
 
-        # a → seam 59 (x1-1); b → seam 59 (x0-1, coincides) + seam 119 (x1-1).
-        assert set(self._seam_xs(gfx)) == {59, 119}
+    def test_events_starting_together_keep_their_windows_order(self):
+        gfx = _drawn([_ev("FIRST", _at(10, 0))], [_ev("SECOND", _at(10, 0))])
 
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["FIRST", "SECOND"]
 
-# ---------------------------------------------------------------------------
-# Bar truncation — overlapping bars clip to the next event's start
-# ---------------------------------------------------------------------------
+    def test_ended_events_are_gone(self):
+        gfx = _drawn([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
 
-class TestBarTruncation:
-    """draw_rows clips each bar to the next visible event's start so
-    overlapping bars render as clean non-overlapping segments.
+        assert "DONE" not in gfx.body_strings()
 
-    Geometry: window 0..7200 over 240 px → 1 px per 30 s.
-    """
+    def test_events_beyond_the_last_slot_are_not_shown(self):
+        gfx = _drawn([_ev(str(i), _at(10 + i, 0)) for i in range(_SLOT_COUNT + 2)])
 
-    def _rects_for_pen(self, gfx: FakeGfx, pen: int) -> list[tuple[int, int]]:
-        return [(x, w) for (p, x, _y, w, _h) in gfx.rect_calls if p == pen]
+        labels = [text for text, x, *_ in gfx.body_texts() if x == 66]
+        assert labels == [str(i) for i in range(_SLOT_COUNT)]
 
-    def test_overlapping_bar_clipped_to_next_start(self):
-        renderer, gfx = _make_renderer()
-        stream = EventWindow(
-            iter([_make_event("A", 0, 3600, 0), _make_event("B", 1800, 1800, 1)]),
-            stream_colors=[10, 11],
+    def test_label_is_cut_to_end_before_the_time_left(self):
+        gfx = _drawn([_ev("PLASTIC+METAL", _at(9, 0), 120, STREAM_YELLOW)])
+        note_x = _right_x("1h48 left")
+
+        label = next(text for text, x, *_ in gfx.body_texts() if x == 66)
+        assert "PLASTIC+METAL".startswith(label)
+        assert 66 + bitmap8_width(label, 2) <= note_x - 6 < 66 + bitmap8_width("PLASTIC+METAL"[:len(label) + 1], 2)
+
+    def test_a_long_label_without_a_note_reaches_the_field_inset(self):
+        full = "PLASTIC AND METAL WASTE"
+        gfx = _drawn([_ev(full, _at(8, 0, day=1))])
+
+        label = next(text for text, x, *_ in gfx.body_texts() if x == 66)
+        assert full.startswith(label)
+        assert 66 + bitmap8_width(label, 2) <= 240 - 6 < 66 + bitmap8_width(full[:len(label) + 1], 2)
+
+    def test_an_event_in_progress_since_before_today_shows_its_weekday(self):
+        gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60, STREAM_RED)])
+
+        assert ("Wed", 42 - bitmap8_width("Wed", 2), _slot_y(0) + 4, WHITE) in gfx.texts
+        assert "1d20 left" in gfx.body_strings()
+
+    def test_notes_use_the_real_time_left(self):
+        gfx = _drawn(
+            [_ev("UV", _at(9, 0), 60), _ev("RAIN", _at(11, 0))],
+            real_remaining_sec=lambda local_epoch: local_epoch - _NOW + 3600,
         )
-        stream.get_visible(0, 7200)
 
-        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
+        notes = [text for text, *_ in gfx.body_texts() if text.endswith(" left") or text.startswith("in ")]
+        assert notes == ["1h48 left", "in 2h48"]
 
-        # A (pen 10) clips to B's start: 1800 s → 60 px, not its full 3600 s.
-        assert self._rects_for_pen(gfx, 10) == [(0, 60)]
-        assert self._rects_for_pen(gfx, 11) == [(60, 60)]  # B: 1800..3600
+    def test_a_clock_stepped_back_hides_events_past_the_horizon(self, fake_ticks):
+        later = _NOW + calendar.HORIZON_SEC - 3600
+        display, gfx, clock = _display([_ev("FAR", later)])
+        display.initialize()
+        assert "FAR" in gfx.body_strings()
 
-    @pytest.mark.parametrize("prime", [False, True])
-    @pytest.mark.parametrize("interruption_duration", [0, 60])
-    def test_pruned_interruption_does_not_resurrect_long_bar(
-        self, prime, interruption_duration
-    ):
-        renderer, gfx = _make_renderer()
-        stream = EventWindow(
-            iter([
-                _make_event("long", 0, 20000, 0),
-                _make_event("interruption", 900, interruption_duration, 1),
-                _make_event("current", 2700, 900, 2),
-            ]),
-            stream_colors=[10, 11, 8],
-        )
-        if prime:
-            stream.get_visible(0, 7200)
+        clock[0] = _NOW - 2 * _DAY
+        fake_ticks[0] = 60_000
+        display.render()
 
-        renderer.draw_rows([stream], 1800, 9000, _wall_clock_remaining(1800))
-
-        assert self._rects_for_pen(gfx, 10) == []
-        assert self._rects_for_pen(gfx, 11) == []
-        assert self._rects_for_pen(gfx, 8) == [(30, 30)]
-
-    def test_contiguous_bars_not_truncated(self):
-        renderer, gfx = _make_renderer()
-        stream = EventWindow(
-            iter([_make_event("A", 0, 1800, 0), _make_event("B", 1800, 1800, 1)]),
-            stream_colors=[10, 11],
-        )
-        stream.get_visible(0, 7200)
-
-        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
-
-        # next_start == A's end → no truncation; A keeps its full 60 px.
-        assert self._rects_for_pen(gfx, 10) == [(0, 60)]
-
-    def test_exact_same_start_earlier_is_zero_width(self):
-        renderer, gfx = _make_renderer()
-        stream = EventWindow(
-            iter([_make_event("A", 1800, 1800, 0), _make_event("B", 1800, 1800, 1)]),
-            stream_colors=[10, 11],
-        )
-        stream.get_visible(0, 7200)
-
-        renderer.draw_rows([stream], 0, 7200, _wall_clock_remaining(0))
-
-        assert self._rects_for_pen(gfx, 10) == []        # A clipped to 0 width
-        assert len(self._rects_for_pen(gfx, 11)) == 1    # B (later) wins
-
-    def test_remaining_time_suppressed_on_truncated_bar(self):
-        renderer, gfx = _make_renderer()
-        now = 100_000
-        window_start, window_end = now - 1800, now + 5400
-        # A extends past the window but is interrupted by B inside it.
-        stream = EventWindow(
-            iter([
-                _make_event("A", now - 600, 3 * 3600),
-                _make_event("B", now + 600, 1800),
-            ]),
-            stream_colors=[10],
-        )
-        stream.get_visible(window_start, window_end)
-
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-
-        rem_texts = [t for t, *_ in gfx.text_calls if t.startswith("-")]
-        assert rem_texts == []  # truncated by B → no -HH:MM
+        assert "FAR" not in gfx.body_strings()
 
 
 # ---------------------------------------------------------------------------
-# Now line
+# Day headers
 # ---------------------------------------------------------------------------
 
-class TestNowLine:
-    def test_now_line_sits_at_now_for_any_window_split(self, monkeypatch):
-        # Not the shipped quarter, so a hardcoded fraction would misplace the line.
-        monkeypatch.setattr(calendar, "WINDOW_PAST_SEC", 40 * 60)
-        monkeypatch.setattr(calendar, "WINDOW_FUTURE_SEC", 80 * 60)
-        monkeypatch.setattr(calendar, "WINDOW_TOTAL_SEC", 120 * 60)
-        renderer, gfx = _make_renderer()
-        now = 7200
-        window_start = now - calendar.WINDOW_PAST_SEC
-        window_end = now + calendar.WINDOW_FUTURE_SEC
-        stream = EventWindow(iter([_make_event("a", now, 1800)]), stream_colors=[10])
-        stream.get_visible(window_start, window_end)
 
-        renderer.draw_rows([stream], window_start, window_end, _wall_clock_remaining(window_start))
-        renderer.draw_static_overlay()
+class TestDayHeaders:
+    def test_a_later_days_first_event_follows_its_day_header(self):
+        gfx = _drawn([_ev("RAIN", _at(14, 0)), _ev("PLAST", _at(8, 0, day=1)), _ev("BIO", _at(9, 0, day=1)),
+                      _ev("MIXED", _at(8, 0, day=6))])
 
-        bar_x0 = next(x for (pen, x, _y, _w, _h) in gfx.rect_calls if pen == 10)
-        now_line_xs = {x1 for (x1, _y1, x2, _y2) in gfx.line_calls if x1 == x2}
-        assert now_line_xs == {bar_x0}
+        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x in (_FIELD_X, 66)] == [
+            ("RAIN", _slot_y(0) + 4),
+            ("Tomorrow", _slot_y(1) + 4),
+            ("PLAST", _slot_y(2) + 4),
+            ("BIO", _slot_y(3) + 4),
+            ("Wed 10 Jun", _slot_y(4) + 4),
+            ("MIXED", _slot_y(5) + 4),
+        ]
 
+    def test_later_days_have_no_note(self):
+        gfx = _drawn([_ev("PLAST", _at(8, 0, day=1))])
 
-# ---------------------------------------------------------------------------
-# Tick marks (15-minute markers below baseline)
-# ---------------------------------------------------------------------------
+        assert gfx.body_strings() == ["Tomorrow", "PLAST", "08:00"]
 
-class TestTickMarks:
-    def test_draws_vertical_lines_every_15_minutes(self):
-        renderer, gfx = _make_renderer()
-        geom = renderer._geom
+    def test_no_day_header_in_the_last_slot(self):
+        today = [_ev(str(i), _at(10 + i, 0)) for i in range(_SLOT_COUNT - 1)]
+        gfx = _drawn(today + [_ev("PLAST", _at(8, 0, day=1))])
 
-        # Window: 2 hours starting at an exact quarter-hour boundary
-        window_start = 7200  # 02:00:00
-        window_end = window_start + 7200  # 04:00:00
+        assert "Tomorrow" not in gfx.body_strings()
+        assert "PLAST" not in gfx.body_strings()
 
-        renderer.draw_time_axis(window_start, window_end)
+    def test_an_event_in_progress_gets_no_day_header(self):
+        gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60)])
 
-        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
-        tick_bottom = baseline_y + calendar._TICK_MARK_HEIGHT_PX
-
-        # 2h window at quarter-aligned start → marks at 0:00, 0:15, ..., 1:45 = 8 marks
-        tick_lines = [c for c in gfx.line_calls if c[1] == baseline_y and c[3] == tick_bottom]
-        assert len(tick_lines) == 8
-
-    def test_tick_marks_at_correct_x_positions(self):
-        renderer, gfx = _make_renderer()
-        geom = renderer._geom
-
-        # Start mid-quarter so first mark is at 900s
-        window_start = 100
-        window_end = window_start + 7200
-
-        renderer.draw_time_axis(window_start, window_end)
-
-        baseline_y = geom.gap_y[geom.row_count - 1] + geom.gap_height - 1
-        tick_bottom = baseline_y + 4
-
-        tick_lines = [c for c in gfx.line_calls if c[1] == baseline_y and c[3] == tick_bottom]
-
-        # First mark at 900s → x = (900 - 100) * 240 // 7200 = 800 * 240 // 7200 = 26
-        assert tick_lines[0][0] == (900 - window_start) * 240 // 7200
-        # Second mark at 1800s → x = (1800 - 100) * 240 // 7200 = 1700 * 240 // 7200 = 56
-        assert tick_lines[1][0] == (1800 - window_start) * 240 // 7200
-
-
-class TestStatusGlyph:
-    """draw_rows paints a right-edge glyph (now_line pen, _STATUS_GLYPH_PX
-    square) on rows whose status is not FRESH/None, so a stale or broken
-    network row never looks like a silently-empty one.
-
-    With stream_colors ``[1]`` the bar pen is 1 and the row background is pen 3,
-    so filtering rectangles by the now_line pen (4) isolates glyphs.
-    """
-
-    _GLYPH_PEN = 4  # now_line in _make_renderer's Colors
-
-    def _glyphs(self, gfx: FakeGfx) -> list:
-        g = calendar._STATUS_GLYPH_PX
-        return [r for r in gfx.rect_calls if r[0] == self._GLYPH_PEN and r[3] == g and r[4] == g]
-
-    def _window(self, status, specs=()) -> EventWindow:
-        return EventWindow(
-            iter([_make_event(*s) for s in specs]),
-            stream_colors=[1],
-            get_status=(None if status is None else (lambda: status)),
-        )
-
-    def test_no_glyph_when_fresh(self):
-        renderer, gfx = _make_renderer()
-        ew = self._window(calendar.FRESH, specs=[("a", 0, 1800)])
-
-        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
-
-        assert self._glyphs(gfx) == []
-
-    def test_no_glyph_when_status_none(self):
-        renderer, gfx = _make_renderer()
-        ew = self._window(None, specs=[("a", 0, 1800)])
-
-        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
-
-        assert self._glyphs(gfx) == []
-
-    @pytest.mark.parametrize("status", [STALE, ERROR, DISABLED])
-    def test_glyph_drawn_when_not_fresh(self, status):
-        renderer, gfx = _make_renderer()
-        ew = self._window(status, specs=[("a", 0, 1800)])
-
-        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
-
-        glyphs = self._glyphs(gfx)
-        assert len(glyphs) == 1
-        assert glyphs[0][1] == 240 - calendar._STATUS_GLYPH_PX  # right-edge x
-
-    def test_glyph_drawn_on_empty_row(self):
-        renderer, gfx = _make_renderer()
-        ew = self._window(ERROR, specs=[])  # an error row with no events
-
-        renderer.draw_rows([ew], 0, 7200, _wall_clock_remaining(0))
-
-        assert len(self._glyphs(gfx)) == 1
+        assert "Tomorrow" not in gfx.body_strings()
+        assert ("BIRCH", 66, _slot_y(0) + 4, BLACK) in gfx.texts

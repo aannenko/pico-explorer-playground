@@ -96,6 +96,9 @@ STREAM_GREEN = const(7)
 STREAM_RED = const(8)
 STREAM_DARK_GRAY = const(9)
 
+# A warning's colour by its level, 1-3, as STREAM_* indices.
+STREAM_SEVERITY = (STREAM_YELLOW, STREAM_ORANGE, STREAM_RED)
+
 
 def program_palette(gfx) -> None:  # gfx: PicoGraphics
     """Load ``PALETTE_RGB`` into all 16 palette slots of ``gfx``."""

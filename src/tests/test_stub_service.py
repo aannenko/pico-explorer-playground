@@ -2,15 +2,14 @@
 
 Drives the full path a real network row uses: tick -> FetchMachine -> schedule
 (fetch+parse) -> harvest (store) -> generation bump -> EventWindow refresh ->
-what the renderer reads (get_visible / status).
+what the renderer reads (get_visible).
 
 Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but
 is published on the *next* ``tick()`` (the harvest), so published-state asserts
-(generation / visible / FRESH / ERROR) come after an extra ``tick()``.
+(generation / visible / failures) come after an extra ``tick()``.
 """
 
 from scheduling.event_window import build_event_windows
-from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
 from _stub_service import StubService
 from services.fetch_machine import FETCHING, INITIAL, FetchCoordinator
 from services.http_client import HttpConnectError
@@ -69,13 +68,7 @@ class _Harness:
             get_ticks_ms=lambda: self.clock_val,
             enabled=enabled,
         )
-        stream = Stream(
-            self.service.iter_events(),
-            events_iter_factory=self.service.iter_events,
-            get_generation=lambda: self.service.generation,
-            get_status=lambda: self.service.status,
-        )
-        self.window = build_event_windows(((1, 2),), [stream])[0]
+        self.window = build_event_windows(((1, 2),), self.service.build_streams())[0]
 
     def _fetcher(self) -> dict:
         self.fetch_calls += 1
@@ -96,15 +89,13 @@ class _Harness:
         return [e.label for e, _ in self.window.get_visible(0, 10_000)]
 
 
-def test_disabled_service_never_fetches_and_reports_disabled():
+def test_disabled_service_never_fetches():
     h = _Harness(enabled=False)
 
     for _ in range(5):
         h.service.tick()
 
     assert h.fetch_calls == 0
-    assert h.service.status == DISABLED
-    assert h.window.status() == DISABLED
     assert h.visible_names() == []
 
 
@@ -113,7 +104,6 @@ def test_fetch_flows_through_to_visible_events():
 
     h.service.tick()  # INITIAL -> FETCHING, fetch deferred
     assert h.fetch_calls == 0  # blocking work not run inline
-    assert h.window.status() == STALE  # no data yet -> glyph
 
     h.schedule.run_all()  # _do_fetch: fetch + parse, result staged (not yet published)
     assert h.fetch_calls == 1
@@ -122,7 +112,6 @@ def test_fetch_flows_through_to_visible_events():
     h.service.tick()  # harvest: store, generation 0 -> 1
     assert h.service.generation == 1
     assert h.visible_names() == ["A"]
-    assert h.window.status() == FRESH  # fresh -> no glyph
 
 
 def test_second_fetch_refreshes_the_window():
@@ -146,7 +135,6 @@ def test_wifi_down_holds_without_fetching():
 
     assert h.fetch_calls == 0
     assert h.schedule.queue == []
-    assert h.service.status == STALE
     assert h.visible_names() == []
 
 
@@ -162,9 +150,6 @@ def test_http_error_backs_off_and_keeps_prior_snapshot():
     assert h.service._failures == 1  # one failure recorded -> backing off
     assert h.service.generation == 1  # no bump on failure
     assert h.visible_names() == ["A"]  # prior snapshot retained
-    # A single failure with a still-recent success stays FRESH on purpose:
-    # one transient blip shouldn't flip the row to a stale/error glyph.
-    assert h.service.status == FRESH
 
 
 def test_malformed_payload_backs_off_and_emits_nothing():
@@ -177,21 +162,6 @@ def test_malformed_payload_backs_off_and_emits_nothing():
     assert h.service._failures == 1  # parse failure counts as a fetch failure
     assert h.service.generation == 0  # parse failure -> no store
     assert h.visible_names() == []
-
-
-def test_error_status_after_repeated_failures():
-    h = _Harness(interval_ms=1000)
-    h.raise_exc = HttpConnectError("down")
-
-    # Default error threshold is 3 consecutive failures.  Each failure is
-    # recorded on the harvest tick (inside fetch_and_harvest), so the loop
-    # advances past the (capped) backoff and runs a full cycle each round.
-    for _ in range(3):
-        h.advance(700_000)
-        h.fetch_and_harvest()
-
-    assert h.service.status == ERROR
-    assert h.window.status() == ERROR
 
 
 def test_backoff_grows_exponentially_and_caps():
@@ -210,18 +180,6 @@ def test_backoff_grows_exponentially_and_caps():
     assert s._backoff_delay() == 300
 
 
-def test_status_goes_stale_after_cutoff():
-    h = _Harness(interval_ms=1000)  # stale_after = 2 * interval = 2000
-    h.fetch_and_harvest()  # success at clock 0
-    assert h.service.status == FRESH
-
-    h.advance(2000)  # boundary is inclusive
-    assert h.service.status == FRESH
-
-    h.advance(1)
-    assert h.service.status == STALE
-
-
 def test_store_exception_is_swallowed_but_success_recorded(capsys):
     h = _Harness()
 
@@ -231,9 +189,8 @@ def test_store_exception_is_swallowed_but_success_recorded(capsys):
     h.service._store = boom
     h.fetch_and_harvest()
 
-    # The store error is swallowed (health is updated *before* the store call),
+    # The store error is swallowed (the success is recorded *before* the store call),
     # so the fetch still counts as a success, but nothing gets published.
-    assert h.service.status == FRESH
     assert h.service._failures == 0
     assert h.service.generation == 0  # store never completed its bump
     out = capsys.readouterr().out
@@ -266,7 +223,6 @@ def test_success_after_failure_resets_failures():
     h.fetch_and_harvest()  # success
 
     assert h.service._failures == 0  # a success clears the failure count
-    assert h.service.status == FRESH
 
 
 def test_not_due_does_not_fetch_before_interval():

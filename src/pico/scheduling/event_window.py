@@ -12,14 +12,13 @@ def build_event_windows(
             stream_colors=stream_colors,
             events_iter_factory=s.events_iter_factory,
             get_generation=s.get_generation,
-            get_status=s.get_status,
         )
         for s in streams
     ]
 
 
 class EventWindow:
-    """Per-row calendar view-model: a sliding buffer that also colors its bars.
+    """Per-stream calendar view-model: a sliding buffer that also colors its events.
 
     Requires events in nondecreasing start order.
 
@@ -32,7 +31,6 @@ class EventWindow:
         stream_colors: list[int],
         events_iter_factory=None,  # () -> Iterator[Event]
         get_generation=None,  # () -> int
-        get_status=None,  # () -> int
     ) -> None:
         self._events = events_iter
         self._stream_colors = stream_colors
@@ -41,33 +39,25 @@ class EventWindow:
         self._exhausted = False
         self._events_iter_factory = events_iter_factory
         self._get_generation = get_generation
-        self._get_status = get_status
         self._generation = -1
-
-    @property
-    def stream_colors(self) -> list[int]:
-        return self._stream_colors
 
     def get_visible(
         self,
         window_start: int,
         window_end: int,
     ) -> list[tuple[Event, int]]:
-        """Return ``(Event, pen)`` pairs for ``[window_start, window_end)``.
+        """Return ``(Event, pen)`` pairs, in start order, for the events not over by ``window_start`` that start
+        before ``window_end``.
 
-        Events wholly before the window after next-start clipping are pruned.
-        Returning the internal buffer avoids a per-call allocation; later calls
-        mutate it, so callers must treat it as read-only.
+        An event is over once it has started and ended, so one starting at ``window_start`` stays, even with zero
+        duration.  After the clock steps back, the pairs can include events starting at or after ``window_end``.
+        Returning the internal buffer avoids a per-call allocation; later calls mutate it, so callers must treat it
+        as read-only.
         """
         self._refresh_if_changed()
-        self._prune_before(window_start)
+        self._prune(window_start)
         self._fill_to(window_start, window_end)
         return self._buffer
-
-    def status(self) -> int | None:
-        """Return the freshness code, or None when no status hook is provided."""
-        sf = self._get_status
-        return sf() if sf is not None else None
 
     def replace(self, events_iter) -> None:  # events_iter: Iterator[Event]
         """Restart from a fresh event iterator."""
@@ -75,6 +65,14 @@ class EventWindow:
         self._buffer = []
         self._next = None
         self._exhausted = False
+
+    def release(self) -> None:
+        """Drop the events held by a window that refreshes, until the next ``get_visible`` refills it from the latest
+        snapshot; a window that doesn't refresh keeps them, as it couldn't refill."""
+        if self._get_generation is None or self._events_iter_factory is None:
+            return
+        self.replace(iter(()))
+        self._generation = -1
 
     def _resolve_pen(self, color_index: int) -> int:
         idx = color_index
@@ -110,21 +108,23 @@ class EventWindow:
                 self._next = (event, pen)
                 break
 
-            self._buffer.append((event, pen))
-            # Prune during catch-up too, or after a long absence the buffer would
-            # hold every event that expired meanwhile.
-            self._prune_before(window_start)
+            # Skipped rather than buffered, so catching up after a long absence keeps only what's still on.
+            if not _is_over(event, window_start):
+                self._buffer.append((event, pen))
 
-    def _prune_before(self, window_start: int) -> None:
+    def _prune(self, window_start: int) -> None:
         buf = self._buffer
-        while buf:
-            event = buf[0][0]
-            end = event.start_timestamp + event.wall_clock_duration_sec
-            # Clip at the next start, as the calendar renderer does, so an
-            # interrupted long event neither pins expired successors nor
-            # reappears after they expire.
-            if len(buf) > 1:
-                end = min(end, buf[1][0].start_timestamp)
-            if end > window_start:
-                break
-            buf.pop(0)
+        kept = 0
+        for i in range(len(buf)):
+            entry = buf[i]
+            if not _is_over(entry[0], window_start):
+                buf[kept] = entry
+                kept += 1
+        while len(buf) > kept:
+            buf.pop()
+
+
+def _is_over(event: Event, at: int) -> bool:
+    """Return whether ``event`` has started and ended by ``at``."""
+    start = event.start_timestamp
+    return start < at and start + event.wall_clock_duration_sec <= at

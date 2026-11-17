@@ -2,10 +2,20 @@
 
 import pytest
 
-from scheduling.event_runs import best_by_priority, level, merge_runs
+from scheduling.event_runs import RunBuilder, level
 
 _HOUR = 3600
-_E0 = 1_700_000_000
+_T0 = 1_794_855_600
+_COLORS = (2, 0, 8)
+_CEST_SEC = 7200
+
+
+def _builder(max_events: int = 10, utc_offset_sec=lambda utc: _CEST_SEC, now_utc: int = 0) -> RunBuilder:
+    return RunBuilder(_COLORS, utc_offset_sec, max_events, now_utc)
+
+
+def _spans(events) -> list[tuple]:
+    return [(e.label, e.start_timestamp, e.wall_clock_duration_sec, e.color_index) for e in events]
 
 
 # ---------------------------------------------------------------------------
@@ -15,109 +25,121 @@ _E0 = 1_700_000_000
 
 @pytest.mark.parametrize(
     "value, expected",
-    [(None, 0), (0, 0), (59, 0), (60, 1), (70, 1), (79, 1), (80, 2), (200, 2)],
+    [(None, 0), (0, 0), (59, 0), (60, 1), (79, 1), (80, 2), (99, 2), (100, 3), (500, 3)],
 )
-def test_level_bands(value, expected):
-    assert level(value, 60, 80) == expected
+def test_level_counts_the_thresholds_reached(value, expected):
+    assert level(value, (60, 80, 100)) == expected
 
 
-def test_level_inclusive_lower_bounds():
-    # Exactly at an edge classifies into that band (inclusive >=).
-    assert level(6, 6, 8) == 1
-    assert level(8, 6, 8) == 2
-
-
-# ---------------------------------------------------------------------------
-# best_by_priority
-# ---------------------------------------------------------------------------
-
-
-def test_best_by_priority_empty_is_none():
-    assert best_by_priority([]) is None
-
-
-def test_best_by_priority_single_passthrough():
-    assert best_by_priority([(1, "A", 7)]) == ("A", 7)
-
-
-def test_best_by_priority_max_wins():
-    assert best_by_priority([(1, "A", 7), (3, "B", 8), (2, "C", 2)]) == ("B", 8)
-
-
-def test_best_by_priority_tie_keeps_first():
-    # Equal priority -> earliest listed wins (strict > in the comparison).
-    assert best_by_priority([(2, "FIRST", 2), (2, "SECOND", 8)]) == ("FIRST", 2)
-
-
-def test_best_by_priority_returns_label_and_color_only():
-    assert best_by_priority([(5, "X", 9)]) == ("X", 9)
+def test_level_reaches_a_zero_threshold_with_zero():
+    # Precipitation's level 1 starts at any amount, including a reported 0.0 mm.
+    assert level(0.0, (0.0, 2.5, 7.6)) == 1
+    assert level(2.49, (0.0, 2.5, 7.6)) == 1
+    assert level(7.6, (0.0, 2.5, 7.6)) == 3
 
 
 # ---------------------------------------------------------------------------
-# merge_runs
+# RunBuilder
 # ---------------------------------------------------------------------------
 
 
-def test_merge_runs_empty():
-    assert merge_runs([]) == []
+def test_no_hours_build_no_events():
+    assert _builder().events() == []
 
 
-def test_merge_runs_single_hour():
-    events = merge_runs([(_E0, "RAIN", 7)])
+def test_one_hour_is_one_local_event_coloured_by_its_level():
+    builder = _builder()
+    builder.add(_T0, "RAIN", 2)
 
-    assert len(events) == 1
-    ev = events[0]
-    assert ev.label == "RAIN"
-    assert ev.start_timestamp == _E0
-    assert ev.wall_clock_duration_sec == _HOUR
-    assert ev.color_index == 7
+    assert _spans(builder.events()) == [("RAIN", _T0 + _CEST_SEC, _HOUR, 0)]
 
 
-def test_merge_runs_contiguous_equal_merge():
-    events = merge_runs([
-        (_E0, "RAIN", 7),
-        (_E0 + _HOUR, "RAIN", 7),
-        (_E0 + 2 * _HOUR, "RAIN", 7),
-    ])
+def test_adjacent_hours_with_one_label_join_at_their_highest_level():
+    builder = _builder()
+    for i, hour_level in enumerate((1, 3, 2)):
+        builder.add(_T0 + i * _HOUR, "UV", hour_level)
 
-    assert len(events) == 1
-    assert events[0].start_timestamp == _E0
-    assert events[0].wall_clock_duration_sec == 3 * _HOUR
+    assert _spans(builder.events()) == [("UV", _T0 + _CEST_SEC, 3 * _HOUR, 8)]
 
 
-def test_merge_runs_label_change_splits():
-    events = merge_runs([(_E0, "RAIN", 7), (_E0 + _HOUR, "SNOW", 7)])
+@pytest.mark.parametrize(
+    "second",
+    [
+        (_T0 + _HOUR, "SNOW", 1),  # another label
+        (_T0 + 2 * _HOUR, "RAIN", 1),  # an hour later than adjacent
+    ],
+)
+def test_another_label_or_a_gap_starts_a_new_event(second):
+    builder = _builder()
+    builder.add(_T0, "RAIN", 1)
+    builder.add(*second)
 
-    assert [e.label for e in events] == ["RAIN", "SNOW"]
-    assert all(e.wall_clock_duration_sec == _HOUR for e in events)
-
-
-def test_merge_runs_color_change_splits():
-    events = merge_runs([(_E0, "RAIN", 7), (_E0 + _HOUR, "RAIN", 2)])
-
-    assert [e.color_index for e in events] == [7, 2]
-    assert all(e.wall_clock_duration_sec == _HOUR for e in events)
-
-
-def test_merge_runs_time_discontinuity_splits_even_without_gap_entry():
-    # Two winning hours 2h apart (a below-threshold hour was simply omitted):
-    # the adjacency check (epoch == prev_end) must split, not merge into a
-    # 2-wide bar.
-    events = merge_runs([(_E0, "AQI", 2), (_E0 + 2 * _HOUR, "AQI", 2)])
-
-    assert len(events) == 2
-    assert all(e.wall_clock_duration_sec == _HOUR for e in events)
-    assert events[1].start_timestamp == _E0 + 2 * _HOUR
+    assert [(e.start_timestamp - _CEST_SEC, e.label) for e in builder.events()] == [(_T0, "RAIN"), second[:2]]
 
 
-def test_merge_runs_adjacent_then_gap():
-    events = merge_runs([
-        (_E0, "AQI", 2),
-        (_E0 + _HOUR, "AQI", 2),
-        (_E0 + 3 * _HOUR, "AQI", 2),
-    ])
+@pytest.mark.parametrize("quiet_hour", [("RAIN", 0), (None, 0), (None, 2)])
+def test_a_quiet_hour_ends_the_event(quiet_hour):
+    builder = _builder()
+    builder.add(_T0, "RAIN", 1)
+    builder.add(_T0 + _HOUR, *quiet_hour)
+    builder.add(_T0 + 2 * _HOUR, "RAIN", 1)
 
-    assert len(events) == 2
-    assert events[0].wall_clock_duration_sec == 2 * _HOUR
-    assert events[1].start_timestamp == _E0 + 3 * _HOUR
-    assert events[1].wall_clock_duration_sec == _HOUR
+    assert [e.start_timestamp - _CEST_SEC for e in builder.events()] == [_T0, _T0 + 2 * _HOUR]
+
+
+def test_hours_after_max_events_are_ignored():
+    builder = _builder(max_events=2)
+    for i, label in enumerate(("RAIN", "SNOW", "RAIN", "SNOW")):
+        builder.add(_T0 + i * _HOUR, label, 1)
+
+    assert [e.label for e in builder.events()] == ["RAIN", "SNOW"]
+
+
+def test_events_over_by_now_are_dropped_and_leave_their_places_to_later_ones():
+    builder = _builder(max_events=14, now_utc=_T0 + _HOUR // 2)
+    for i in range(24, 0, -1):
+        builder.add(_T0 - i * _HOUR, "RAIN" if i % 2 else "SNOW", 1)
+    builder.add(_T0, "STORM", 3)
+
+    assert _spans(builder.events()) == [("STORM", _T0 + _CEST_SEC, _HOUR, 8)]
+
+
+def test_an_event_in_progress_keeps_its_past_hours():
+    builder = _builder(now_utc=_T0 + _HOUR // 2)
+    for i in range(-2, 2):
+        builder.add(_T0 + i * _HOUR, "RAIN", 1)
+
+    assert _spans(builder.events()) == [("RAIN", _T0 - 2 * _HOUR + _CEST_SEC, 4 * _HOUR, 2)]
+
+
+def test_a_run_across_the_fall_back_lasts_its_wall_clock_time():
+    # Clocks go back from CEST to CET at 01:00 UTC.
+    def utc_offset_sec(utc: int) -> int:
+        return 7200 if utc < _T0 + _HOUR else 3600
+
+    builder = _builder(utc_offset_sec=utc_offset_sec)
+    for i in range(3):
+        builder.add(_T0 + i * _HOUR, "RAIN", 1)
+
+    assert _spans(builder.events()) == [("RAIN", _T0 + 7200, 2 * _HOUR, 2)]
+
+
+def test_a_one_hour_run_ending_at_the_fall_back_is_empty_in_local_time():
+    def utc_offset_sec(utc: int) -> int:
+        return 7200 if utc < _T0 + _HOUR else 3600
+
+    builder = _builder(utc_offset_sec=utc_offset_sec)
+    builder.add(_T0, "RAIN", 1)
+
+    assert _spans(builder.events()) == [("RAIN", _T0 + 7200, 0, 2)]
+
+
+def test_a_run_across_the_spring_forward_lasts_its_wall_clock_time():
+    def utc_offset_sec(utc: int) -> int:
+        return 3600 if utc < _T0 + _HOUR else 7200
+
+    builder = _builder(utc_offset_sec=utc_offset_sec)
+    for i in range(2):
+        builder.add(_T0 + i * _HOUR, "RAIN", 1)
+
+    assert _spans(builder.events()) == [("RAIN", _T0 + 3600, 3 * _HOUR, 2)]

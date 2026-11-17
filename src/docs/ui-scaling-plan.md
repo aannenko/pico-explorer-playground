@@ -26,13 +26,13 @@ one integer `S`, with today's Explorer layout defined as `S = 1`.
   badge cells and the badge radius, Calendar label fitting, and the Calendar
   header guard.
 - **Space fillers.** Sensors quadrant spans, graph widths and heights, and
-  `ticks_per_commit`, Calendar row heights and bar positions, ring thickness
+  `ticks_per_commit`, Calendar field widths and slot count, ring thickness
   (`min(W, H) // _RING_THICKNESS_DIVISOR`, 30), and centred Ring / Status
   text. Graph height enters a 32-bit product in the viper
   `_Quadrant._replace_graph` (span × graph height < 2³¹; see its comment).
-- **Text-derived heights.** Text height, and the Sensors stack offsets
-  (margins are measured to ink: text height less its descender row, and
-  icons trimmed to their ink).
+- **Text-derived heights.** Text height, the Sensors stack offsets and the
+  Calendar field height (margins are measured to ink: text height less its
+  descender row, and icons trimmed to their ink).
 
 ## What does not: hand-written pixel values
 
@@ -41,23 +41,18 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 | Where | Value | Role |
 |---|---|---|
 | `app.py` | `TEXT_SCALE` 3 (config) | primary text: Status, Ring, Calendar header, Sensors values and badge time |
-| `app.py` | `_SECONDARY_TEXT_SCALE` 2 | Calendar bar labels and time axis; Sensors ranges, units, badge weekday and date |
+| `app.py` | `_SECONDARY_TEXT_SCALE` 2 | Calendar slot texts; Sensors ranges, units, badge weekday and date |
 | `sensors.py` | `_ICON_SCALE` 2 | band icons; replaced by the icon row (design §2) |
 | `sensors.py` | `_GUTTER_PX` 3, `_MARGIN_PX` 8 | quadrant gutters; every gap between neighbouring texts, icons and graphs, and from a text or icon to the edges and gutter |
 | `sensors.py` | `_BADGE_PADDING_PX` 5, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | black space inside the ring; the ring; black border outside it |
-| `calendar.py` | `_HEADER_MARGIN_PX` 6, `_AXIS_MARGIN_PX` 3 | header→rows, rows→axis |
-| `calendar.py` | `_BAR_TEXT_MARGIN_PX` 2, `_MIN_LABEL_PX` 14 | label inset, minimum bar width for a label |
-| `calendar.py` | `_TICK_MARK_HEIGHT_PX` 4, `_STATUS_GLYPH_PX` 4 | axis ticks, stale-data square |
-| `calendar.py` | `max(3, …)` | minimum row gap |
-| `calendar.py` | inline `+ 2` in bar `text_y` | label lift: bitmap8 ink sits high in its cell |
+| `calendar.py` | `_BODY_MARGIN_PX` 3, `_SLOT_GAP_PX` 5 | header→first slot, gap between slots |
+| `calendar.py` | `_FIELD_PAD_PX` 4, `_TEXT_INSET_PX` 6, `_BAR_PX` 4 | above and below a field's text, from a field's edges to its texts, the progress bar under a field |
+| `calendar.py` | `_RAIL_PX` 2, `_DOT_R_PX` 5, `_DOT_GAP_PX` 4 | the rail, its dots, a dot→start time and →field |
 | `ring.py` | `_RING_OUTER_MARGIN_PX` 2 | ring→edge |
 | `status.py` | `h // 2 + 5` | subtext offset |
 
 **1-px elements, which need a policy rather than a multiply (open question 2):**
 
-- Calendar bar seams (`_BAR_SEAM_PX` 1), the `label_right + 1` separation,
-  and the now-line, baseline and quarter-hour ticks (`gfx.line`, always
-  1 px).
 - Sensors graph columns (1 px wide, one history sample each) and the 1-px
   graph line.
 - Ring polygon overdraw (`outer_poly_r = outer_circle_r + 2`,
@@ -79,7 +74,7 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 - `TEXT_SCALE` retires as a config key. A leftover override then only warns
   as unknown; the current `config.py` has none.
 - Every new name costs a qstr slot for good, and a full boot already fills
-  about 1,180 of the 1,260 slots that fit before the next pool, which needs a
+  about 1,110 of the 1,260 slots that fit before the next pool, which needs a
   7.7 KB block a booted heap doesn't have (see the Qstr pool note in
   `.github/copilot-instructions.md`).
 
@@ -108,10 +103,10 @@ footprint and no code change.
 
 ### 3. Every view asserts its fit at boot
 
-Each view raises a `RuntimeError` naming itself, like today's header and
-Sensors layout guards. There are no silent clips. Missing today:
+Each view raises a `RuntimeError` naming itself, like today's header,
+Calendar slot and Sensors layout guards. There are no silent clips. Missing
+today:
 
-- **Calendar:** the derived bar height is ≥ 1.
 - **Ring:** the text lines fit inside the inner circle. Today a panel that
   is too small fails with a cryptic `math domain error` from `sqrt`.
 
@@ -119,24 +114,21 @@ Sensors layout guards. There are no silent clips. Missing today:
 
 Panels are rarely an exact multiple of 240×240 (800×480 at `S = 2` leaves a
 320 px strip, for example). Width already flows into the space fillers
-(Sensors quadrants and graphs, Calendar bars); Ring, Status and the Sensors
-badge centre.
+(Sensors quadrants and graphs, Calendar fields); Ring, Status and the Sensors
+badge centre. Height gives the Calendar more slots, and each network stream
+keeps two events per slot (`app._stream_event_cap`).
 
 ## Open questions (settle in the plan review)
 
 1. **Source of `S`.** An explicit `UI_SCALE` key (lean: predictable, and the
    boot guards validate it), auto-derived as
    `max(1, min(W // 240, H // 240))`, or both (`UI_SCALE = 0` meaning auto).
-2. **1-px elements.** Do seams, ticks, the now-line, the baseline, the label
-   separation and the Sensors graph line scale to `S` px, or stay hairlines?
-   For the Sensors graphs, 1-px columns give `S×` more history resolution
-   (and `S×` the `SampleHistory` capacity at 16 B per column, and `S×` the
-   commit's in-place shift, about 6 ms at today's 119 columns), while `S`-px
-   columns keep today's resolution and visual weight.
-3. **Leftover space.** Does the Calendar window stay at 2 h on a wider
-   panel? Widening it cascades into the network forecast horizons, which
-   `app.py` derives from the calendar windows.
-4. **Art for larger panels.** Upscale the 16 px set, or ship a native
+2. **1-px elements.** Does the Sensors graph line scale to `S` px, or stay a
+   hairline? For the Sensors graphs, 1-px columns give `S×` more history
+   resolution (and `S×` the `SampleHistory` capacity at 16 B per column, and
+   `S×` the commit's in-place shift, about 6 ms at today's 119 columns),
+   while `S`-px columns keep today's resolution and visual weight.
+3. **Art for larger panels.** Upscale the 16 px set, or ship a native
    higher-resolution set? Today's 20 icons, trimmed to their ink, pack to
    1,444 bytes, so a set at twice the resolution costs about 4× that in
    flash.
@@ -148,8 +140,8 @@ badge centre.
 1. **Snapshot tests.** Pin the draw-call log of each view's first frame at
    today's config, with fixed time and inputs. This is the pixel-identity
    safety net for everything after it. `FakePicoGraphics` records `clear`,
-   `rectangle`, `text`, `pixel` and `circle`, but not `line` (Calendar ticks
-   and baseline) or `polygon` (Ring), so extend it first.
+   `rectangle`, `text`, `pixel` and `circle`, but not `line` or `polygon`
+   (Ring), so extend it first.
 2. **Thread `S` through.** Add `UI_SCALE`, pass `ui_scale` into each
    `Geometry`, and multiply its constants: one commit per view. The
    snapshots must not change at `S = 1`.
@@ -186,7 +178,7 @@ badge centre.
 
 - **Framebuffer memory.** A `PEN_P4` framebuffer is `W × H / 2` bytes, on a
   GC heap of 178,112 B on Pimoroni v1.29.0-2 (196,800 B on the earlier
-  1.27-based build), about 32 KB of it free once the app has booted. Today,
+  1.27-based build), about 37 KB of it free once the app has booted. Today,
   240×240 needs 28.8 KB. 480×480 would need 115 KB, and 800×480 would need
   192 KB, more than the entire heap; even a 1-bit 800×480 framebuffer would
   need 48 KB, 19.2 KB more than today's. On the RP2040 a larger panel is only
@@ -195,7 +187,7 @@ badge centre.
 - **E-ink refresh.** A full refresh takes seconds and flashes the panel.
   Sensors renders every second and already pushes a frame only when
   something changed, but a BME690 reading can change a value every 5 s;
-  Calendar scrolls every minute. Both need a slower update strategy
+  Calendar redraws every minute. Both need a slower update strategy
   (`refresh_period_ms`, `RefreshGate`), not just new geometry.
 - **Colour language.** The 16-colour palette, the `LABEL_FOR_SLOT` contrast
   table and the CVD verification all assume a colour panel. A mono or

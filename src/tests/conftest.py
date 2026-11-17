@@ -378,7 +378,7 @@ class RecordingRenderer:
         return recorder
 
 
-# DST test constants — shared between test_time_service and test_event_factory.
+# DST test constants, used by test_time_service.
 CET_OFFSET_SEC = 3600
 CEST_EXTRA_SEC = 3600
 DST_START = (3, -1, 6, 2)   # Last Sun of Mar at 02:00 CET
@@ -390,19 +390,34 @@ def utc_epoch(*args) -> int:
     return int(_calendar_mod.timegm(args))
 
 
+class _FakeBody:
+    """Stub of a response's ``raw`` stream: ``readinto(buf)`` fills ``buf`` from the next chunk, then returns 0, or
+    raises ``raise_at_end`` once the chunks run out."""
+
+    def __init__(self, chunks, raise_at_end) -> None:
+        self._chunks = list(chunks)
+        self._raise_at_end = raise_at_end
+
+    def readinto(self, buf) -> int:
+        if not self._chunks:
+            if self._raise_at_end is not None:
+                raise self._raise_at_end
+            return 0
+        chunk = self._chunks.pop(0)
+        if len(chunk) > len(buf):
+            self._chunks.insert(0, chunk[len(buf):])
+            chunk = chunk[:len(buf)]
+        buf[:len(chunk)] = chunk
+        return len(chunk)
+
+
 class FakeResponse:
-    """Stub of a urequests Response: ``status_code``, ``json()``, ``close()``."""
+    """Stub of a urequests Response: ``status_code``, ``raw``, ``close()``."""
 
-    def __init__(self, status_code: int, json_data, raise_on_json) -> None:
+    def __init__(self, status_code: int, chunks, raise_at_end) -> None:
         self.status_code = status_code
-        self._json_data = json_data
-        self._raise_on_json = raise_on_json
+        self.raw = _FakeBody(chunks, raise_at_end)
         self.closed = False
-
-    def json(self):
-        if self._raise_on_json is not None:
-            raise self._raise_on_json
-        return self._json_data
 
     def close(self) -> None:
         self.closed = True
@@ -411,25 +426,25 @@ class FakeResponse:
 class FakeUrequests:
     """Configurable stand-in for the urequests/requests module.
 
-    Set ``raise_on_get`` / ``raise_on_json`` to an exception instance to
-    simulate connect/timeout / parse failures; set ``status_code`` /
-    ``json_data`` for the success path. Every ``get()`` call records
-    ``(url, headers, timeout)`` and the produced response.
+    Set ``raise_on_get`` to an exception instance to simulate connect, timeout or protocol failures, and
+    ``raise_at_end`` to fail a body read once ``chunks`` run out; set ``status_code`` and ``chunks`` (the body's
+    reads, ``bytes`` or ``bytearray``) for the success path.  Every ``get()`` call records ``(url, timeout)`` and
+    the produced response.
     """
 
     def __init__(self) -> None:
         self.status_code = 200
-        self.json_data = {}
+        self.chunks: list = []
         self.raise_on_get: Exception | None = None
-        self.raise_on_json: Exception | None = None
+        self.raise_at_end: Exception | None = None
         self.calls: list[tuple] = []
         self.responses: list[FakeResponse] = []
 
-    def get(self, url, headers=None, timeout=None) -> FakeResponse:
-        self.calls.append((url, headers, timeout))
+    def get(self, url, timeout=None) -> FakeResponse:
+        self.calls.append((url, timeout))
         if self.raise_on_get is not None:
             raise self.raise_on_get
-        response = FakeResponse(self.status_code, self.json_data, self.raise_on_json)
+        response = FakeResponse(self.status_code, self.chunks, self.raise_at_end)
         self.responses.append(response)
         return response
 

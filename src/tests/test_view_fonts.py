@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 import pytest
 
 import displays.calendar as calendar
@@ -18,10 +16,8 @@ from _fakes import FakePicoGraphics
 
 _SENSORS_FONT = "sensors-font"
 _COUNTDOWN_FONT = "countdown-font"
-_CALENDAR_HEADER_FONT = "calendar-header-font"
-_CALENDAR_BAR_FONT = "calendar-bar-font"
+_CALENDAR_FONT = "calendar-font"
 _FOREIGN_FONT = "foreign-font"
-_CALENDAR_HEADER = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
 _NOW_SEC = 1_780_000_000
 _READING = (22.0, 1010.0, 50.0, 120.0)
 _SENSORS, _COUNTDOWN, _CALENDAR = 0, 1, 2
@@ -105,28 +101,17 @@ def _build_countdown(panel: _Panel, timer: CountdownTimer) -> countdown.Display:
 
 def _build_calendar(panel: _Panel, clock: _Clock) -> calendar.Display:
     return calendar.Display(
-        renderer=calendar.Renderer(
-            geometry=calendar.Geometry(
-                pico_graphics=panel,
-                header_font=_CALENDAR_HEADER_FONT,
-                header_font_height=8,
-                header_text_scale=3,
-                bar_font=_CALENDAR_BAR_FONT,
-                bar_font_height=8,
-                bar_text_scale=2,
-            ),
-            colors=calendar.Colors(background=0, header_text=1, axis_text=2, empty_row=3, now_line=4),
+        geometry=calendar.Geometry(
+            pico_graphics=panel,
+            font=_CALENDAR_FONT,
+            font_height=8,
+            header_text_scale=3,
+            label_text_scale=2,
         ),
-        event_windows=[
-            EventWindow(iter([Event("WORK", _NOW_SEC - 600, 4 * 3600, color_index=0)]), stream_colors=[10])
-        ],
+        windows=[EventWindow(iter([Event("WORK", _NOW_SEC - 600, 4 * 3600, color_index=0)]), stream_colors=[10])],
         get_local_time=clock.now,
         real_remaining_sec=lambda local_epoch: local_epoch - clock.now_sec,
     )
-
-
-def _calendar_font(text: str) -> str:
-    return _CALENDAR_HEADER_FONT if _CALENDAR_HEADER.match(text) else _CALENDAR_BAR_FONT
 
 
 @pytest.mark.parametrize("foreign_font_before_each_switch", [False, True])
@@ -139,11 +124,11 @@ def test_every_view_draws_and_measures_text_in_its_own_font(foreign_font_before_
     sensors_display = _build_sensors(panel, clock)
     panel.font_for = lambda text: _COUNTDOWN_FONT
     countdown_display = _build_countdown(panel, timer)
-    panel.font_for = _calendar_font
+    panel.font_for = lambda text: _CALENDAR_FONT
     calendar_display = _build_calendar(panel, clock)
     mgr = DisplayManager([sensors_display, countdown_display, calendar_display], tick_period_ms=500)
-    view_fonts = (lambda text: _SENSORS_FONT, lambda text: _COUNTDOWN_FONT, _calendar_font)
-    panel.font_for = lambda text: view_fonts[mgr._current](text)
+    view_fonts = (_SENSORS_FONT, _COUNTDOWN_FONT, _CALENDAR_FONT)
+    panel.font_for = lambda text: view_fonts[mgr._current]
 
     def enter(
         step,  # () -> None
@@ -185,6 +170,6 @@ def test_every_view_draws_and_measures_text_in_its_own_font(foreign_font_before_
     enter(mgr.previous, _CALENDAR)
     enter(mgr.next, _SENSORS)
 
-    for font in (_SENSORS_FONT, _COUNTDOWN_FONT, _CALENDAR_HEADER_FONT, _CALENDAR_BAR_FONT):
+    for font in (_SENSORS_FONT, _COUNTDOWN_FONT, _CALENDAR_FONT):
         assert any(expected == font for _, expected, _ in panel.text_fonts), font
     assert [op for op in panel.text_fonts if op[1] != op[2]] == []

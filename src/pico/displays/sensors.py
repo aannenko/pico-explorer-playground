@@ -22,6 +22,7 @@ from displays.palette import (
     WHITE,
 )
 from displays.shared import _icons_data, icons_p4
+from displays.shared.header import MONTH_NAMES, WEEKDAY_NAMES, WIDEST_MDAY_TEXT, WIDEST_TIME_TEXT
 from services.sample_history import MISSING, SampleHistory
 
 
@@ -56,15 +57,9 @@ _ALIGN_RIGHT = const(2)
 # "-99.9", the widest _format_value emits, also measures 63; its integer limits "9999"
 # and "-999" measure 57 and 54.
 _WIDEST_VALUE_TEXT = "-88.8"
-# bitmap8 draws '1' narrower than every other digit.
-_WIDEST_TIME_TEXT = "00:00"
-_WIDEST_MDAY_TEXT = "20"
 _RANGE_SEPARATOR = ".."
 _PLACEHOLDER_TEXT = "--"
 _WARMING_TEXT = "warming..."
-# Three characters per name, sliced out rather than kept as 19 short literals that would each take a qstr slot.
-_WEEKDAY_NAMES = "MonTueWedThuFriSatSun"
-_MONTH_NAMES = "JanFebMarAprMayJunJulAugSepOctNovDec"
 # Weekday, time and date, top to bottom.
 _BADGE_PENS = (GRAY, WHITE, GRAY)
 
@@ -218,9 +213,9 @@ def _format_badge(local_epoch: int) -> tuple[str, str, str]:
     weekday_start = 3 * fields[6]
     month_start = 3 * (month - 1)
     return (
-        _WEEKDAY_NAMES[weekday_start:weekday_start + 3],
+        WEEKDAY_NAMES[weekday_start:weekday_start + 3],
         f"{hour:02}:{minute:02}",
-        str(mday) + " " + _MONTH_NAMES[month_start:month_start + 3],
+        str(mday) + " " + MONTH_NAMES[month_start:month_start + 3],
     )
 
 
@@ -297,14 +292,14 @@ class Geometry:
         measure_text = self.pico_graphics.measure_text
         label_scale = self.label_text_scale
         weekday_width = 0
-        for i in range(0, len(_WEEKDAY_NAMES), 3):
-            weekday_width = max(weekday_width, measure_text(_WEEKDAY_NAMES[i:i + 3], scale=label_scale))
+        for i in range(0, len(WEEKDAY_NAMES), 3):
+            weekday_width = max(weekday_width, measure_text(WEEKDAY_NAMES[i:i + 3], scale=label_scale))
         date_width = 0
-        for i in range(0, len(_MONTH_NAMES), 3):
+        for i in range(0, len(MONTH_NAMES), 3):
             date_width = max(
-                date_width, measure_text(_WIDEST_MDAY_TEXT + " " + _MONTH_NAMES[i:i + 3], scale=label_scale)
+                date_width, measure_text(WIDEST_MDAY_TEXT + " " + MONTH_NAMES[i:i + 3], scale=label_scale)
             )
-        time_width = measure_text(_WIDEST_TIME_TEXT, scale=self.value_text_scale)
+        time_width = measure_text(WIDEST_TIME_TEXT, scale=self.value_text_scale)
 
         label_ink_height = self.label_ink_height
         # Centres the lines' ink plus the date's descenders.

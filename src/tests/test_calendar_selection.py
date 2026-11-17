@@ -3,10 +3,12 @@
 import pytest
 
 import config_defaults
-import demo_streams
 from displays.base import Display
 from displays.manager import DisplayManager
-from scheduling.stream import DISABLED, Stream
+from displays.palette import STREAM_YELLOW
+from scheduling.event import Event
+from scheduling.providers import waste
+from scheduling.stream import Stream
 from services.time_service import TimeService
 
 from _fakes import FakePicoGraphics
@@ -23,9 +25,6 @@ class _Panel(FakePicoGraphics):
     def clear(self):
         super().clear()
         self.frame.clear()
-
-    def line(self, *args):
-        self.calls.append(("line", args, {}))
 
     def text(self, text, x, y, *, scale):
         super().text(text, x, y, scale=scale)
@@ -48,29 +47,27 @@ class _OtherDisplay(Display):
         self.panel.update()
 
 
+def _time_service(get_time) -> TimeService:
+    return TimeService(
+        tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
+        dst_start_rule=config_defaults.DST_START_RULE,
+        dst_end_rule=config_defaults.DST_END_RULE,
+        dst_offset_hours=config_defaults.DST_OFFSET_HOURS,
+        get_time=get_time,
+    )
+
+
 @pytest.mark.parametrize("direction", ["next", "previous"])
 @pytest.mark.parametrize("visited_before", [False, True])
 def test_cycle_to_calendar_after_month_away_draws_first_frame(
     app_module, monkeypatch, direction, visited_before
 ):
     clock = [utc_epoch(2026, 9, 14, 7, 0, 0)]
-    time_service = TimeService(
-        tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
-        dst_start_rule=config_defaults.DST_START_RULE,
-        dst_end_rule=config_defaults.DST_END_RULE,
-        dst_offset_hours=config_defaults.DST_OFFSET_HOURS,
-        get_time=lambda: clock[0],
-    )
-    monkeypatch.setattr(demo_streams.random, "choice", lambda items: items[0])
-    monkeypatch.setattr(demo_streams.random, "randint", lambda low, high: high)
     panel = _Panel()
     calendar = app_module._build_calendar_display(
-        panel,
-        time_service,
-        [
-            Stream(iter(()), get_status=lambda: DISABLED),
-            Stream(iter(()), get_status=lambda: DISABLED),
-        ],
+        app_module._build_calendar_geometry(panel),
+        _time_service(lambda: clock[0]),
+        [Stream(iter(())) for _ in range(4)],
     )
     manager = DisplayManager(
         [
@@ -86,17 +83,18 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         manager.next_ref(0)
     clock[0] += 30 * 86400
 
-    event_type = demo_streams.Event
+    event_type = waste.Event
     produced = 0
 
     def budgeted_event(*args, **kwargs):
         nonlocal produced
         produced += 1
-        if produced > 10:
-            raise MemoryError("calendar entry replayed obsolete demo history")
+        # Four pickups a fortnight: a month away is at most ten, plus the next one.
+        if produced > 11:
+            raise MemoryError("calendar entry replayed more waste history than the month away")
         return event_type(*args, **kwargs)
 
-    monkeypatch.setattr(demo_streams, "Event", budgeted_event)
+    monkeypatch.setattr(waste, "Event", budgeted_event)
     if direction == "next":
         manager.next_ref(0)
         assert panel.presented == ("COUNTDOWN",)
@@ -110,26 +108,28 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
 
     assert manager._current == 2
     assert panel.updates == updates_before + 1
-    assert panel.presented[0] == "2026-10-14 09:00"
-    assert len(calendar._event_windows) == 5
-    assert len(calendar._event_windows[-1]._buffer) == 8
-    assert produced == 9
+    # Wednesday 14 Oct is a MIXED pickup day, 08:00-10:00, and Friday 16 Oct a PAPER one.
+    assert panel.presented[:2] == ("09:00", "Wed 14 Oct")
+    assert "MIXED" in panel.presented
+    assert "Fri 16 Oct" in panel.presented
+    assert len(calendar._windows) == 5
+    assert [len(window._buffer) for window in calendar._windows] == [2, 0, 0, 0, 0]
 
 
-def test_weekend_bar_shows_real_time_left_across_the_fall_back(app_module) -> None:
-    # Sat 2026-10-24 12:00 CEST: the weekend ends Mon 09:00 CET, 45 h away on the
+def test_time_left_is_real_across_the_fall_back(app_module) -> None:
+    # Sat 2026-10-24 12:00 CEST: an event ending Mon 09:00 CET is 45 h away on the
     # clock and 46 h in real time.
     utc = utc_epoch(2026, 10, 24, 10, 0, 0)
-    time_service = TimeService(
-        tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
-        dst_start_rule=config_defaults.DST_START_RULE,
-        dst_end_rule=config_defaults.DST_END_RULE,
-        dst_offset_hours=config_defaults.DST_OFFSET_HOURS,
-        get_time=lambda: utc,
-    )
+    time_service = _time_service(lambda: utc)
+    now = time_service.now()
+    end = now + 45 * 3600
     panel = _Panel()
-    calendar = app_module._build_calendar_display(panel, time_service, [])
+    calendar = app_module._build_calendar_display(
+        app_module._build_calendar_geometry(panel),
+        time_service,
+        [Stream(iter([Event("UV", now - 600, end - (now - 600), color_index=STREAM_YELLOW)]))],
+    )
 
     calendar.initialize()
 
-    assert "-46:00" in panel.presented
+    assert "1d22 left" in panel.presented

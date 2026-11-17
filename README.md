@@ -4,7 +4,7 @@ Test ideas with a [Raspberry Pi Pico](https://www.raspberrypi.com/products/raspb
 (RP2040) and the [Pimoroni Pico Explorer Base](https://shop.pimoroni.com/products/pico-explorer-base).
 
 The on-device code is a MicroPython app that cycles between three
-views (sensors, countdown timer, horizontal calendar timeline) driven
+views (sensors, countdown timer, agenda calendar) driven
 by the Explorer's X/Y buttons, with A/B forwarded to the active view.
 
 ## Layout

@@ -2,7 +2,7 @@ import time
 
 from micropython import const
 
-from displays.palette import STREAM_GREEN, STREAM_YELLOW, STREAM_RED
+from displays.palette import STREAM_SEVERITY
 from scheduling import event_runs
 from scheduling.event import Event
 from services import http_client, openmeteo_client
@@ -12,9 +12,8 @@ from services.tick_scheduler import TickScheduler
 
 _METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
-# Standard meteorological light / moderate / heavy rain-rate edges (mm/h).
-_MODERATE_MM = 2.5
-_HEAVY_MM = 7.6
+# Any amount, then the standard meteorological moderate and heavy rain rates (mm/h).
+_PRECIP_THRESHOLDS_MM = (0.0, 2.5, 7.6)
 
 # WMO weather interpretation codes (Open-Meteo ``weathercode``), as inclusive ranges.
 _WMO_DRIZZLE_AND_RAIN_FIRST = const(51)  # freezing drizzle and freezing rain included
@@ -28,13 +27,13 @@ _WMO_SNOW_SHOWERS_LAST = const(86)
 _WMO_THUNDERSTORM_FIRST = const(95)  # hail included
 _WMO_THUNDERSTORM_LAST = const(99)
 
-_UV_LEVEL_COLOR = (None, STREAM_YELLOW, STREAM_RED)
 
-
-def _precip_label(wmo_code: int) -> str | None:
-    """Return ``None`` for non-precipitation codes: probability alone must not
+def _precip_label(wmo_code: float | None) -> str | None:
+    """Return ``None`` for a missing or non-precipitation code: probability alone must not
     draw a precipitation bar.
     """
+    if wmo_code is None:
+        return None
     if (
         _WMO_DRIZZLE_AND_RAIN_FIRST <= wmo_code <= _WMO_DRIZZLE_AND_RAIN_LAST
         or _WMO_RAIN_SHOWERS_FIRST <= wmo_code <= _WMO_RAIN_SHOWERS_LAST
@@ -50,69 +49,39 @@ def _precip_label(wmo_code: int) -> str | None:
     return None
 
 
-def _precip_rank_and_color(precip_mm: float) -> tuple[int, int]:
-    """Ranks 1/2/3 mean light/moderate/heavy."""
-    if precip_mm < _MODERATE_MM:
-        return (1, STREAM_GREEN)
-    if precip_mm < _HEAVY_MM:
-        return (2, STREAM_YELLOW)
-    return (3, STREAM_RED)
+class _WeatherHours:
+    """The precipitation and UV events of a forecast, built an hour at a time."""
 
+    def __init__(
+        self,
+        prob_threshold_pct: int,
+        uv_thresholds: tuple[float, float, float],
+        utc_offset_sec,  # (int) -> int
+        max_events: int,
+        now_utc: int,
+    ) -> None:
+        self._prob_threshold_pct = prob_threshold_pct
+        self._uv_thresholds = uv_thresholds
+        self.precip = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
+        self.uv = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
 
-def _uv_column(payload: dict, n: int) -> list[float | None]:
-    """Return the payload's ``n`` hourly UV index values.
-
-    Precip must render even if UV is absent or malformed, so any problem
-    degrades to ``None`` rather than failing the fetch: a missing key, non-list
-    or wrong-length array gives an all-``None`` column, and a non-numeric
-    element gives ``None`` for that hour.
-    """
-    try:
-        uv = payload["hourly"]["uv_index"]
-    except (KeyError, TypeError):
-        return [None] * n
-    if not isinstance(uv, list) or len(uv) != n:
-        return [None] * n
-    return [v if isinstance(v, (int, float)) else None for v in uv]
-
-
-def _build_events(payload: dict, prob_threshold_pct: int, uv_thresholds: tuple[int, int]) -> list[Event]:
-    """Return the weather bars from a forecast payload.
-
-    Precipitation wins equal-priority ties; severe UV beats light precipitation.
-    """
-    times, probs, amounts, codes = openmeteo_client.extract_hourly(
-        payload, ("time", "precipitation_probability", "precipitation", "weathercode")
-    )
-    uv = _uv_column(payload, len(times))
-    uv_warn, uv_severe = uv_thresholds
-
-    emitted: list[tuple[int, str, int]] = []
-    for i in range(len(times)):
-        candidates = []
-        prob = probs[i]
-        kind = None if (prob is None or prob < prob_threshold_pct) else _precip_label(codes[i])
+    def add_hour(self, utc_epoch: int, values: list[float | None]) -> None:
+        """Add one hour's ``_METRICS`` values."""
+        prob, amount_mm, wmo_code, uv_index = values
+        kind = None if (prob is None or prob < self._prob_threshold_pct) else _precip_label(wmo_code)
+        precip_level = 0
         if kind is not None:
-            precip_mm = amounts[i] if amounts[i] is not None else 0.0
-            rank, color = _precip_rank_and_color(precip_mm)
-            candidates.append((rank, kind, color))
-        uv_lvl = event_runs.level(uv[i], uv_warn, uv_severe)
-        if uv_lvl:
-            candidates.append((uv_lvl, "UV", _UV_LEVEL_COLOR[uv_lvl]))
-
-        win = event_runs.best_by_priority(candidates)
-        if win is not None:
-            emitted.append((openmeteo_client.parse_iso_local(times[i]), win[0], win[1]))
-
-    return event_runs.merge_runs(emitted)
+            # The WMO code already says it precipitates, so a missing amount still warns.
+            precip_level = event_runs.level(amount_mm if amount_mm is not None else 0.0, _PRECIP_THRESHOLDS_MM)
+        self.precip.add(utc_epoch, kind, precip_level)
+        self.uv.add(utc_epoch, "UV", event_runs.level(uv_index, self._uv_thresholds))
 
 
 class WeatherService(EventStreamService):
-    """Weather row (precipitation + UV) over one Open-Meteo forecast fetch.
+    """Precipitation and UV streams over one Open-Meteo forecast fetch, coloured by warning level.
 
-    Precipitation and UV rarely coincide, so sharing a row keeps it dense.
-
-    Stays disabled unless ``openmeteo_client.is_location_set(latitude, longitude)``.
+    Event times are local, by ``utc_offset_sec``; each stream keeps at most ``max_events`` events not over by the
+    fetch, at ``get_utc_time``.  Stays disabled unless ``openmeteo_client.is_location_set(latitude, longitude)``.
     """
 
     def __init__(
@@ -120,15 +89,18 @@ class WeatherService(EventStreamService):
         latitude: float,
         longitude: float,
         prob_threshold_pct: int,
-        uv_thresholds: tuple[int, int],
+        uv_thresholds: tuple[float, float, float],
         wifi,  # has is_connected() -> bool
         coordinator: FetchCoordinator,
         schedule,  # (callback, arg) -> None
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
+        utc_offset_sec,  # (int) -> int
+        max_events: int,
+        get_utc_time=time.time,  # () -> int
         get_ticks_ms=time.ticks_ms,  # () -> int
-        http_get=http_client.get_json,  # (url, timeout_sec) -> dict
+        http_get_lines=http_client.get_lines,  # (url, on_line, timeout_sec) -> None
         timeout_sec: int = 3,
         tick_scheduler: TickScheduler | None = None,
     ) -> None:
@@ -136,13 +108,16 @@ class WeatherService(EventStreamService):
         self._lon = longitude
         self._prob_threshold_pct = prob_threshold_pct
         self._uv_thresholds = uv_thresholds
-        self._http_get = http_get
+        self._http_get_lines = http_get_lines
         self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
+        self._utc_offset_sec = utc_offset_sec
+        self._max_events = max_events
+        self._get_utc_time = get_utc_time
         enabled = openmeteo_client.is_location_set(latitude, longitude)
         super().__init__(
-            wifi, coordinator, schedule, interval_ms, "weather", enabled,
+            wifi, coordinator, schedule, interval_ms, "weather", enabled, stream_count=2,
             get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,
         )
         if enabled:
@@ -150,10 +125,14 @@ class WeatherService(EventStreamService):
         else:
             print("[weather] disabled: set LATITUDE/LONGITUDE in config.py")
 
-    def _fetch_and_parse(self) -> list[Event]:
+    def _fetch_and_parse(self) -> tuple[list[Event], list[Event]]:
         print("[weather] fetching lat=%s lon=%s" % (self._lat, self._lon))
-        payload = openmeteo_client.fetch_forecast(
-            self._http_get, self._lat, self._lon, _METRICS, self._timeout_sec,
-            self._forecast_hours, self._past_hours,
+        hours = _WeatherHours(
+            self._prob_threshold_pct, self._uv_thresholds, self._utc_offset_sec, self._max_events,
+            self._get_utc_time(),
         )
-        return _build_events(payload, self._prob_threshold_pct, self._uv_thresholds)
+        openmeteo_client.fetch_forecast(
+            self._http_get_lines, self._lat, self._lon, _METRICS, self._timeout_sec,
+            self._forecast_hours, self._past_hours, hours.add_hour,
+        )
+        return hours.precip.events(), hours.uv.events()
