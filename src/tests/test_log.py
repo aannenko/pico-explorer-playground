@@ -1,6 +1,8 @@
+import gc
+
 import micropython
 
-from utilities.log import log_exception
+from utilities.log import log_exception, log_memory
 
 
 def _raised(exc: Exception) -> Exception:
@@ -30,3 +32,13 @@ def test_memory_error_prints_heap_summary_between_tag_and_traceback(monkeypatch,
     out = capsys.readouterr().out
     assert out.startswith("[x] err:\n<heap>\nTraceback")
     assert "MemoryError: allocating 64 bytes" in out
+
+
+def test_memory_log_prints_tag_heap_and_qstr_pool_without_collecting(monkeypatch, capsys):
+    monkeypatch.setattr(gc, "collect", lambda: print("<collect>"))
+    monkeypatch.setattr(micropython, "mem_info", lambda: print("<heap>"))
+    monkeypatch.setattr(micropython, "qstr_info", lambda: print("<qstr>"))
+
+    log_memory("[boot] memory:")
+
+    assert capsys.readouterr().out == "[boot] memory:\n<heap>\n<qstr>\n"

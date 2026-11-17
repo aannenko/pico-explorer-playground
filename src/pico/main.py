@@ -15,8 +15,6 @@ config_bootstrap.apply_overrides()
 
 import config  # noqa: F401, E402
 
-_DISPATCH_INTERVAL_MS = const(10)
-
 # Create the framebuffer before importing the app graph so it allocates while
 # the heap is still unfragmented (the GC is non-compacting).
 PICO_GRAPHICS = PicoGraphics(display=DISPLAY_PICO_EXPLORER, pen_type=PEN_P4)
@@ -26,14 +24,22 @@ from displays.palette import program_palette  # noqa: E402
 
 program_palette(PICO_GRAPHICS)
 
+# Like the framebuffer, and for the same reason: the native code of these views, ring's geometry and the Sensors
+# graph, takes the largest blocks the app graph allocates, and compiling it last could leave no free run that big.
+import displays.ring  # noqa: F401, E402
+import displays.sensors  # noqa: F401, E402
+
 from app import build_app  # noqa: E402
+from utilities.log import log_memory  # noqa: E402
 
 APP = build_app(PICO_GRAPHICS, micropython.schedule)
+log_memory("[boot] memory after the first frame:")
 APP.tick_scheduler.start()
 
 # Not machine.idle(): it returns on every interrupt, about 2,500 times a second
 # here, far more often than presses need checking. sleep_ms still runs
 # scheduled callbacks while it waits.
+_DISPATCH_INTERVAL_MS = const(10)
 while True:
     time.sleep_ms(_DISPATCH_INTERVAL_MS)
     APP.button_dispatcher.dispatch_pending()

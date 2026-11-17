@@ -96,6 +96,7 @@ if "micropython" not in sys.modules:
     micropython_stub.viper = _viper
     micropython_stub.schedule = _schedule
     micropython_stub.mem_info = lambda *_args: None
+    micropython_stub.qstr_info = lambda *_args: None
     sys.modules["micropython"] = micropython_stub
 
 # MicroPython's sys.print_exception() prints a traceback to stdout.
