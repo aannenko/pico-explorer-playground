@@ -4,6 +4,7 @@ import displays.palette as palette
 from displays.palette import (
     BLACK,
     BLUE,
+    DARK_GRAY,
     GREEN,
     GREEN_SHADE,
     ICON_SLOTS,
@@ -118,7 +119,7 @@ def test_program_palette_writes_all_16_slots() -> None:
 # ---------------------------------------------------------------------------
 
 def test_stream_colors_are_valid_slots() -> None:
-    assert len(STREAM_COLORS) == 9
+    assert len(STREAM_COLORS) == 10
     for idx, slot in enumerate(STREAM_COLORS):
         assert isinstance(slot, int)
         assert 0 <= slot <= 15, f"STREAM_COLORS[{idx}] out of slot range"
@@ -138,7 +139,8 @@ def test_stream_color_constants_match_positions() -> None:
     assert palette.STREAM_GRAY == 6
     assert palette.STREAM_GREEN == 7
     assert palette.STREAM_RED == 8
-    assert palette.STREAM_RED == len(STREAM_COLORS) - 1
+    assert palette.STREAM_DARK_GRAY == 9
+    assert palette.STREAM_DARK_GRAY == len(STREAM_COLORS) - 1
 
 
 def test_stream_colors_map_to_expected_slots() -> None:
@@ -146,3 +148,4 @@ def test_stream_colors_map_to_expected_slots() -> None:
     assert STREAM_COLORS[palette.STREAM_BLUE] == BLUE
     assert STREAM_COLORS[palette.STREAM_BROWN] == BROWN
     assert STREAM_COLORS[palette.STREAM_PINK] == PINK
+    assert STREAM_COLORS[palette.STREAM_DARK_GRAY] == DARK_GRAY

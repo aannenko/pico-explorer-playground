@@ -81,6 +81,7 @@ STREAM_COLORS = [
     GRAY,
     GREEN,
     RED,
+    DARK_GRAY,
 ]
 
 # STREAM_* indices are stable configuration values.
@@ -93,6 +94,7 @@ STREAM_BROWN = const(5)
 STREAM_GRAY = const(6)
 STREAM_GREEN = const(7)
 STREAM_RED = const(8)
+STREAM_DARK_GRAY = const(9)
 
 
 def program_palette(gfx) -> None:  # gfx: PicoGraphics
