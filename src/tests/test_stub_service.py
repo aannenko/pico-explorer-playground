@@ -9,8 +9,6 @@ is published on the *next* ``tick()`` (the harvest), so published-state asserts
 (generation / visible / FRESH / ERROR) come after an extra ``tick()``.
 """
 
-import pytest
-
 from scheduling.event_window import build_event_windows
 from scheduling.stream import DISABLED, ERROR, FRESH, STALE, Stream
 from _stub_service import StubService
