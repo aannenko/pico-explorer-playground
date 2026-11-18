@@ -23,7 +23,9 @@ leaves them ambiguous.
   progress come first, each with the time left and a progress bar under its
   field, today's later events say how soon they start, and a header names
   each later day. Every row is the same height, so events beyond the last
-  row are just not shown.
+  row are just not shown. A stream that fails to list its events is left out
+  of that minute's redraw, which still shows the other streams under a red
+  date with a red "!" badge after it.
 
 - **Calendar streams** — built-in streams that work out of the box, each a
   long-lived data source the calendar reads passively:
