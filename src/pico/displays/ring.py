@@ -1,8 +1,6 @@
 """Progress-ring screen: a segmented ring around up to three centred text lines."""
 
 import math
-import micropython
-
 
 from array import array
 from micropython import const
@@ -37,7 +35,6 @@ class Colors:
 class Geometry:
     """Pixel layout of the ring screen, with ``TEXT_*`` boxes that fit inside the ring."""
 
-    @micropython.native
     def __init__(
         self,
         pico_graphics: PicoGraphics,
@@ -57,11 +54,17 @@ class Geometry:
         self.outer_poly_r = self.outer_circle_r + 2
         self.inner_poly_r = self.inner_circle_r - 1
 
-        empty_list = [0] * RING_SEGMENTS
-        self.x_outer_vertices = array("H", empty_list)
-        self.y_outer_vertices = array("H", empty_list)
-        self.x_inner_vertices = array("H", empty_list)
-        self.y_inner_vertices = array("H", empty_list)
+        if max(self.x_center, self.y_center) + self.outer_poly_r <= 255:
+            typecode = "B"
+            coordinate_bytes = 1
+        else:
+            typecode = "H"
+            coordinate_bytes = 2
+        zeros = bytes(RING_SEGMENTS * coordinate_bytes)
+        self.x_outer_vertices = array(typecode, zeros)
+        self.y_outer_vertices = array(typecode, zeros)
+        self.x_inner_vertices = array(typecode, zeros)
+        self.y_inner_vertices = array(typecode, zeros)
 
         x_center = self.x_center
         y_center = self.y_center

@@ -25,9 +25,7 @@ from displays.palette import program_palette  # noqa: E402
 
 program_palette(PICO_GRAPHICS)
 
-# Like the framebuffer, and for the same reason: the native code of these views, ring's geometry and the Sensors
-# graph, takes the largest blocks the app graph allocates, and compiling it last could leave no free run that big.
-import displays.ring  # noqa: F401, E402
+# Compile the Sensors graph's native code before the app graph fragments its required heap block.
 import displays.sensors  # noqa: F401, E402
 
 from app import build_app  # noqa: E402

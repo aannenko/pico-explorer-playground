@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass
 
 import pytest
 
-from displays.ring import Colors, Renderer, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
+from displays.ring import Colors, Geometry, Renderer, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER, RING_SEGMENTS
 
 
 class FakePicoGraphics:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
+
+    def get_bounds(self) -> tuple[int, int]:
+        return 240, 240
 
     def set_pen(self, pen: int) -> None:
         self.calls.append(("set_pen", (pen,), {}))
@@ -221,3 +225,25 @@ def test_invalid_text_position_is_ignored(position: int) -> None:
     tg.clear_text(position)
 
     assert display.calls == []
+
+
+def test_byte_coordinates_render_like_unsigned_short_coordinates() -> None:
+    byte_panel, short_panel = FakePicoGraphics(), FakePicoGraphics()
+    byte_geom = Geometry(byte_panel, font="bitmap6", font_height=6, text_scale=3)
+    short_geom = Geometry(short_panel, font="bitmap6", font_height=6, text_scale=3)
+    for name in ("x_outer_vertices", "y_outer_vertices", "x_inner_vertices", "y_inner_vertices"):
+        assert getattr(byte_geom, name).typecode == "B"
+        setattr(short_geom, name, array("H", getattr(short_geom, name)))
+    colors = Colors(background=1, ring=2, primary_text=3, secondary_text=4)
+    byte_renderer, short_renderer = Renderer(byte_geom, colors), Renderer(short_geom, colors)
+
+    for renderer in (byte_renderer, short_renderer):
+        renderer.reset()
+        renderer.write_text(TEXT_CENTER, "12:34")
+        for segment_count in (1, 2, 60, 119, 120):
+            renderer.clear_ring_segments(segment_count)
+
+    assert byte_panel.calls == short_panel.calls
+    polygons = [args[0] for method, args, _ in byte_panel.calls if method == "polygon"]
+    assert [len(points) for points in polygons] == [4, 4, 118, 120]
+    assert byte_renderer.segments_cleared == short_renderer.segments_cleared == 120

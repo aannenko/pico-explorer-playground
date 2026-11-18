@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import math
 from array import array
+
+import pytest
 
 import displays.ring as ring
 from displays.ring import Geometry, RING_SEGMENTS
@@ -47,15 +50,19 @@ def test_geometry_precomputes_vertex_arrays() -> None:
     assert isinstance(g.x_inner_vertices, array)
     assert isinstance(g.y_inner_vertices, array)
 
-    assert g.x_outer_vertices.typecode == "H"
-    assert g.y_outer_vertices.typecode == "H"
-    assert g.x_inner_vertices.typecode == "H"
-    assert g.y_inner_vertices.typecode == "H"
+    assert g.x_outer_vertices.typecode == "B"
+    assert g.y_outer_vertices.typecode == "B"
+    assert g.x_inner_vertices.typecode == "B"
+    assert g.y_inner_vertices.typecode == "B"
 
     assert len(g.x_outer_vertices) == RING_SEGMENTS
     assert len(g.y_outer_vertices) == RING_SEGMENTS
     assert len(g.x_inner_vertices) == RING_SEGMENTS
     assert len(g.y_inner_vertices) == RING_SEGMENTS
+    assert sum(
+        len(vertices) * vertices.itemsize
+        for vertices in (g.x_outer_vertices, g.y_outer_vertices, g.x_inner_vertices, g.y_inner_vertices)
+    ) == 480
 
     # Segment 0 is at angle -90°, so x should be centered and y should be above center.
     # Note: Geometry uses float32 intermediates; allow a small integer rounding tolerance.
@@ -78,3 +85,47 @@ def test_geometry_text_rects_are_even_and_centered() -> None:
 
     assert 0 <= g.max_text_center_width <= g.width
     assert 0 <= g.max_text_above_center_width <= g.width
+
+
+@pytest.mark.parametrize(
+    "width, height, coordinate_bound, typecode, item_bytes",
+    [(240, 240, 240, "B", 1), (240, 270, 255, "B", 1), (270, 240, 255, "B", 1),
+     (240, 272, 256, "H", 2), (272, 240, 256, "H", 2), (480, 320, 400, "H", 2)],
+    ids=["default-panel", "tall-byte-limit", "wide-byte-limit", "tall-short-limit", "wide-short-limit", "wide-panel"],
+)
+def test_geometry_storage_boundary_and_binary_initializers_preserve_coordinates(
+    monkeypatch, width: int, height: int, coordinate_bound: int, typecode: str, item_bytes: int
+) -> None:
+    initializers = []
+
+    def make_array(code: str, initializer: bytes) -> array:
+        initializers.append((code, initializer))
+        return array(code, initializer)
+
+    monkeypatch.setattr(ring, "array", make_array)
+
+    geom = Geometry(FakeDisplay(width, height), font="bitmap6", font_height=6, text_scale=3)
+
+    assert len(initializers) == 4
+    for code, initializer in initializers:
+        assert code == typecode
+        assert isinstance(initializer, bytes)
+        assert initializer == bytes(120 * item_bytes)
+
+    x_center, y_center = (width + 1) // 2, (height + 1) // 2
+    outer_r = min(x_center, y_center)
+    inner_r = outer_r - 3 - min(width, height) // 30
+    expected = [[], [], [], []]
+    for index in range(120):
+        angle = math.radians(index * 3 - 90)
+        expected[0].append(int(x_center + outer_r * math.cos(angle)))
+        expected[1].append(int(y_center + outer_r * math.sin(angle)))
+        expected[2].append(int(x_center + inner_r * math.cos(angle)))
+        expected[3].append(int(y_center + inner_r * math.sin(angle)))
+    vertices = (geom.x_outer_vertices, geom.y_outer_vertices, geom.x_inner_vertices, geom.y_inner_vertices)
+    for actual, old_coordinates in zip(vertices, expected):
+        assert actual.typecode == typecode
+        assert actual.itemsize == item_bytes
+        assert len(actual) == RING_SEGMENTS == 120
+        assert list(actual) == old_coordinates
+    assert max(max(axis) for axis in vertices) == coordinate_bound
