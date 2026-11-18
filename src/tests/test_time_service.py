@@ -7,10 +7,9 @@ import pytest
 from services.time_service import (
     TimeService,
     _days_in_month,
-    _is_dst,
     _is_leap,
     _mday_of_nth_weekday,
-    _next_transition_utc,
+    _offset_span,
     _transition_utc,
     _weekday,
 )
@@ -124,67 +123,84 @@ def test_cest_dst_end_2026():
     assert epoch == _utc_epoch(2026, 10, 25, 1, 0, 0)
 
 
-# ── _is_dst ──────────────────────────────────────────────────────────
+# ── _offset_span ────────────────────────────────────────────────────
 
 
-def test_is_dst_winter():
+def _span(utc: int) -> tuple[int, int, int]:
+    return _offset_span(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
+
+
+def _offset(utc: int) -> int:
+    return _span(utc)[2]
+
+
+def test_offset_winter():
     # January 2026 — definitely not DST
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
+    assert _offset(utc) == _CET_OFFSET_SEC
 
 
-def test_is_dst_summer():
+def test_offset_summer():
     # July 2026 — definitely DST
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
+    assert _offset(utc) == _CET_OFFSET_SEC + _CEST_EXTRA_SEC
 
 
-def test_is_dst_just_before_spring_forward():
+def test_offset_just_before_spring_forward():
     # 2026-03-29 00:59 UTC → 01:59 CET, not yet DST
     utc = _utc_epoch(2026, 3, 29, 0, 59, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
+    assert _offset(utc) == _CET_OFFSET_SEC
 
 
-def test_is_dst_at_spring_forward():
+def test_offset_at_spring_forward():
     # 2026-03-29 01:00 UTC → 02:00 CET → clocks jump to 03:00 CEST
     utc = _utc_epoch(2026, 3, 29, 1, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
+    assert _offset(utc) == _CET_OFFSET_SEC + _CEST_EXTRA_SEC
 
 
-def test_is_dst_just_before_fall_back():
+def test_offset_just_before_fall_back():
     # 2026-10-25 00:59 UTC → 02:59 CEST, still DST
     utc = _utc_epoch(2026, 10, 25, 0, 59, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is True
+    assert _offset(utc) == _CET_OFFSET_SEC + _CEST_EXTRA_SEC
 
 
-def test_is_dst_at_fall_back():
+def test_offset_at_fall_back():
     # 2026-10-25 01:00 UTC → 03:00 CEST → clocks fall back to 02:00 CET
     utc = _utc_epoch(2026, 10, 25, 1, 0, 0)
-    assert _is_dst(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END) is False
+    assert _offset(utc) == _CET_OFFSET_SEC
 
 
-# ── _next_transition_utc ────────────────────────────────────────────
-
-
-def test_next_transition_from_winter():
+def test_span_ends_at_the_next_change_from_winter():
     # January → next transition is spring forward (March)
     utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
+    nxt = _span(utc)[1]
     assert nxt == _utc_epoch(2026, 3, 29, 1, 0, 0)
 
 
-def test_next_transition_from_summer():
+def test_span_ends_at_the_next_change_from_summer():
     # July → next transition is fall back (October)
     utc = _utc_epoch(2026, 7, 15, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
+    nxt = _span(utc)[1]
     assert nxt == _utc_epoch(2026, 10, 25, 1, 0, 0)
 
 
-def test_next_transition_after_fall_back():
+def test_span_ends_at_the_next_change_after_fall_back():
     # November → next transition is spring forward of next year
     utc = _utc_epoch(2026, 11, 1, 12, 0, 0)
-    nxt = _next_transition_utc(utc, _CET_OFFSET_SEC, _CEST_EXTRA_SEC, _DST_START, _DST_END)
+    nxt = _span(utc)[1]
     assert nxt == _utc_epoch(2027, 3, 28, 1, 0, 0)
+
+
+@pytest.mark.parametrize(
+    "utc, start",
+    [
+        (_utc_epoch(2026, 1, 15, 12, 0, 0), _utc_epoch(2025, 10, 26, 1, 0, 0)),
+        (_utc_epoch(2026, 3, 29, 1, 0, 0), _utc_epoch(2026, 3, 29, 1, 0, 0)),
+        (_utc_epoch(2026, 10, 25, 0, 59, 0), _utc_epoch(2026, 3, 29, 1, 0, 0)),
+    ],
+)
+def test_span_starts_at_the_last_change_at_or_before(utc: int, start: int):
+    assert _span(utc)[0] == start
 
 
 # ── TimeService ─────────────────────────────────────────────────────
@@ -307,6 +323,53 @@ def test_reads_away_from_a_dst_change_do_no_dst_math(monkeypatch):
     for _ in range(5):
         clock[0] += 60
         svc.now()
+    assert mktime_calls[0] == 0
+
+
+def test_lookups_either_side_of_one_dst_change_do_its_dst_math_once(monkeypatch):
+    winter_utc = _utc_epoch(2026, 3, 20, 12, 0, 0)
+    summer_utc = _utc_epoch(2026, 4, 3, 12, 0, 0)
+    svc = TimeService(
+        tz_offset_hours=1, dst_start_rule=_DST_START, dst_end_rule=_DST_END, dst_offset_hours=1,
+        get_time=lambda: winter_utc,
+    )
+    mktime = time.mktime
+    mktime_calls = [0]
+
+    def counting_mktime(fields: tuple) -> int:
+        mktime_calls[0] += 1
+        return mktime(fields)
+
+    monkeypatch.setattr(time, "mktime", counting_mktime)
+    svc.utc_offset_sec(winter_utc)
+    svc.utc_offset_sec(summer_utc)
+    calls_for_both_spans = mktime_calls[0]
+
+    for i in range(3):
+        assert svc.now() == winter_utc + 3600
+        assert svc.to_local(summer_utc + i) == summer_utc + i + 7200
+        assert svc.to_utc(summer_utc + 7200) == summer_utc
+    assert mktime_calls[0] == calls_for_both_spans
+
+
+def test_a_new_span_replaces_the_one_used_least_recently(monkeypatch):
+    winter_utc = _utc_epoch(2026, 1, 15, 12, 0, 0)
+    svc = TimeService(
+        tz_offset_hours=1, dst_start_rule=_DST_START, dst_end_rule=_DST_END, dst_offset_hours=1,
+        get_time=lambda: winter_utc,
+    )
+    for utc in (winter_utc, _utc_epoch(2026, 7, 15, 12, 0, 0), winter_utc, _utc_epoch(2026, 12, 15, 12, 0, 0)):
+        svc.utc_offset_sec(utc)
+    mktime = time.mktime
+    mktime_calls = [0]
+
+    def counting_mktime(fields: tuple) -> int:
+        mktime_calls[0] += 1
+        return mktime(fields)
+
+    monkeypatch.setattr(time, "mktime", counting_mktime)
+    svc.utc_offset_sec(winter_utc)
+
     assert mktime_calls[0] == 0
 
 

@@ -51,48 +51,33 @@ def _transition_utc(year: int, rule: tuple[int, int, int, int], offset_sec: int)
     return time.mktime((year, month, mday, hour, 0, 0, 0, 0)) - offset_sec
 
 
-def _is_dst(
+def _offset_span(
     utc_epoch: int,
     tz_offset_sec: int,
     dst_offset_sec: int,
     dst_start_rule: tuple[int, int, int, int],
     dst_end_rule: tuple[int, int, int, int],
-) -> bool:
+) -> tuple[int, int, int]:
+    """Return ``(start_utc, end_utc, offset_sec)``: the DST changes around ``utc_epoch``, the last at or before it and
+    the first after it, and the UTC offset in force from one to the other."""
     year = time.gmtime(utc_epoch)[0]
-    latest_utc = -1
+    start_utc = -1
+    end_utc = 0
     is_dst = False
     for y in range(year - 1, year + 2):
-        start = _transition_utc(y, dst_start_rule, tz_offset_sec)
-        if latest_utc < start <= utc_epoch:
-            latest_utc = start
+        dst_start_utc = _transition_utc(y, dst_start_rule, tz_offset_sec)
+        dst_end_utc = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
+        if start_utc < dst_start_utc <= utc_epoch:
+            start_utc = dst_start_utc
             is_dst = True
-        end = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
-        if latest_utc < end <= utc_epoch:
-            latest_utc = end
+        if start_utc < dst_end_utc <= utc_epoch:
+            start_utc = dst_end_utc
             is_dst = False
-    return is_dst
-
-
-def _next_transition_utc(
-    utc_epoch: int,
-    tz_offset_sec: int,
-    dst_offset_sec: int,
-    dst_start_rule: tuple[int, int, int, int],
-    dst_end_rule: tuple[int, int, int, int],
-) -> int:
-    """Returns 0 if no future transition is found (should not happen
-    for valid rules within a reasonable year range).
-    """
-    year = time.gmtime(utc_epoch)[0]
-    result = 0
-    for y in range(year - 1, year + 2):
-        s = _transition_utc(y, dst_start_rule, tz_offset_sec)
-        e = _transition_utc(y, dst_end_rule, tz_offset_sec + dst_offset_sec)
-        if s > utc_epoch and (result == 0 or s < result):
-            result = s
-        if e > utc_epoch and (result == 0 or e < result):
-            result = e
-    return result
+        if dst_start_utc > utc_epoch and (end_utc == 0 or dst_start_utc < end_utc):
+            end_utc = dst_start_utc
+        if dst_end_utc > utc_epoch and (end_utc == 0 or dst_end_utc < end_utc):
+            end_utc = dst_end_utc
+    return start_utc, end_utc, tz_offset_sec + dst_offset_sec if is_dst else tz_offset_sec
 
 
 def _validate_dst_rule(rule: tuple[int, int, int, int]) -> None:
@@ -119,8 +104,8 @@ class TimeService:
     ``sync_initial`` and ``sync`` set the RTC over NTP; until the first, times
     follow whatever it holds.  Times follow each sync at once.
 
-    Owns no timer: ``now()`` re-derives its cached UTC offset on the first read
-    after a DST change or a sync.
+    Owns no timer: it keeps the two spans between DST changes it looked up last,
+    so a lookup inside either does no DST math, wherever the clock moved.
     """
 
     def __init__(
@@ -145,9 +130,10 @@ class TimeService:
         self._get_time = get_time
         self._sync_time = sync_time
 
-        self._offset_sec = self._tz_offset_sec
-        self._next_transition_utc = 0
-        self._dst_stale = True
+        # (start_utc, end_utc, offset_sec), the span looked up last first: lookups mostly fall near now, or across the
+        # next or the last DST change.  An empty span until the first lookup; without DST, the zone's one offset.
+        self._span = (0, 0, self._tz_offset_sec)
+        self._other_span = self._span
 
     def sync_initial(self, on_progress=None) -> None:  # on_progress: (str) -> None
         """Block until NTP sets the RTC, else raise ``RuntimeError``.
@@ -166,36 +152,28 @@ class TimeService:
 
     def sync(self, attempts: int = 1) -> bool:
         """Blocking NTP sync of the RTC; return whether one of ``attempts`` succeeded."""
-        # A sync can step the clock back across a DST change, which now()'s transition
-        # check never sees.  Marked before the attempt, so this needn't trust a failed
-        # or raising one to have left the RTC alone.
-        self._dst_stale = True
         return self._sync_time(attempts)
 
     def now(self) -> int:
-        """Return the current local-epoch time in seconds.
+        """Return the current local-epoch time in seconds, as ``to_local`` converts it."""
+        return self.to_local(self._get_time())
 
-        Short of heap to re-derive the offset after a DST change or a sync, it uses
-        the previous offset, off by at most the DST offset, and the next call retries.
+    def to_local(self, utc_epoch: int) -> int:
+        """Convert a UTC-epoch time to local epoch.
+
+        Short of heap to look up its offset, it uses the offset of the last time
+        looked up, off by at most the DST offset, and the next call retries.
         """
-        utc_epoch = self._get_time()
-        if self._dst_stale or (self._next_transition_utc > 0 and utc_epoch >= self._next_transition_utc):
-            self._update_dst(utc_epoch)
-        return utc_epoch + self._offset_sec
+        try:
+            return utc_epoch + self._span_at(utc_epoch)[2]
+        except MemoryError as e:
+            # Rather than raise, as a raise would end any generator reading the time, for good.
+            log_exception("[time] dst err:", e)
+            return utc_epoch + self._span[2]
 
     def utc_offset_sec(self, utc_epoch: int) -> int:
         """Time-zone offset, plus the DST offset when DST is active at ``utc_epoch``."""
-        if self._dst_start_rule is None or self._dst_end_rule is None:
-            return self._tz_offset_sec
-        if _is_dst(
-            utc_epoch,
-            self._tz_offset_sec,
-            self._dst_offset_sec,
-            self._dst_start_rule,
-            self._dst_end_rule,
-        ):
-            return self._tz_offset_sec + self._dst_offset_sec
-        return self._tz_offset_sec
+        return self._span_at(utc_epoch)[2]
 
     def to_utc(self, local_epoch: int) -> int:
         """Convert a local-epoch time to UTC epoch.
@@ -211,20 +189,14 @@ class TimeService:
         """
         # Estimating with the max offset never overshoots a fall-back boundary.
         max_offset_sec = self._tz_offset_sec + self._dst_offset_sec
-        utc_estimate = local_epoch - max_offset_sec
-        offset_sec = self.utc_offset_sec(utc_estimate)
+        span = self._span_at(local_epoch - max_offset_sec)
+        offset_sec = span[2]
         utc = local_epoch - offset_sec
-        if self.utc_offset_sec(utc) == offset_sec:
+        if utc < span[1] or self.utc_offset_sec(utc) == offset_sec:
             return utc
         # The clock never shows local_epoch, so a spring-forward jump skips it, and
-        # that jump is the first transition after the estimate.
-        return _next_transition_utc(
-            utc_estimate,
-            self._tz_offset_sec,
-            self._dst_offset_sec,
-            self._dst_start_rule,
-            self._dst_end_rule,
-        )
+        # that jump ends the estimate's span.
+        return span[1]
 
     def real_remaining_sec(self, local_epoch: int) -> int:
         """Return the real seconds from now until the clock first reaches local time ``local_epoch``.
@@ -236,35 +208,22 @@ class TimeService:
         # say which pass it is, so to_utc(now()) would be off by the DST offset.
         return self.to_utc(local_epoch) - self._get_time()
 
-    def _update_dst(self, utc_epoch: int) -> None:
+    def _span_at(self, utc_epoch: int) -> tuple[int, int, int]:
+        """Return ``(start_utc, end_utc, offset_sec)`` for the span between DST changes holding ``utc_epoch``; without
+        DST, the zone's offset with an empty span."""
+        span = self._span
+        if span[0] <= utc_epoch < span[1]:
+            return span
+        other = self._other_span
+        if other[0] <= utc_epoch < other[1]:
+            self._other_span = span
+            self._span = other
+            return other
         if self._dst_start_rule is None or self._dst_end_rule is None:
-            self._dst_stale = False
-            return
-
-        try:
-            dst_active = _is_dst(
-                utc_epoch,
-                self._tz_offset_sec,
-                self._dst_offset_sec,
-                self._dst_start_rule,
-                self._dst_end_rule,
-            )
-            next_transition_utc = _next_transition_utc(
-                utc_epoch,
-                self._tz_offset_sec,
-                self._dst_offset_sec,
-                self._dst_start_rule,
-                self._dst_end_rule,
-            )
-        except MemoryError as e:
-            # Keeps the previous offset rather than raising, as now() documents: a raise
-            # would end any generator reading the time, for good.
-            log_exception("[time] dst err:", e)
-            return
-
-        if dst_active:
-            self._offset_sec = self._tz_offset_sec + self._dst_offset_sec
-        else:
-            self._offset_sec = self._tz_offset_sec
-        self._next_transition_utc = next_transition_utc
-        self._dst_stale = False
+            return span
+        found = _offset_span(
+            utc_epoch, self._tz_offset_sec, self._dst_offset_sec, self._dst_start_rule, self._dst_end_rule
+        )
+        self._other_span = span
+        self._span = found
+        return found
