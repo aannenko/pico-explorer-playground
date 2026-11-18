@@ -1,19 +1,19 @@
-"""Tests for the stateless fetch machine + the single-in-flight gate.
+"""Tests for the fetch machine functions + the single-in-flight gate.
 
 Scheduling and backoff now live on ``EventStreamService`` and are
 covered end-to-end in ``test_stub_service.py``; this file covers only the
-``FetchMachine`` transition mechanics and the ``FetchCoordinator`` gate.
+``fetch_machine`` transition mechanics and the ``FetchCoordinator`` gate.
 """
 
 import pytest
 
+from services import fetch_machine
 from services.fetch_machine import (
     DONE,
     FAILED,
     FETCHING,
     INITIAL,
     FetchCoordinator,
-    FetchMachine,
     FetchState,
 )
 from services.http_client import (
@@ -70,7 +70,7 @@ def _start(wifi=None, coord=None, schedule=None, fetcher=None):
     coord = coord or FetchCoordinator()
     schedule = schedule or _FakeSchedule()
     fetcher = fetcher or _FakeFetcher()
-    state = FetchMachine.start(fetcher, wifi, schedule, coord)
+    state = FetchState(fetcher, wifi, schedule, coord)
     return state, wifi, coord, schedule, fetcher
 
 
@@ -88,16 +88,15 @@ def test_coordinator_acquire_release_cycle():
     assert c.try_acquire() is True  # reusable after release
 
 
-# ── start ────────────────────────────────────────────────────────────
+# ── a new attempt ────────────────────────────────────────────────────
 
 
-def test_start_returns_initial_state():
+def test_a_new_attempt_is_initial_and_not_done():
     state, _, _, _, _ = _start()
-    assert isinstance(state, FetchState)
     assert state.stage == INITIAL
     assert state.result is None
     assert state.error is None
-    assert FetchMachine.is_done(state) is False
+    assert fetch_machine.is_done(state) is False
 
 
 # ── tick: dispatch gating ────────────────────────────────────────────
@@ -106,7 +105,7 @@ def test_start_returns_initial_state():
 def test_tick_dispatches_when_connected_and_gate_free():
     state, _, coord, sched, fetcher = _start()
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
 
     assert state.stage == FETCHING
     assert coord.busy is True        # gate acquired
@@ -119,7 +118,7 @@ def test_tick_holds_initial_while_wifi_down():
     state, _, coord, sched, fetcher = _start(wifi=wifi)
 
     for _ in range(5):
-        FetchMachine.tick(state)
+        fetch_machine.tick(state)
 
     assert state.stage == INITIAL
     assert coord.busy is False       # never acquired the gate
@@ -131,11 +130,11 @@ def test_tick_fetches_once_wifi_returns():
     wifi = _FakeWifi(connected=False)
     state, _, _, _, _ = _start(wifi=wifi)
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
     assert state.stage == INITIAL
 
     wifi.connected = True
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
     assert state.stage == FETCHING
 
 
@@ -144,7 +143,7 @@ def test_tick_holds_initial_when_gate_busy():
     coord.try_acquire()  # a peer fetch holds the gate
     state, _, _, sched, fetcher = _start(coord=coord)
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
 
     assert state.stage == INITIAL    # blocked by the single-active invariant
     assert sched.queue == []
@@ -154,9 +153,9 @@ def test_tick_holds_initial_when_gate_busy():
 def test_tick_is_idempotent_while_fetching():
     state, _, _, sched, _ = _start()
 
-    FetchMachine.tick(state)
-    FetchMachine.tick(state)
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
+    fetch_machine.tick(state)
+    fetch_machine.tick(state)
 
     assert state.stage == FETCHING
     assert len(sched.queue) == 1     # not re-scheduled
@@ -167,7 +166,7 @@ def test_schedule_failure_rolls_back_to_initial_and_releases():
     sched.raise_next = True
     state, _, coord, _, _ = _start(schedule=sched)
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
 
     assert state.stage == INITIAL    # rolled back so the next tick can retry
     assert coord.busy is False       # gate released
@@ -179,14 +178,14 @@ def test_schedule_failure_rolls_back_to_initial_and_releases():
 def test_do_fetch_success_sets_done_and_releases():
     state, _, coord, sched, fetcher = _start()
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
     sched.run_all()
 
     assert state.stage == DONE
     assert state.result is fetcher.result
     assert state.error is None
     assert coord.busy is False       # gate released on success
-    assert FetchMachine.is_done(state) is True
+    assert fetch_machine.is_done(state) is True
 
 
 @pytest.mark.parametrize(
@@ -204,11 +203,11 @@ def test_do_fetch_failure_sets_failed_and_releases(exc):
     fetcher.exc = exc
     state, _, coord, sched, _ = _start(fetcher=fetcher)
 
-    FetchMachine.tick(state)
+    fetch_machine.tick(state)
     sched.run_all()
 
     assert state.stage == FAILED
     assert state.error is exc
     assert state.result is None
     assert coord.busy is False       # gate released even on failure
-    assert FetchMachine.is_done(state) is True
+    assert fetch_machine.is_done(state) is True

@@ -1,6 +1,6 @@
 """End-to-end test of the network substrate via the stub service.
 
-Drives the full path a real network row uses: tick -> FetchMachine -> schedule
+Drives the full path a real network row uses: tick -> fetch_machine.tick -> schedule
 (fetch+parse) -> harvest (store) -> what the calendar reads from the stream's getter.
 
 Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but

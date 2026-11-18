@@ -44,43 +44,34 @@ class FetchState:
         self.coordinator = coordinator
 
 
-class FetchMachine:
-    """Stateless driver for a ``FetchState``; call ``tick`` once per owner tick."""
+def tick(state: FetchState) -> None:
+    """Dispatch the fetch once WiFi is up and the gate is free; call once per owner tick."""
+    if state.stage != INITIAL:
+        return
+    if not state.wifi.is_connected():
+        return
+    if not state.coordinator.try_acquire():
+        return
+    state.stage = FETCHING
+    try:
+        # Scheduled, so the current tick finishes before the blocking fetch.
+        state.schedule(_do_fetch, state)
+    except Exception:
+        state.coordinator.release()
+        state.stage = INITIAL
 
-    @staticmethod
-    def start(fetcher, wifi, schedule, coordinator: FetchCoordinator) -> FetchState:
-        # fetcher: () -> result; wifi: has is_connected() -> bool; schedule: (callback, arg) -> None
-        return FetchState(fetcher, wifi, schedule, coordinator)
 
-    @staticmethod
-    def tick(state: FetchState) -> None:
-        """Dispatch the fetch once WiFi is up and the gate is free."""
-        if state.stage != INITIAL:
-            return
-        if not state.wifi.is_connected():
-            return
-        if not state.coordinator.try_acquire():
-            return
-        state.stage = FETCHING
-        try:
-            # Scheduled, so the current tick finishes before the blocking fetch.
-            state.schedule(FetchMachine._do_fetch, state)
-        except Exception:
-            state.coordinator.release()
-            state.stage = INITIAL
+def _do_fetch(state: FetchState) -> None:
+    try:
+        state.result = state.fetcher()
+        state.stage = DONE
+    except Exception as exc:
+        state.error = exc
+        state.stage = FAILED
+    finally:
+        state.coordinator.release()
 
-    @staticmethod
-    def _do_fetch(state: FetchState) -> None:
-        try:
-            state.result = state.fetcher()
-            state.stage = DONE
-        except Exception as exc:
-            state.error = exc
-            state.stage = FAILED
-        finally:
-            state.coordinator.release()
 
-    @staticmethod
-    def is_done(state: FetchState) -> bool:
-        """Return whether the attempt finished, with a result or an error."""
-        return state.stage == DONE or state.stage == FAILED
+def is_done(state: FetchState) -> bool:
+    """Return whether the attempt finished, with a result or an error."""
+    return state.stage == DONE or state.stage == FAILED

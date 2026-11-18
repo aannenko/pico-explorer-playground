@@ -68,7 +68,7 @@ graph TD
     TimeService -- "on_progress (bootstrap only)" --> StatusDisplay
     TimeService --> ntp["utilities/ntp"]
     OpenMeteoService -- "forecast + air-quality requests" --> WifiClient
-    OpenMeteoService --> EventStreamService["EventStreamService base (fetch_machine: FetchMachine + FetchCoordinator)"]
+    OpenMeteoService --> EventStreamService["EventStreamService base (fetch_machine: FetchState + FetchCoordinator)"]
     OpenMeteoService -- "precip, UV, AQI, pollen streams" --> CalendarDisplay
 
     app --> providers["scheduling/providers/waste"]

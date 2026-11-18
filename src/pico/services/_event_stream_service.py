@@ -3,7 +3,8 @@ import time
 from micropython import const
 
 from scheduling.event import Event
-from services.fetch_machine import FetchCoordinator, FetchMachine, FetchState
+from services import fetch_machine
+from services.fetch_machine import FetchCoordinator, FetchState
 from services.tick_scheduler import TickScheduler
 from utilities.log import log_exception
 
@@ -17,7 +18,7 @@ class EventStreamService:
 
     One fetch publishes every stream at once.
 
-    A ``FetchState`` lives only from ``FetchMachine.start`` to harvest, so no
+    A ``FetchState`` lives only from the fetch's start to its harvest, so no
     attempt's state stays pinned during the long idle between fetches.
     """
 
@@ -72,11 +73,9 @@ class EventStreamService:
         if self._fetch_state is None:
             if time.ticks_diff(self._get_ticks_ms(), self._next_fetch_ms) < 0:
                 return
-            self._fetch_state = FetchMachine.start(
-                self._fetcher_ref, self._wifi, self._schedule, self._coordinator
-            )
-        FetchMachine.tick(self._fetch_state)
-        if FetchMachine.is_done(self._fetch_state):
+            self._fetch_state = FetchState(self._fetcher_ref, self._wifi, self._schedule, self._coordinator)
+        fetch_machine.tick(self._fetch_state)
+        if fetch_machine.is_done(self._fetch_state):
             state = self._fetch_state
             self._fetch_state = None  # drop before harvest so a raising harvest can't repeat
             self._harvest(state)
