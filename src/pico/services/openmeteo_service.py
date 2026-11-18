@@ -68,14 +68,13 @@ class _WeatherHours:
         self,
         prob_threshold_pct: int,
         uv_thresholds: tuple[float, float, float],
-        utc_offset_sec,  # (int) -> int
         max_events: int,
         now_utc: int,
     ) -> None:
         self._prob_threshold_pct = prob_threshold_pct
         self._uv_thresholds = uv_thresholds
-        self.precip = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
-        self.uv = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
+        self.precip = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
+        self.uv = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
 
     def add_hour(self, utc_epoch: int, values: list[float | None]) -> None:
         """Add one hour's ``_FORECAST_METRICS`` values."""
@@ -100,15 +99,14 @@ class _AirHours:
         self,
         aqi_thresholds: tuple[float, float, float],
         pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
-        utc_offset_sec,  # (int) -> int
         max_events: int,
         now_utc: int,
     ) -> None:
         self._aqi_thresholds = aqi_thresholds
         self._pollen_labels = tuple(species.upper() for species, _ in pollen_thresholds)
         self._species_thresholds = tuple(edges for _, edges in pollen_thresholds)
-        self.aqi = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
-        self.pollen = event_runs.RunBuilder(STREAM_SEVERITY, utc_offset_sec, max_events, now_utc)
+        self.aqi = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
+        self.pollen = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
 
     def add_hour(self, utc_epoch: int, values: list[float | None]) -> None:
         """Add one hour's values: the AQI, then each species' count in ``pollen_thresholds`` order."""
@@ -216,9 +214,9 @@ class OpenMeteoService(EventStreamService):
 
     ``pollen_thresholds`` lists ``(species, levels)``: an Open-Meteo pollen name without its ``_pollen`` suffix, and
     the ascending grains/m³ that start levels 1-3.  Each stream looks from ``past_hours`` back to ``forecast_hours``
-    ahead, but AQI and pollen at most 168 hours ahead, the air-quality API's limit.  Event times are local, by
-    ``utc_offset_sec``; each stream keeps at most ``max_events`` events not over by the fetch, at ``get_utc_time``.
-    Stays disabled unless the coordinates are set: 0.0/0.0, a point at sea, means unset.
+    ahead, but AQI and pollen at most 168 hours ahead, the air-quality API's limit.  Each stream keeps at most
+    ``max_events`` events not over by the fetch, at ``get_utc_time``.  Stays disabled unless the coordinates are set:
+    0.0/0.0, a point at sea, means unset.
     """
 
     def __init__(
@@ -235,7 +233,6 @@ class OpenMeteoService(EventStreamService):
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
-        utc_offset_sec,  # (int) -> int
         max_events: int,
         get_utc_time=time.time,  # () -> int
         get_ticks_ms=time.ticks_ms,  # () -> int
@@ -254,7 +251,6 @@ class OpenMeteoService(EventStreamService):
         self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
-        self._utc_offset_sec = utc_offset_sec
         self._max_events = max_events
         self._get_utc_time = get_utc_time
         enabled = not (latitude == 0.0 and longitude == 0.0)
@@ -270,9 +266,7 @@ class OpenMeteoService(EventStreamService):
     def _fetch_and_parse(self) -> tuple[list[Event], list[Event], list[Event], list[Event]]:
         now_utc = self._get_utc_time()
         print("[meteo] fetching %s lat=%s lon=%s" % ("forecast", self._lat, self._lon))
-        weather = _WeatherHours(
-            self._prob_threshold_pct, self._uv_thresholds, self._utc_offset_sec, self._max_events, now_utc
-        )
+        weather = _WeatherHours(self._prob_threshold_pct, self._uv_thresholds, self._max_events, now_utc)
         self._fetch_hourly(_FORECAST_URL, _FORECAST_METRICS, self._forecast_hours, weather.add_hour)
         precip = weather.precip.events()
         uv = weather.uv.events()
@@ -280,7 +274,7 @@ class OpenMeteoService(EventStreamService):
         del weather
 
         print("[meteo] fetching %s lat=%s lon=%s" % ("air", self._lat, self._lon))
-        air = _AirHours(self._aqi_thresholds, self._pollen_thresholds, self._utc_offset_sec, self._max_events, now_utc)
+        air = _AirHours(self._aqi_thresholds, self._pollen_thresholds, self._max_events, now_utc)
         self._fetch_hourly(
             _AIR_QUALITY_URL, self._air_metrics, min(self._forecast_hours, _AIR_QUALITY_MAX_FORECAST_HOURS),
             air.add_hour,

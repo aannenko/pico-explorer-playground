@@ -3,7 +3,6 @@ import time
 from micropython import const
 
 from scheduling.event import Event
-from scheduling.stream import Stream
 from services.fetch_machine import FetchCoordinator, FetchMachine, FetchState
 from services.tick_scheduler import TickScheduler
 from utilities.log import log_exception
@@ -16,7 +15,7 @@ _MAX_BACKOFF_SHIFT = const(20)
 class EventStreamService:
     """Fetch/parse/publish loop for ``stream_count`` network-backed streams, with retry backoff.
 
-    One fetch publishes every stream at once, so they share one generation.
+    One fetch publishes every stream at once.
 
     A ``FetchState`` lives only from ``FetchMachine.start`` to harvest, so no
     attempt's state stays pinned during the long idle between fetches.
@@ -109,26 +108,17 @@ class EventStreamService:
         delay = self._backoff_base_ms << shift
         return delay if delay < self._backoff_max_ms else self._backoff_max_ms
 
-    def iter_events(self, stream_index: int):  # -> Iterator[Event]
-        """Return an iterator over stream ``stream_index``'s latest published events."""
-        return iter(self._events[stream_index])
+    def build_streams(self) -> list:  # -> list[(int) -> list[Event]]
+        """Return a getter per event list ``_fetch_and_parse`` returns, in its order.
 
-    def build_streams(self) -> list[Stream]:
-        """Return one ``Stream`` per event list ``_fetch_and_parse`` returns, in its order."""
+        A getter takes the UTC time, which it ignores, and returns that stream's latest published events.  The list is
+        the service's own: callers must not change it, and a publish replaces it rather than changing it.
+        """
         return [self._build_stream(i) for i in range(len(self._events))]
 
-    def _build_stream(self, stream_index: int) -> Stream:
+    def _build_stream(self, stream_index: int):  # -> (int) -> list[Event]
         # A helper, not a lambda in the comprehension: closures there would all see its last index.
-        return Stream(
-            self.iter_events(stream_index),
-            events_iter_factory=lambda: self.iter_events(stream_index),
-            get_generation=lambda: self._generation,
-        )
-
-    @property
-    def generation(self) -> int:
-        """Number of event snapshots published so far."""
-        return self._generation
+        return lambda now_utc: self._events[stream_index]
 
     def _store(self, events: tuple[list[Event], ...]) -> None:
         self._events = events

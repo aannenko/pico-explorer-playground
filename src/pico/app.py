@@ -11,7 +11,6 @@ from displays.palette import (
     BLACK,
     GRAY,
     ORANGE,
-    STREAM_COLORS,
     WHITE,
 )
 from displays.status import StatusDisplay
@@ -21,9 +20,7 @@ from hardware.explorer import (
     BUTTON_X_PIN,
     BUTTON_Y_PIN,
 )
-from scheduling.event_window import build_event_windows
 from scheduling.providers import waste
-from scheduling.stream import Stream
 from services.fetch_machine import FetchCoordinator
 from services.button_dispatcher import ButtonDispatcher
 from services.countdown_timer import CountdownTimer
@@ -176,16 +173,18 @@ def _stream_event_cap(geometry: calendar.Geometry) -> int:
 
 
 def _build_calendar_display(
-    geometry: calendar.Geometry, time_service: TimeService, warning_streams: list[Stream]
+    geometry: calendar.Geometry,
+    time_service: TimeService,
+    warning_streams: list,  # list[(int) -> list[Event]]
 ) -> calendar.Display:
     return calendar.Display(
         geometry=geometry,
         # The waste stream first, so its events come before warnings that start with them.
-        windows=build_event_windows(
-            STREAM_COLORS, [waste.build_stream(time_service, config.WASTE_SCHEDULE)] + warning_streams
-        ),
-        get_local_time=time_service.now,
-        real_remaining_sec=time_service.real_remaining_sec,
+        streams=[
+            waste.build_stream(time_service, config.WASTE_SCHEDULE, calendar.HORIZON_SEC, geometry.slot_count)
+        ] + warning_streams,
+        get_utc_time=time_service.utc_now,
+        to_local=time_service.to_local,
     )
 
 
@@ -261,7 +260,6 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
-        utc_offset_sec=time_service.utc_offset_sec,
         max_events=stream_event_cap,
         timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,

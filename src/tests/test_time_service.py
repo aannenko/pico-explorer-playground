@@ -578,7 +578,7 @@ def test_lord_howe_fall_back_lengthens_by_half_an_hour():
     local_start = svc.now()
     assert type(local_start) is int
     # 00:00 to 04:00 on the wall clock spans the 02:00 LHDT -> 01:30 LHST fall-back.
-    real = svc.real_remaining_sec(local_start + 4 * 3600)
+    real = svc.to_utc(local_start + 4 * 3600) - utc
     assert type(real) is int
     assert real == 4 * 3600 + 1800
 
@@ -603,7 +603,7 @@ def test_lord_howe_spring_forward_shortens_by_half_an_hour():
         get_time=lambda: utc,
     )
     # 01:00 to 04:00 on the wall clock spans the 02:00 LHST -> 02:30 LHDT gap.
-    assert svc.real_remaining_sec(svc.now() + 3 * 3600) == 3 * 3600 - 1800
+    assert svc.to_utc(svc.now() + 3 * 3600) - utc == 3 * 3600 - 1800
 
 
 def test_now_applies_a_fractional_dst_offset():
@@ -738,33 +738,6 @@ def test_now_applies_a_transition_from_the_previous_rule_year() -> None:
     assert svc.now() == clock[0] - 14_400
     clock[0] = _utc_epoch(2027, 1, 1, 3, 0, 0)
     assert svc.now() == clock[0] - 18_000
-
-
-# ── real_remaining_sec ──────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "utc_now, local_end, expected_sec",
-    [
-        # Sat 12:00 CEST to Mon 08:00 CET: 44 h on the wall clock across the fall-back.
-        pytest.param((2026, 10, 24, 10, 0), (2026, 10, 26, 8, 0), 45 * 3600, id="fall-back ahead"),
-        # Sat 12:00 CET to Mon 08:00 CEST: 44 h on the wall clock across the spring-forward.
-        pytest.param((2026, 3, 28, 11, 0), (2026, 3, 30, 8, 0), 43 * 3600, id="spring-forward ahead"),
-        # 02:30 CET, the repeated hour's second pass, to 08:00 CET.
-        pytest.param((2026, 10, 25, 1, 30), (2026, 10, 25, 8, 0), 5 * 3600 + 1800, id="repeated hour"),
-        # 12:00 CEST, an hour after 11:00 CEST.
-        pytest.param((2026, 10, 24, 10, 0), (2026, 10, 24, 11, 0), -3600, id="passed"),
-    ],
-)
-def test_real_remaining_sec_counts_real_seconds_from_now(
-    utc_now: tuple[int, int, int, int, int], local_end: tuple[int, int, int, int, int], expected_sec: int
-) -> None:
-    utc = _utc_epoch(*utc_now, 0)
-    svc = TimeService(
-        tz_offset_hours=1, dst_start_rule=_DST_START, dst_end_rule=_DST_END,
-        dst_offset_hours=1, get_time=lambda: utc,
-    )
-    assert svc.real_remaining_sec(_local_epoch(*local_end)) == expected_sec
 
 
 # ── NTP sync ────────────────────────────────────────────────────────

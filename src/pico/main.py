@@ -1,3 +1,4 @@
+import gc
 import micropython
 import time
 from micropython import const
@@ -33,7 +34,10 @@ from app import build_app  # noqa: E402
 from utilities.log import log_memory  # noqa: E402
 
 APP = build_app(PICO_GRAPHICS, micropython.schedule)
+
+gc.collect()
 log_memory("[boot] memory after the first frame:")
+
 APP.tick_scheduler.start()
 
 # time.sleep_ms() allows scheduled callbacks to run while it waits.

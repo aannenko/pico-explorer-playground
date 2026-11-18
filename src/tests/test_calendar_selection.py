@@ -8,7 +8,6 @@ from displays.manager import DisplayManager
 from displays.palette import STREAM_YELLOW
 from scheduling.event import Event
 from scheduling.providers import waste
-from scheduling.stream import Stream
 from services.time_service import TimeService
 
 from _fakes import FakePicoGraphics
@@ -47,6 +46,10 @@ class _OtherDisplay(Display):
         self.panel.update()
 
 
+def _no_events(now_utc: int) -> list[Event]:
+    return []
+
+
 def _time_service(get_time) -> TimeService:
     return TimeService(
         tz_offset_hours=config_defaults.TIME_ZONE_OFFSET_HOURS,
@@ -67,7 +70,7 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     calendar = app_module._build_calendar_display(
         app_module._build_calendar_geometry(panel),
         _time_service(lambda: clock[0]),
-        [Stream(iter(())) for _ in range(4)],
+        [_no_events] * 4,
     )
     manager = DisplayManager(
         [
@@ -89,9 +92,9 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     def budgeted_event(*args, **kwargs):
         nonlocal produced
         produced += 1
-        # Four pickups a fortnight: a month away is at most ten, plus the next one.
-        if produced > 11:
-            raise MemoryError("calendar entry replayed more waste history than the month away")
+        # A redraw lists at most a slot count of pickups, however long the calendar was away.
+        if produced > calendar._geom.slot_count:
+            raise MemoryError("calendar entry built more waste events than it can show")
         return event_type(*args, **kwargs)
 
     monkeypatch.setattr(waste, "Event", budgeted_event)
@@ -112,24 +115,40 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
     assert panel.presented[:2] == ("09:00", "Wed 14 Oct")
     assert "MIXED" in panel.presented
     assert "Fri 16 Oct" in panel.presented
-    assert len(calendar._windows) == 5
-    assert [len(window._buffer) for window in calendar._windows] == [2, 0, 0, 0, 0]
 
 
 def test_time_left_is_real_across_the_fall_back(app_module) -> None:
     # Sat 2026-10-24 12:00 CEST: an event ending Mon 09:00 CET is 45 h away on the
     # clock and 46 h in real time.
     utc = utc_epoch(2026, 10, 24, 10, 0, 0)
-    time_service = _time_service(lambda: utc)
-    now = time_service.now()
-    end = now + 45 * 3600
+    end_utc = utc_epoch(2026, 10, 26, 8, 0, 0)
     panel = _Panel()
     calendar = app_module._build_calendar_display(
         app_module._build_calendar_geometry(panel),
-        time_service,
-        [Stream(iter([Event("UV", now - 600, end - (now - 600), color_index=STREAM_YELLOW)]))],
+        _time_service(lambda: utc),
+        [lambda now_utc: [Event("UV", utc - 600, end_utc - (utc - 600), color_index=STREAM_YELLOW)]],
     )
 
     calendar.initialize()
 
     assert "1d22 left" in panel.presented
+
+
+@pytest.mark.parametrize(
+    "utc, agenda",
+    [
+        # Sat 24 Oct 2026, 12:00 CEST, before the fall-back.
+        (utc_epoch(2026, 10, 24, 10, 0, 0), ("Wed 28 Oct", "MIXED", "08:00", "Fri 30 Oct", "PAPER", "08:00")),
+        # Sat 27 Mar 2027, 12:00 CET, before the spring-forward.
+        (utc_epoch(2027, 3, 27, 11, 0, 0), ("Wed 31 Mar", "MIXED", "08:00", "Fri 2 Apr", "PAPER", "08:00")),
+    ],
+)
+def test_pickups_past_a_dst_change_keep_their_wall_clock_time(app_module, utc: int, agenda: tuple) -> None:
+    panel = _Panel()
+    calendar = app_module._build_calendar_display(
+        app_module._build_calendar_geometry(panel), _time_service(lambda: utc), [_no_events] * 4
+    )
+
+    calendar.initialize()
+
+    assert panel.presented[2:] == agenda

@@ -1,15 +1,13 @@
 """End-to-end test of the network substrate via the stub service.
 
 Drives the full path a real network row uses: tick -> FetchMachine -> schedule
-(fetch+parse) -> harvest (store) -> generation bump -> EventWindow refresh ->
-what the renderer reads (get_visible).
+(fetch+parse) -> harvest (store) -> what the calendar reads from the stream's getter.
 
 Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but
 is published on the *next* ``tick()`` (the harvest), so published-state asserts
-(generation / visible / failures) come after an extra ``tick()``.
+(_generation / visible / failures) come after an extra ``tick()``.
 """
 
-from scheduling.event_window import build_event_windows
 from _stub_service import StubService
 from services.fetch_machine import FETCHING, INITIAL, FetchCoordinator
 from services.http_client import HttpConnectError
@@ -68,7 +66,7 @@ class _Harness:
             get_ticks_ms=lambda: self.clock_val,
             enabled=enabled,
         )
-        self.window = build_event_windows(((1, 2),), self.service.build_streams())[0]
+        self.stream = self.service.build_streams()[0]
 
     def _fetcher(self) -> dict:
         self.fetch_calls += 1
@@ -86,7 +84,7 @@ class _Harness:
         self.service.tick()
 
     def visible_names(self) -> list[str]:
-        return [e.label for e, _ in self.window.get_visible(0, 10_000)]
+        return [e.label for e in self.stream(0)]
 
 
 def test_disabled_service_never_fetches():
@@ -107,14 +105,14 @@ def test_fetch_flows_through_to_visible_events():
 
     h.schedule.run_all()  # _do_fetch: fetch + parse, result staged (not yet published)
     assert h.fetch_calls == 1
-    assert h.service.generation == 0  # harvest hasn't run yet
+    assert h.service._generation == 0  # harvest hasn't run yet
 
     h.service.tick()  # harvest: store, generation 0 -> 1
-    assert h.service.generation == 1
+    assert h.service._generation == 1
     assert h.visible_names() == ["A"]
 
 
-def test_second_fetch_refreshes_the_window():
+def test_second_fetch_refreshes_the_stream():
     h = _Harness(interval_ms=1000)
     h.fetch_and_harvest()
     assert h.visible_names() == ["A"]
@@ -123,7 +121,7 @@ def test_second_fetch_refreshes_the_window():
     h.advance(1000)  # next interval due
     h.fetch_and_harvest()
 
-    assert h.service.generation == 2
+    assert h.service._generation == 2
     assert h.visible_names() == ["B", "C"]
 
 
@@ -148,7 +146,7 @@ def test_http_error_backs_off_and_keeps_prior_snapshot():
     h.fetch_and_harvest()  # fetch raises -> backoff, generation unchanged
 
     assert h.service._failures == 1  # one failure recorded -> backing off
-    assert h.service.generation == 1  # no bump on failure
+    assert h.service._generation == 1  # no bump on failure
     assert h.visible_names() == ["A"]  # prior snapshot retained
 
 
@@ -160,7 +158,7 @@ def test_malformed_payload_backs_off_and_emits_nothing():
 
     assert h.fetch_calls == 1
     assert h.service._failures == 1  # parse failure counts as a fetch failure
-    assert h.service.generation == 0  # parse failure -> no store
+    assert h.service._generation == 0  # parse failure -> no store
     assert h.visible_names() == []
 
 
@@ -192,7 +190,7 @@ def test_store_exception_is_swallowed_but_success_recorded(capsys):
     # The store error is swallowed (the success is recorded *before* the store call),
     # so the fetch still counts as a success, but nothing gets published.
     assert h.service._failures == 0
-    assert h.service.generation == 0  # store never completed its bump
+    assert h.service._generation == 0  # store never completed its bump
     out = capsys.readouterr().out
     assert "[stub] store err:" in out
     assert "RuntimeError: store blew up" in out
@@ -229,13 +227,13 @@ def test_not_due_does_not_fetch_before_interval():
     h = _Harness(interval_ms=1000)
     h.fetch_and_harvest()  # success at clock 0 -> next due at 1000
     assert h.fetch_calls == 1
-    assert h.service.generation == 1
+    assert h.service._generation == 1
 
     h.advance(999)  # still before the interval elapses
     h.service.tick()
 
     assert h.fetch_calls == 1  # no second fetch yet
-    assert h.service.generation == 1
+    assert h.service._generation == 1
     assert h.schedule.queue == []  # nothing dispatched
 
 

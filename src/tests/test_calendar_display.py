@@ -19,8 +19,9 @@ from displays.palette import (
     WHITE,
     YELLOW,
 )
+from conftest import DST_END, DST_START, utc_epoch
 from scheduling.event import Event
-from scheduling.event_window import EventWindow
+from services.time_service import TimeService
 
 from _fakes import bitmap8_width, circle_pixels
 
@@ -101,17 +102,20 @@ def _ev(label: str, start: int, duration_min: int = 60, color_index: int = STREA
     return Event(label, start, duration_min * 60, color_index=color_index)
 
 
-def _display(*streams, now: int = _NOW, real_remaining_sec=None):
-    """Each stream is a list of events."""
+def _stream(events: list[Event]):  # -> (int) -> list[Event]
+    return lambda now_utc: events
+
+
+def _display(*streams, now: int = _NOW, to_local=None):  # to_local: (int) -> int
+    """Each stream is a list of events, or a getter; local time is UTC unless ``to_local`` says otherwise."""
     gfx = _Raster()
     geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
-    windows = [EventWindow(iter(events), stream_colors=STREAM_COLORS) for events in streams]
     clock = [now]
     display = calendar.Display(
         geometry,
-        windows,
-        get_local_time=lambda: clock[0],
-        real_remaining_sec=real_remaining_sec or (lambda local_epoch: local_epoch - clock[0]),
+        [_stream(stream) if isinstance(stream, list) else stream for stream in streams],
+        get_utc_time=lambda: clock[0],
+        to_local=to_local or (lambda utc_epoch: utc_epoch),
     )
     return display, gfx, clock
 
@@ -165,25 +169,53 @@ class TestLifecycle:
 
         assert gfx.updates == 2
 
-    def test_leaving_releases_a_refreshed_window_and_reentry_refills_it(self):
-        snapshot = [_ev("RAIN", _at(11, 0))]
-        window = EventWindow(
-            iter(snapshot), stream_colors=STREAM_COLORS, events_iter_factory=lambda: iter(snapshot),
-            get_generation=lambda: 1,
-        )
+    def test_no_events_stay_pinned_between_redraws(self):
+        display, _gfx, _clock = _display([_ev("RAIN", _at(11, 0))])
+
+        display.initialize()
+
+        assert display._visible == [()]
+
+    @pytest.mark.parametrize("failure", ["stream", "painter"])
+    def test_a_redraw_that_raises_pins_no_events_and_retries_at_the_next_minute(self, fake_ticks, failure):
+        def raise_memory_error(*args) -> None:
+            raise MemoryError
+
+        streams = [[_ev("RAIN", _at(11, 0))]] + ([raise_memory_error] if failure == "stream" else [])
+        display, gfx, _clock = _display(*streams, now=_at(9, 12, 20))
+        if failure == "painter":
+            gfx.circle = raise_memory_error
+
+        with pytest.raises(MemoryError):
+            display.initialize()
+
+        assert display._visible == [()] * len(streams)
+        fake_ticks[0] = 39_999
+        display.render()
+        assert gfx.updates == 0
+
+    def test_a_failed_time_read_is_retried_a_minute_later(self, fake_ticks):
+        reads = [0]
+
+        def failing_utc_time() -> int:
+            reads[0] += 1
+            raise MemoryError
+
         gfx = _Raster()
         display = calendar.Display(
-            calendar.Geometry(gfx, "bitmap8", 8, 3, 2), [window], get_local_time=lambda: _NOW,
-            real_remaining_sec=lambda local_epoch: local_epoch - _NOW,
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2), [], get_utc_time=failing_utc_time,
+            to_local=lambda utc_epoch: utc_epoch,
         )
-        display.initialize()
+        with pytest.raises(MemoryError):
+            display.initialize()
 
-        display.deinitialize()
-
-        assert window._buffer == []
-        assert display._visible == [()]
-        display.initialize()
-        assert "RAIN" in gfx.body_strings()
+        fake_ticks[0] = 59_999
+        display.render()
+        assert reads[0] == 1
+        fake_ticks[0] = 60_000
+        with pytest.raises(MemoryError):
+            display.render()
+        assert reads[0] == 2
 
     def test_redraws_only_once_the_minute_changes(self, fake_ticks):
         display, gfx, clock = _display([_ev("RAIN", _at(11, 0))], now=_at(9, 12, 20))
@@ -276,7 +308,7 @@ class TestSlots:
         assert ("BIO", 66, y + 4, WHITE) in gfx.texts
         assert ("48m left", _right_x("48m left"), y + 4, WHITE) in gfx.texts
 
-    def test_events_in_progress_come_first_in_start_order_across_windows(self):
+    def test_events_in_progress_come_first_in_start_order_across_streams(self):
         gfx = _drawn(
             [_ev("BIO", _at(8, 0), 120, STREAM_BROWN), _ev("PLAST", _at(10, 0), 60, STREAM_YELLOW)],
             [_ev("GRASS", _at(7, 0), 12 * 60, STREAM_RED), _ev("UV", _at(11, 0), 300, STREAM_RED)],
@@ -285,7 +317,7 @@ class TestSlots:
         assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["GRASS", "BIO", "PLAST", "UV"]
         assert [gfx.at(_FIELD_X, _slot_y(slot) + 22) for slot in range(4)] == [WHITE, WHITE, BLACK, BLACK]
 
-    def test_events_starting_together_keep_their_windows_order(self):
+    def test_events_starting_together_keep_their_streams_order(self):
         gfx = _drawn([_ev("FIRST", _at(10, 0))], [_ev("SECOND", _at(10, 0))])
 
         assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["FIRST", "SECOND"]
@@ -294,6 +326,22 @@ class TestSlots:
         gfx = _drawn([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
 
         assert "DONE" not in gfx.body_strings()
+
+    def test_an_event_in_progress_outlives_a_later_one_that_ended(self):
+        gfx = _drawn([_ev("LONG", _at(8, 0), 180), _ev("SHORT", _at(8, 30), 30), _ev("NEXT", _at(10, 0))])
+
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["LONG", "NEXT"]
+
+    def test_a_zero_duration_event_starting_now_is_upcoming(self):
+        gfx = _drawn([_ev("NOW", _NOW, 0)])
+
+        assert ("in 0m", _right_x("in 0m"), _slot_y(0) + 4, BLACK) in gfx.texts
+        assert gfx.at(_FIELD_X, _slot_y(0) + 22) == BLACK
+
+    def test_a_colour_index_past_the_palette_takes_its_last_colour(self):
+        gfx = _drawn([_ev("ODD", _at(10, 0), color_index=len(STREAM_COLORS) + 3)])
+
+        assert gfx.at(100, _slot_y(0) + 2) == STREAM_COLORS[-1]
 
     def test_events_beyond_the_last_slot_are_not_shown(self):
         gfx = _drawn([_ev(str(i), _at(10 + i, 0)) for i in range(_SLOT_COUNT + 2)])
@@ -323,26 +371,22 @@ class TestSlots:
         assert ("Wed", 42 - bitmap8_width("Wed", 2), _slot_y(0) + 4, WHITE) in gfx.texts
         assert "1d20 left" in gfx.body_strings()
 
-    def test_notes_use_the_real_time_left(self):
-        gfx = _drawn(
-            [_ev("UV", _at(9, 0), 60), _ev("RAIN", _at(11, 0))],
-            real_remaining_sec=lambda local_epoch: local_epoch - _NOW + 3600,
-        )
+    def test_an_event_starting_at_the_horizon_is_not_shown(self):
+        gfx = _drawn([_ev("NEAR", _NOW + calendar.HORIZON_SEC - 1), _ev("FAR", _NOW + calendar.HORIZON_SEC)])
 
-        notes = [text for text, *_ in gfx.body_texts() if text.endswith(" left") or text.startswith("in ")]
-        assert notes == ["1h48 left", "in 2h48"]
+        assert "NEAR" in gfx.body_strings()
+        assert "FAR" not in gfx.body_strings()
 
-    def test_a_clock_stepped_back_hides_events_past_the_horizon(self, fake_ticks):
-        later = _NOW + calendar.HORIZON_SEC - 3600
-        display, gfx, clock = _display([_ev("FAR", later)])
+    def test_a_clock_stepped_back_shows_again_the_events_not_over_then(self, fake_ticks):
+        display, gfx, clock = _display([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
         display.initialize()
-        assert "FAR" in gfx.body_strings()
+        assert "DONE" not in gfx.body_strings()
 
-        clock[0] = _NOW - 2 * _DAY
+        clock[0] = _at(9, 0)
         fake_ticks[0] = 60_000
         display.render()
 
-        assert "FAR" not in gfx.body_strings()
+        assert "DONE" in gfx.body_strings()
 
 
 # ---------------------------------------------------------------------------
@@ -381,3 +425,95 @@ class TestDayHeaders:
 
         assert "Tomorrow" not in gfx.body_strings()
         assert ("BIRCH", 66, _slot_y(0) + 4, BLACK) in gfx.texts
+
+
+# ---------------------------------------------------------------------------
+# Time frames: order and timing in UTC, drawing in local time
+# ---------------------------------------------------------------------------
+
+
+def _cet() -> TimeService:
+    return TimeService(
+        tz_offset_hours=1, dst_start_rule=DST_START, dst_end_rule=DST_END, dst_offset_hours=1, get_time=lambda: 0
+    )
+
+
+def _cet_drawn(now_utc: int, *events: Event) -> _Raster:
+    display, gfx, _clock = _display(list(events), now=now_utc, to_local=_cet().to_local)
+    display.initialize()
+    return gfx
+
+
+class TestTimeFrames:
+    def test_a_start_across_the_spring_forward_is_an_hour_away_at_its_local_time(self):
+        # 01:30 CET, then 03:30 CEST an hour later.
+        gfx = _cet_drawn(utc_epoch(2026, 3, 29, 0, 30, 0), _ev("RAIN", utc_epoch(2026, 3, 29, 1, 30, 0)))
+
+        assert "03:30" in gfx.body_strings()
+        assert "in 1h00" in gfx.body_strings()
+
+    def test_an_event_across_the_fall_back_shows_its_local_start_and_real_progress(self):
+        # From 02:00 CEST to 04:00 CET, three real hours; now 02:30 CET, half way.
+        gfx = _cet_drawn(utc_epoch(2026, 10, 25, 1, 30, 0), _ev("RAIN", utc_epoch(2026, 10, 25, 0, 0, 0), 180))
+        y = _slot_y(0)
+
+        assert ("02:00", 0, y + 4, WHITE) in gfx.texts
+        assert "1h30 left" in gfx.body_strings()
+        assert [gfx.at(_FIELD_X + 89, y + 22), gfx.at(_FIELD_X + 90, y + 22)] == [WHITE, DARK_GRAY]
+
+    def test_an_event_in_the_repeated_hours_second_pass_is_upcoming_during_the_first(self):
+        # Now 02:45 CEST; the event starts at 02:30 CET, 45 minutes later.
+        gfx = _cet_drawn(utc_epoch(2026, 10, 25, 0, 45, 0), _ev("RAIN", utc_epoch(2026, 10, 25, 1, 30, 0)))
+
+        assert ("02:30", 42 - bitmap8_width("02:30", 2), _slot_y(0) + 4, GRAY) in gfx.texts
+        assert "in 45m" in gfx.body_strings()
+
+    def test_events_across_the_fall_back_keep_their_real_order(self):
+        # Now 02:15 CEST: LATER starts at 02:30 CET, after EARLIER at 02:45 CEST, though its wall time is earlier.
+        display, gfx, _clock = _display(
+            [_ev("LATER", utc_epoch(2026, 10, 25, 1, 30, 0))],
+            [_ev("EARLIER", utc_epoch(2026, 10, 25, 0, 45, 0))],
+            now=utc_epoch(2026, 10, 25, 0, 15, 0),
+            to_local=_cet().to_local,
+        )
+        display.initialize()
+
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["EARLIER", "LATER"]
+
+    def test_days_are_local_dates(self):
+        # 23:30 CET on Thursday 8 Jan, and an event at 00:30 CET, still 8 Jan in UTC.
+        gfx = _cet_drawn(utc_epoch(2026, 1, 8, 22, 30, 0), _ev("BIO", utc_epoch(2026, 1, 8, 23, 30, 0)))
+
+        assert gfx.body_strings() == ["Tomorrow", "BIO", "00:30"]
+        assert ("23:30", 0, 0, WHITE) in gfx.texts
+
+    def test_today_is_the_local_date(self):
+        # 00:30 CET on Friday 9 Jan, still Thursday in UTC: an event at 08:00 CET is today's.
+        gfx = _cet_drawn(utc_epoch(2026, 1, 8, 23, 30, 0), _ev("BIO", utc_epoch(2026, 1, 9, 7, 0, 0)))
+
+        assert gfx.body_strings() == ["BIO", "in 7h30", "08:00"]
+
+    def test_an_event_in_progress_since_after_local_midnight_shows_its_start_time(self):
+        # Since 00:10 CET on Friday 9 Jan, Thursday in UTC.
+        gfx = _cet_drawn(utc_epoch(2026, 1, 8, 23, 30, 0), _ev("BIO", utc_epoch(2026, 1, 8, 23, 10, 0), 120))
+
+        assert ("00:10", 42 - bitmap8_width("00:10", 2), _slot_y(0) + 4, WHITE) in gfx.texts
+
+    def test_the_horizon_is_real_time_from_now(self):
+        gfx = _cet_drawn(_NOW, _ev("NEAR", _NOW + calendar.HORIZON_SEC - 1), _ev("FAR", _NOW + calendar.HORIZON_SEC))
+
+        assert "NEAR" in gfx.body_strings()
+        assert "FAR" not in gfx.body_strings()
+
+    def test_redraws_as_each_local_minute_starts(self, fake_ticks):
+        # Local time runs 30 s ahead of UTC: at 09:12:10 UTC the local minute ends in 20 s.
+        display, gfx, clock = _display([], now=_at(9, 12, 10), to_local=lambda utc_epoch: utc_epoch + 30)
+        display.initialize()
+
+        fake_ticks[0] = 19_999
+        display.render()
+        assert gfx.updates == 1
+
+        fake_ticks[0] = 20_000
+        display.render()
+        assert gfx.updates == 2

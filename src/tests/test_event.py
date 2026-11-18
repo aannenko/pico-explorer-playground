@@ -5,8 +5,8 @@ from scheduling.event import Event
 def test_event_init_sets_fields() -> None:
     e = Event("work", 123, 45)
     assert e.label == "work"
-    assert e.start_timestamp == 123
-    assert e.wall_clock_duration_sec == 45
+    assert e.start_utc == 123
+    assert e.duration_sec == 45
 
 
 def test_event_requires_label() -> None:
@@ -14,7 +14,7 @@ def test_event_requires_label() -> None:
         Event("", 0, 1)
 
 
-def test_event_requires_non_negative_start_timestamp() -> None:
+def test_event_requires_non_negative_start() -> None:
     with pytest.raises(ValueError, match="Event start timestamp cannot be negative"):
         Event("x", -1, 1)
 
@@ -27,7 +27,7 @@ def test_event_requires_non_negative_duration() -> None:
 def test_event_repr_is_stable() -> None:
     e = Event("rest", 10, 20)
     assert repr(e) == (
-        "Event(label=rest, start_timestamp=10, wall_clock_duration_sec=20, "
+        "Event(label=rest, start_utc=10, duration_sec=20, "
         "color_index=0)"
     )
 

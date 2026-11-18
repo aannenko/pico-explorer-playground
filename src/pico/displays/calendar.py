@@ -4,7 +4,7 @@ from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
-from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, WHITE
+from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, STREAM_COLORS, WHITE
 from displays.shared.header import (
     WEEKDAY_NAMES,
     WIDEST_TIME_TEXT,
@@ -14,7 +14,6 @@ from displays.shared.header import (
     widest_name,
 )
 from scheduling.event import Event
-from scheduling.event_window import EventWindow
 
 HORIZON_SEC = const(7 * 24 * 3600)
 
@@ -37,7 +36,7 @@ _RAIL_PX = const(2)
 _DOT_R_PX = const(5)
 # Either side of a dot: to the start times and to the fields.
 _DOT_GAP_PX = const(4)
-_NO_WINDOW = const(-1)
+_NO_STREAM = const(-1)
 
 
 def _format_duration(sec: int) -> str:
@@ -108,33 +107,36 @@ class Geometry:
 
 
 class Display(_Display):
-    """Calendar view: an agenda of every window's events in start order, from those in progress to those starting
+    """Calendar view: an agenda of every stream's events in start order, from those in progress to those starting
     within ``HORIZON_SEC``, redrawn as each minute starts.
 
     Each event fills a slot: those in progress come first, each with a progress bar, and the first event of each
     later day follows a day header in a slot of its own.  Events beyond the last slot aren't shown, and events
-    starting together keep their windows' order.  Labels are drawn as given, cut to fit.
+    starting together keep their streams' order.  Labels are drawn as given, cut to fit, on a field of
+    ``STREAM_COLORS[color_index]``, or of its last colour for an index past its end.
 
-    ``get_local_time`` must return local epoch seconds, and ``real_remaining_sec(local_epoch)`` the real seconds
-    from now until ``local_epoch``.
+    Each of ``streams`` is a getter ``(now_utc) -> list[Event]`` of a stream's events in start order; they may include
+    events already over or starting after the horizon.  The calendar reads each list only while drawing and never
+    changes it.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to the local epoch the
+    header, start times and days are drawn in.
     """
 
     def __init__(
         self,
         geometry: Geometry,
-        windows: list[EventWindow],
-        get_local_time,  # () -> int
-        real_remaining_sec,  # (int) -> int
+        streams: list,  # list[(int) -> list[Event]]
+        get_utc_time,  # () -> int
+        to_local,  # (int) -> int
     ) -> None:
         self._geom = geometry
         self._gfx = geometry.pico_graphics
-        self._windows = windows
-        # Each window's visible events, and the index of the next one to show, for the current redraw.  An unshown
-        # window holds the shared empty tuple, where an empty list would be allocated.
-        self._visible: list[list[tuple[Event, int]] | tuple[()]] = [()] * len(windows)
-        self._cursors = [0] * len(windows)
-        self._get_local_time = get_local_time
-        self._real_remaining_sec = real_remaining_sec
+        self._streams = streams
+        # Each stream's events, and the index of the next one to show, during a redraw.  Otherwise each holds the
+        # shared empty tuple, so no snapshot stays pinned, and no empty list is allocated.
+        self._visible: list[list[Event] | tuple[()]] = [()] * len(streams)
+        self._cursors = [0] * len(streams)
+        self._get_utc_time = get_utc_time
+        self._to_local = to_local
         self._active = False
         self._next_redraw_ms = 0
 
@@ -146,10 +148,6 @@ class Display(_Display):
 
     def deinitialize(self) -> None:
         self._active = False
-        # Unseen, a window would keep an older network snapshot alive beside the service's current one.
-        for i in range(len(self._windows)):
-            self._windows[i].release()
-            self._visible[i] = ()
 
     def render(self) -> None:
         # The wall-clock read allocates, so wait for the minute to change on the alloc-free ticks.
@@ -157,82 +155,106 @@ class Display(_Display):
             self._redraw()
 
     def _redraw(self) -> None:
-        now = self._get_local_time()
-        # Set before drawing, so a redraw that raises is retried at the next minute, not on every render.
-        self._next_redraw_ms = time.ticks_add(time.ticks_ms(), (_SEC_PER_MIN - now % _SEC_PER_MIN) * _MS_PER_SEC)
-        window_end = now + HORIZON_SEC
-        windows = self._windows
-        for i in range(len(windows)):
-            self._visible[i] = windows[i].get_visible(now, window_end)
+        # Retried a minute on if anything below raises, the time reads included, rather than on every render.
+        self._next_redraw_ms = time.ticks_add(time.ticks_ms(), _SEC_PER_MIN * _MS_PER_SEC)
+        now_utc = self._get_utc_time()
+        now_local = self._to_local(now_utc)
+        self._next_redraw_ms = time.ticks_add(
+            time.ticks_ms(), (_SEC_PER_MIN - now_local % _SEC_PER_MIN) * _MS_PER_SEC
+        )
+        try:
+            self._draw(now_utc, now_local)
+        finally:
+            for i in range(len(self._visible)):
+                self._visible[i] = ()
+
+    def _draw(self, now_utc: int, now_local: int) -> None:
+        window_end = now_utc + HORIZON_SEC
+        streams = self._streams
+        for i in range(len(streams)):
+            self._visible[i] = streams[i](now_utc)
             self._cursors[i] = 0
+            self._skip_over(i, now_utc)
 
         geom = self._geom
         gfx = self._gfx
         gfx.set_font(geom.font)
         gfx.set_pen(BLACK)
         gfx.clear()
-        self._draw_header(now)
+        self._draw_header(now_local)
         gfx.set_pen(DARK_GRAY)
         gfx.rectangle(geom.rail_x - _RAIL_PX // 2, geom.body_top, _RAIL_PX, geom.height - geom.body_top)
 
-        today = now // _SEC_PER_DAY
+        today = now_local // _SEC_PER_DAY
         day = today
         slot = 0
         while slot < geom.slot_count:
-            window_index = self._next_window_index(window_end)
-            if window_index == _NO_WINDOW:
+            stream_index = self._next_stream_index(window_end)
+            if stream_index == _NO_STREAM:
                 break
-            event, pen = self._visible[window_index][self._cursors[window_index]]
-            self._cursors[window_index] += 1
-            start = event.start_timestamp
-            in_progress = start <= now < start + event.wall_clock_duration_sec
-            if not in_progress and start // _SEC_PER_DAY != day:
-                day = start // _SEC_PER_DAY
+            event = self._visible[stream_index][self._cursors[stream_index]]
+            self._cursors[stream_index] += 1
+            self._skip_over(stream_index, now_utc)
+            start = event.start_utc
+            start_local = self._to_local(start)
+            in_progress = start <= now_utc < start + event.duration_sec
+            if not in_progress and start_local // _SEC_PER_DAY != day:
+                day = start_local // _SEC_PER_DAY
                 if slot + 1 == geom.slot_count:
                     break
-                self._draw_day_header(slot, start, today)
+                self._draw_day_header(slot, start_local, today)
                 slot += 1
-            self._draw_event(slot, event, pen, now, in_progress, today)
+            self._draw_event(slot, event, now_utc, start_local, in_progress, today)
             slot += 1
         gfx.update()
 
-    def _next_window_index(self, window_end: int) -> int:
-        """Return the index of the window whose next event starts first, before ``window_end``, or ``_NO_WINDOW``."""
-        # window_end bounds it as well: after the clock steps back, a window can hold events past it.
-        best_index = _NO_WINDOW
+    def _skip_over(self, stream_index: int, now_utc: int) -> None:
+        """Move stream ``stream_index``'s cursor past the events over by ``now_utc``."""
+        # Checked once per cursor move: each check allocates the event's end, an epoch past the small-int range.
+        events = self._visible[stream_index]
+        cursor = self._cursors[stream_index]
+        while cursor < len(events) and _is_over(events[cursor], now_utc):
+            cursor += 1
+        self._cursors[stream_index] = cursor
+
+    def _next_stream_index(self, window_end: int) -> int:
+        """Return the index of the stream whose next event starts first, before ``window_end``, or ``_NO_STREAM``."""
+        best_index = _NO_STREAM
         best_start = window_end
         visible = self._visible
         cursors = self._cursors
         for i in range(len(visible)):
             events = visible[i]
             if cursors[i] < len(events):
-                start = events[cursors[i]][0].start_timestamp
+                start = events[cursors[i]].start_utc
                 if start < best_start:
                     best_index = i
                     best_start = start
         return best_index
 
-    def _draw_header(self, now: int) -> None:
+    def _draw_header(self, now_local: int) -> None:
         geom = self._geom
         gfx = self._gfx
-        time_text, date_text = format_header_time(now)
+        time_text, date_text = format_header_time(now_local)
         gfx.set_pen(WHITE)
         gfx.text(time_text, 0, 0, scale=geom.header_text_scale)
         gfx.set_pen(GRAY)
         gfx.text(date_text, geom.date_x, 0, scale=geom.header_text_scale)
 
-    def _draw_day_header(self, slot: int, start: int, today: int) -> None:
+    def _draw_day_header(self, slot: int, start_local: int, today: int) -> None:
         geom = self._geom
-        if start // _SEC_PER_DAY == today + 1:
+        if start_local // _SEC_PER_DAY == today + 1:
             text = "Tomorrow"
         else:
-            text = format_header_time(start)[1]
+            text = format_header_time(start_local)[1]
         self._gfx.set_pen(GRAY)
         self._gfx.text(
             text, geom.field_x, geom.body_top + slot * geom.slot_pitch + _FIELD_PAD_PX, scale=geom.label_text_scale
         )
 
-    def _draw_event(self, slot: int, event: Event, pen: int, now: int, in_progress: bool, today: int) -> None:
+    def _draw_event(
+        self, slot: int, event: Event, now_utc: int, start_local: int, in_progress: bool, today: int
+    ) -> None:
         """Draw ``event`` in ``slot``: its dot, field, label, time left or to go, progress bar and start time."""
         geom = self._geom
         gfx = self._gfx
@@ -240,7 +262,8 @@ class Display(_Display):
         y = geom.body_top + slot * geom.slot_pitch
         text_y = y + _FIELD_PAD_PX
         field_width = geom.width - geom.field_x
-        start = event.start_timestamp
+        start = event.start_utc
+        pen = _pen(event.color_index)
 
         gfx.set_pen(pen)
         gfx.circle(geom.rail_x, y + geom.field_height // 2, _DOT_R_PX)
@@ -248,9 +271,9 @@ class Display(_Display):
 
         # Only today's events say how soon they start: a later day's header dates them.
         if in_progress:
-            note = _format_duration(self._real_remaining_sec(start + event.wall_clock_duration_sec)) + " left"
-        elif start // _SEC_PER_DAY == today:
-            note = "in " + _format_duration(self._real_remaining_sec(start))
+            note = _format_duration(start + event.duration_sec - now_utc) + " left"
+        elif start_local // _SEC_PER_DAY == today:
+            note = "in " + _format_duration(start - now_utc)
         else:
             note = ""
         label_x = geom.field_x + _TEXT_INSET_PX
@@ -264,18 +287,30 @@ class Display(_Display):
             gfx.text(note, note_x, text_y, scale=scale)
 
         if in_progress:
-            elapsed_px = field_width * (now - start) // event.wall_clock_duration_sec
+            elapsed_px = field_width * (now_utc - start) // event.duration_sec
             bar_y = y + geom.field_height
             gfx.set_pen(WHITE)
             gfx.rectangle(geom.field_x, bar_y, elapsed_px, _BAR_PX)
             gfx.set_pen(DARK_GRAY)
             gfx.rectangle(geom.field_x + elapsed_px, bar_y, field_width - elapsed_px, _BAR_PX)
 
-        fields = time.gmtime(start)
-        if in_progress and start // _SEC_PER_DAY < today:
+        fields = time.gmtime(start_local)
+        if in_progress and start_local // _SEC_PER_DAY < today:
             weekday_start = 3 * fields[6]
             time_text = WEEKDAY_NAMES[weekday_start:weekday_start + 3]
         else:
             time_text = f"{fields[3]:02}:{fields[4]:02}"
         gfx.set_pen(WHITE if in_progress else GRAY)
         gfx.text(time_text, geom.time_right - gfx.measure_text(time_text, scale=scale), text_y, scale=scale)
+
+
+def _pen(color_index: int) -> int:
+    """Return ``STREAM_COLORS[color_index]``, or its last colour for an index past its end."""
+    last_index = len(STREAM_COLORS) - 1
+    return STREAM_COLORS[color_index if color_index < last_index else last_index]
+
+
+def _is_over(event: Event, at: int) -> bool:
+    """Return whether ``event`` has started and ended by ``at``."""
+    start = event.start_utc
+    return start < at and start + event.duration_sec <= at

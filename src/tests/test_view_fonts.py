@@ -8,7 +8,6 @@ import displays.ring as ring
 import displays.sensors as sensors
 from displays.manager import DisplayManager
 from scheduling.event import Event
-from scheduling.event_window import EventWindow
 from services.countdown_timer import DONE, PAUSED, RUNNING, CountdownTimer
 from services.sample_history import SampleHistory
 
@@ -108,9 +107,9 @@ def _build_calendar(panel: _Panel, clock: _Clock) -> calendar.Display:
             header_text_scale=3,
             label_text_scale=2,
         ),
-        windows=[EventWindow(iter([Event("WORK", _NOW_SEC - 600, 4 * 3600, color_index=0)]), stream_colors=[10])],
-        get_local_time=clock.now,
-        real_remaining_sec=lambda local_epoch: local_epoch - clock.now_sec,
+        streams=[lambda now_utc: [Event("WORK", _NOW_SEC - 600, 4 * 3600)]],
+        get_utc_time=clock.now,
+        to_local=lambda utc_epoch: utc_epoch,
     )
 
 

@@ -3,7 +3,6 @@
 import pytest
 
 from displays.palette import STREAM_COLORS, STREAM_ORANGE, STREAM_RED, STREAM_YELLOW
-from scheduling.event_window import build_event_windows
 from services.fetch_machine import FetchCoordinator
 from services.http_client import HttpConnectError, HttpParseError
 from services.openmeteo_service import OpenMeteoService, _AirHours, _HourlyCsv, _precip_label, _WeatherHours
@@ -20,7 +19,6 @@ _SPECIES = [species for species, _ in _POLLEN_THR]
 _AQI_THR = (60, 80, 100)
 _T0 = 1_794_855_600
 _HOUR = 3600
-_CET_SEC = 3600
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +47,7 @@ def test_precip_label_mapping(wmo_code, expected):
 
 def _weather_hours(*rows, threshold=30, max_events=10):
     """Feed hourly ``(prob, mm, code, uv)`` rows from ``_T0``; return the precipitation and UV events."""
-    hours = _WeatherHours(threshold, _UV, lambda utc: _CET_SEC, max_events, 0)
+    hours = _WeatherHours(threshold, _UV, max_events, 0)
     for i, row in enumerate(rows):
         hours.add_hour(_T0 + i * _HOUR, list(row))
     return hours.precip.events(), hours.uv.events()
@@ -79,11 +77,11 @@ def test_a_missing_probability_or_a_non_precipitation_code_emits_nothing(row):
     assert _precip(row) == []
 
 
-def test_single_qualifying_hour_emits_one_local_event():
+def test_single_qualifying_hour_emits_one_event():
     events = _precip((50, 1.0, 61, 0))
 
-    assert [(e.label, e.start_timestamp, e.wall_clock_duration_sec, e.color_index) for e in events] == [
-        ("RAIN", _T0 + _CET_SEC, _HOUR, STREAM_YELLOW)
+    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
+        ("RAIN", _T0, _HOUR, STREAM_YELLOW)
     ]
 
 
@@ -109,7 +107,7 @@ def test_none_precipitation_amount_still_warns_at_level_1():
 def test_precip_contiguous_hours_merge_at_their_highest_level():
     events = _precip((80, 1.0, 61, 0), (80, 5.0, 61, 0), (80, 0.8, 61, 0))
 
-    assert [(e.wall_clock_duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
+    assert [(e.duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
 
 
 def test_type_change_splits_run_even_at_same_level():
@@ -119,7 +117,7 @@ def test_type_change_splits_run_even_at_same_level():
 def test_precip_gap_hour_breaks_the_run():
     events = _precip((80, 1.0, 61, 0), (0, 0.0, 0, 0), (80, 1.0, 61, 0))
 
-    assert [e.start_timestamp - _CET_SEC for e in events] == [_T0, _T0 + 2 * _HOUR]
+    assert [e.start_utc for e in events] == [_T0, _T0 + 2 * _HOUR]
 
 
 def test_weather_streams_keep_at_most_max_events():
@@ -147,8 +145,8 @@ def test_uv_below_threshold_or_missing_emits_nothing(uv_index):
 def test_precipitation_and_uv_in_the_same_hour_both_emit():
     precip, uv = _weather_hours((80, 1.0, 61, 9))
 
-    assert [(e.label, e.start_timestamp) for e in precip] == [("RAIN", _T0 + _CET_SEC)]
-    assert [(e.label, e.start_timestamp) for e in uv] == [("UV", _T0 + _CET_SEC)]
+    assert [(e.label, e.start_utc) for e in precip] == [("RAIN", _T0)]
+    assert [(e.label, e.start_utc) for e in uv] == [("UV", _T0)]
 
 
 def test_weather_color_indices_are_valid_palette_indices():
@@ -170,7 +168,7 @@ def _row(aqi, **pollen) -> list:
 
 def _air_hours(*rows, pollen_thresholds=_POLLEN_THR, max_events=10):
     """Feed hourly rows from ``_T0``; return the AQI and pollen events."""
-    hours = _AirHours(_AQI_THR, pollen_thresholds, lambda utc: _CET_SEC, max_events, 0)
+    hours = _AirHours(_AQI_THR, pollen_thresholds, max_events, 0)
     for i, row in enumerate(rows):
         hours.add_hour(_T0 + i * _HOUR, row)
     return hours.aqi.events(), hours.pollen.events()
@@ -192,11 +190,11 @@ def test_none_values_emit_nothing():
     assert _air_hours(_row(None, grass=None)) == ([], [])
 
 
-def test_single_aqi_hour_is_one_local_event():
+def test_single_aqi_hour_is_one_event():
     events = _aqi(_row(60))
 
-    assert [(e.label, e.start_timestamp, e.wall_clock_duration_sec, e.color_index) for e in events] == [
-        ("AQI", _T0 + _CET_SEC, _HOUR, STREAM_YELLOW)
+    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
+        ("AQI", _T0, _HOUR, STREAM_YELLOW)
     ]
 
 
@@ -238,7 +236,7 @@ def test_aqi_and_pollen_in_the_same_hour_both_emit():
 def test_aqi_contiguous_hours_merge_at_their_highest_level():
     events = _aqi(_row(60), _row(85), _row(65))
 
-    assert [(e.wall_clock_duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
+    assert [(e.duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
 
 
 def test_species_change_splits_run_even_at_same_level():
@@ -250,7 +248,7 @@ def test_species_change_splits_run_even_at_same_level():
 def test_aqi_gap_hour_breaks_the_run():
     events = _aqi(_row(60), _row(10), _row(60))
 
-    assert [e.start_timestamp - _CET_SEC for e in events] == [_T0, _T0 + 2 * _HOUR]
+    assert [e.start_utc for e in events] == [_T0, _T0 + 2 * _HOUR]
 
 
 def test_no_species_is_aqi_only():
@@ -425,11 +423,10 @@ class _Harness:
             interval_ms=1000,
             forecast_hours=forecast_hours,
             past_hours=_PAST_HOURS,
-            utc_offset_sec=lambda utc: _CET_SEC,
             max_events=10,
             get_utc_time=lambda: self.utc_now,
         )
-        self.windows = build_event_windows(((1, 2),) * len(STREAM_COLORS), self.service.build_streams())
+        self.streams = self.service.build_streams()
 
     def _http_get_lines(self, url, on_line, timeout_sec=None):
         self.get_calls.append((url, timeout_sec))
@@ -452,12 +449,11 @@ class _Harness:
         self.clock_val += ms
 
     def visible(self, stream_index: int) -> list[tuple[str, int]]:
-        window = self.windows[stream_index]
-        local_t0 = _T0 + _CET_SEC
-        return [(e.label, e.start_timestamp) for e, _ in window.get_visible(local_t0, local_t0 + 100 * _HOUR)]
+        return [(e.label, e.start_utc) for e in self.streams[stream_index](self.utc_now)]
+
 
     def visible_names(self) -> list[list[str]]:
-        return [[label for label, _ in self.visible(i)] for i in range(len(self.windows))]
+        return [[label for label, _ in self.visible(i)] for i in range(len(self.streams))]
 
 
 @pytest.mark.parametrize("lat, lon, enabled", [(0.0, 0.0, False), (0.0, 14.42, True), (50.08, 0.0, True)])
@@ -469,7 +465,7 @@ def test_disabled_only_when_both_coordinates_are_zero(lat, lon, enabled):
     assert bool(h.get_calls) == enabled
 
 
-def test_one_fetch_publishes_all_four_streams_in_order_with_local_times():
+def test_one_fetch_publishes_all_four_streams_in_order():
     h = _Harness()
     h.forecast_lines = _forecast_csv(b"80,1.0,61,0", b"0,0.0,0,9")
     h.air_lines = _air_csv(b"60,0.0,0.0,0.0,0.0,0.0", b"0,0.0,0.0,0.0,0.0,3.0")
@@ -481,10 +477,10 @@ def test_one_fetch_publishes_all_four_streams_in_order_with_local_times():
     assert h.requested_hosts() == ["api.open-meteo.com", "air-quality-api.open-meteo.com"]
 
     h.service.tick()  # harvest: publish the parsed snapshot
-    assert h.service.generation == 1
+    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], ["UV"], ["AQI"], ["RAGWEED"]]
-    assert h.visible(_PRECIP_INDEX) == [("RAIN", _T0 + _CET_SEC)]
-    assert h.visible(_POLLEN_INDEX) == [("RAGWEED", _T0 + _HOUR + _CET_SEC)]
+    assert h.visible(_PRECIP_INDEX) == [("RAIN", _T0)]
+    assert h.visible(_POLLEN_INDEX) == [("RAGWEED", _T0 + _HOUR)]
 
 
 def test_urls_ask_for_csv_in_utc_unix_time_with_coordinates_metrics_and_timeout():
@@ -513,7 +509,7 @@ def test_air_quality_forecast_is_capped_at_the_api_maximum():
     (forecast_url, _), (air_url, _) = h.get_calls
     assert "forecast_hours=200" in forecast_url
     assert "forecast_hours=168" in air_url
-    assert h.service.generation == 1
+    assert h.service._generation == 1
 
 
 def test_warnings_over_by_the_fetch_are_not_published():
@@ -526,7 +522,7 @@ def test_warnings_over_by_the_fetch_are_not_published():
     assert [e.label for e in h.service._events[_PRECIP_INDEX]] == ["SNOW"]
 
 
-def test_second_fetch_refreshes_the_windows():
+def test_second_fetch_refreshes_the_streams():
     h = _Harness()
     h.fetch()
     assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
@@ -536,7 +532,7 @@ def test_second_fetch_refreshes_the_windows():
     h.advance(1000)
     h.fetch()
 
-    assert h.service.generation == 2
+    assert h.service._generation == 2
     assert h.visible_names() == [["SNOW"], [], [], ["GRASS"]]
 
 
@@ -560,7 +556,7 @@ def test_a_failed_forecast_request_skips_the_air_request_and_keeps_the_prior_sna
 
     assert h.requested_hosts()[2:] == ["api.open-meteo.com"]
     assert h.service._failures == 1
-    assert h.service.generation == 1
+    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
 
 
@@ -574,7 +570,7 @@ def test_a_failed_air_request_publishes_no_stream_and_backs_off():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.service.generation == 1
+    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
 
 
@@ -585,5 +581,5 @@ def test_a_truncated_body_backs_off_without_publishing():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.service.generation == 0
+    assert h.service._generation == 0
     assert h.visible_names() == [[], [], [], []]

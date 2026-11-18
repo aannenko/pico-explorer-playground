@@ -27,7 +27,7 @@ leaves them ambiguous.
 
 - **Calendar streams** — built-in streams that work out of the box, each a
   long-lived data source the calendar reads passively:
-  - **Waste collection** — a local generator driven by `config`.
+  - **Waste collection** — local wall-clock pickups from `config`, computed on-device.
   - **Precipitation**, **UV**, **air quality** (European AQI) and **pollen**
     (the dominant species) — warning levels for the past day and the week
     ahead from Open-Meteo's forecast and air-quality APIs, fetched together,

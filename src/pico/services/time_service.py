@@ -158,6 +158,10 @@ class TimeService:
         """Return the current local-epoch time in seconds, as ``to_local`` converts it."""
         return self.to_local(self._get_time())
 
+    def utc_now(self) -> int:
+        """Return the current UTC-epoch time in seconds."""
+        return self._get_time()
+
     def to_local(self, utc_epoch: int) -> int:
         """Convert a UTC-epoch time to local epoch.
 
@@ -167,7 +171,7 @@ class TimeService:
         try:
             return utc_epoch + self._span_at(utc_epoch)[2]
         except MemoryError as e:
-            # Rather than raise, as a raise would end any generator reading the time, for good.
+            # Rather than raise, so a view drawing the time still draws it, nearly right.
             log_exception("[time] dst err:", e)
             return utc_epoch + self._span[2]
 
@@ -197,16 +201,6 @@ class TimeService:
         # The clock never shows local_epoch, so a spring-forward jump skips it, and
         # that jump ends the estimate's span.
         return span[1]
-
-    def real_remaining_sec(self, local_epoch: int) -> int:
-        """Return the real seconds from now until the clock first reaches local time ``local_epoch``.
-
-        A DST change in between counts, as on a stopwatch; negative once that
-        moment has passed.
-        """
-        # Measured from the true current instant: in a repeated hour now() doesn't
-        # say which pass it is, so to_utc(now()) would be off by the DST offset.
-        return self.to_utc(local_epoch) - self._get_time()
 
     def _span_at(self, utc_epoch: int) -> tuple[int, int, int]:
         """Return ``(start_utc, end_utc, offset_sec)`` for the span between DST changes holding ``utc_epoch``; without
