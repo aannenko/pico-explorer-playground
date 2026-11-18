@@ -1,5 +1,6 @@
 import gc
 import micropython
+import sys
 import time
 from micropython import const
 
@@ -14,7 +15,12 @@ import config_bootstrap
 
 config_bootstrap.apply_overrides()
 
-import config  # noqa: F401, E402
+# Drop boot-only validation code before the large runtime allocations.
+sys.modules.pop("config_defaults", None)
+sys.modules.pop("config_bootstrap", None)
+del config_bootstrap
+del sys
+gc.collect()
 
 # Create the framebuffer before importing the app graph so it allocates while
 # the heap is still unfragmented (the GC is non-compacting).

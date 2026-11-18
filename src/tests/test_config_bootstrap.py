@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import ast
+import gc
 import importlib
 import sys
+from types import ModuleType
 
+import micropython
+import picographics
 import pytest
 
 import config_bootstrap
-from conftest import utc_epoch
+from conftest import PICO_SRC, utc_epoch
 from services.time_service import TimeService
 
 
@@ -539,3 +544,64 @@ def test_real_defaults_take_a_fractional_zone_without_dst(workspace, utc) -> Non
     assert type(local) is int
     assert local == utc + 19_800
     assert svc.to_utc(local) == utc
+
+
+def test_main_prefix_releases_bootstrap_before_collection_and_framebuffer_on_reentry(tmp_path, monkeypatch) -> None:
+    source_path = PICO_SRC / "main.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    framebuffer_index = next(
+        index for index, node in enumerate(tree.body)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "PICO_GRAPHICS" for target in node.targets)
+    )
+    prefix = compile(
+        ast.Module(body=tree.body[:framebuffer_index + 1], type_ignores=[]), str(source_path), "exec"
+    )
+    defaults = ModuleType("config_defaults")
+    shared = [(1, 2, 3)]
+    defaults.PORT = 8080
+    defaults.SHARED = shared
+    user = ModuleType("config")
+    user.PORT = 100
+    monkeypatch.setitem(sys.modules, "config_defaults", defaults)
+    monkeypatch.setitem(sys.modules, "config_bootstrap", config_bootstrap)
+    monkeypatch.setitem(sys.modules, "config", user)
+    (tmp_path / "config.py").write_text("PORT = 100\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    namespace = {"__name__": "__main__"}
+    calls = []
+
+    def assert_released() -> None:
+        assert "config_defaults" not in sys.modules
+        assert "config_bootstrap" not in sys.modules
+        assert "config_bootstrap" not in namespace
+        assert "config_defaults" not in namespace
+        assert "sys" not in namespace
+        assert sys.modules["config"] is user
+        assert user.PORT == 100
+        assert user.SHARED is shared
+
+    def collect() -> None:
+        assert_released()
+        calls.append("collect")
+
+    def framebuffer(*, display: int, pen_type: int) -> tuple[int, int]:
+        assert_released()
+        assert calls[-1] == "collect"
+        calls.append("framebuffer")
+        return display, pen_type
+
+    monkeypatch.setattr(gc, "collect", collect)
+    monkeypatch.setattr(micropython, "alloc_emergency_exception_buf", lambda size: None, raising=False)
+    monkeypatch.setattr(picographics, "DISPLAY_PICO_EXPLORER", 17, raising=False)
+    monkeypatch.setattr(picographics, "PEN_P4", 4, raising=False)
+    monkeypatch.setattr(picographics, "PicoGraphics", framebuffer)
+
+    for _ in range(2):
+        exec(prefix, namespace)
+        assert sys.modules["config"] is user
+        assert namespace["PICO_GRAPHICS"] == (17, 4)
+        assert user._CONFIG_BOOTSTRAP_MERGED is True
+        assert user.SHARED is shared
+    assert calls == ["collect", "framebuffer", "collect", "framebuffer"]
+    assert shared == [(1, 2, 3)]
