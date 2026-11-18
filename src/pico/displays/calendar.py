@@ -4,7 +4,7 @@ from micropython import const
 from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
-from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, STREAM_COLORS, WHITE
+from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, RED, STREAM_COLORS, WHITE
 from displays.shared.header import (
     WEEKDAY_NAMES,
     WIDEST_TIME_TEXT,
@@ -14,6 +14,7 @@ from displays.shared.header import (
     widest_name,
 )
 from scheduling.event import Event
+from utilities.log import log_exception
 
 HORIZON_SEC = const(7 * 24 * 3600)
 
@@ -36,6 +37,8 @@ _RAIL_PX = const(2)
 _DOT_R_PX = const(5)
 # Either side of a dot: to the start times and to the fields.
 _DOT_GAP_PX = const(4)
+_BADGE_R_PX = const(7)
+_BADGE_TEXT_SCALE = const(2)
 _NO_STREAM = const(-1)
 
 
@@ -65,9 +68,11 @@ def _fitting_prefix(gfx: PicoGraphics, text: str, room_px: int, text_scale: int)
 
 class Geometry:
     """Pixel layout of the Calendar view: a header over ``slot_count`` equal slots, each a colour field with room
-    for a progress bar under it, right of a rail with the start times left of it.
+    for a progress bar under it, right of a rail with the start times left of it.  The header keeps room after the
+    widest date for the badge that marks a failed stream.
 
-    Raises ``RuntimeError`` if the widest header doesn't fit the panel width or fewer than two slots fit under it.
+    Raises ``RuntimeError`` if the widest header and the badge don't fit the panel width or fewer than two slots fit
+    under it.
     """
 
     def __init__(
@@ -82,11 +87,17 @@ class Geometry:
         self.width, self.height = pico_graphics.get_bounds()
         self.font = font
 
-        if not header_fits(pico_graphics, font, header_text_scale, self.width):
+        # The badge sits after the date, as far from it as the header's characters are from one another.
+        badge_room = 2 * _BADGE_R_PX + 1 + header_text_scale
+        if not header_fits(pico_graphics, font, header_text_scale, self.width - badge_room):
             raise RuntimeError("calendar geometry: no room for header (font/scale too large)")
         self.header_text_scale = header_text_scale
         self.date_x = header_date_x(pico_graphics, font, header_text_scale)
         self.label_text_scale = label_text_scale
+        self.badge_x = self.width - _BADGE_R_PX - 1
+        self.badge_y = ((font_height - _DESCENDER_ROWS) * header_text_scale - 1) // 2
+        self.badge_text_x = self.badge_x - pico_graphics.measure_text("!", scale=_BADGE_TEXT_SCALE) // 2
+        self.badge_text_y = self.badge_y - (font_height - _DESCENDER_ROWS) * _BADGE_TEXT_SCALE // 2
 
         # A start time, or the weekday of an event in progress since before today, ends at time_right.
         self.time_right = max(
@@ -117,8 +128,9 @@ class Display(_Display):
 
     Each of ``streams`` is a getter ``(now_utc) -> list[Event]`` of a stream's events in start order; they may include
     events already over or starting after the horizon.  The calendar reads each list only while drawing and never
-    changes it.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to the local epoch the
-    header, start times and days are drawn in.
+    changes it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a
+    red date with a badge after it.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to the
+    local epoch the header, start times and days are drawn in.
     """
 
     def __init__(
@@ -171,17 +183,23 @@ class Display(_Display):
     def _draw(self, now_utc: int, now_local: int) -> None:
         window_end = now_utc + HORIZON_SEC
         streams = self._streams
+        stream_failed = False
         for i in range(len(streams)):
-            self._visible[i] = streams[i](now_utc)
             self._cursors[i] = 0
-            self._skip_over(i, now_utc)
+            try:
+                self._visible[i] = streams[i](now_utc)
+                self._skip_over(i, now_utc)
+            except Exception as exc:
+                self._visible[i] = ()
+                stream_failed = True
+                log_exception("[calendar] stream err:", exc)
 
         geom = self._geom
         gfx = self._gfx
         gfx.set_font(geom.font)
         gfx.set_pen(BLACK)
         gfx.clear()
-        self._draw_header(now_local)
+        self._draw_header(now_local, stream_failed)
         gfx.set_pen(DARK_GRAY)
         gfx.rectangle(geom.rail_x - _RAIL_PX // 2, geom.body_top, _RAIL_PX, geom.height - geom.body_top)
 
@@ -232,14 +250,18 @@ class Display(_Display):
                     best_start = start
         return best_index
 
-    def _draw_header(self, now_local: int) -> None:
+    def _draw_header(self, now_local: int, stream_failed: bool) -> None:
         geom = self._geom
         gfx = self._gfx
         time_text, date_text = format_header_time(now_local)
         gfx.set_pen(WHITE)
         gfx.text(time_text, 0, 0, scale=geom.header_text_scale)
-        gfx.set_pen(GRAY)
+        gfx.set_pen(RED if stream_failed else GRAY)
         gfx.text(date_text, geom.date_x, 0, scale=geom.header_text_scale)
+        if stream_failed:
+            gfx.circle(geom.badge_x, geom.badge_y, _BADGE_R_PX)
+            gfx.set_pen(LABEL_FOR_SLOT[RED])
+            gfx.text("!", geom.badge_text_x, geom.badge_text_y, scale=_BADGE_TEXT_SCALE)
 
     def _draw_day_header(self, slot: int, start_local: int, today: int) -> None:
         geom = self._geom

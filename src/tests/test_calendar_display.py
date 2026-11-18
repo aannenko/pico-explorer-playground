@@ -10,6 +10,7 @@ from displays.palette import (
     BROWN,
     DARK_GRAY,
     GRAY,
+    RED,
     SKY,
     STREAM_BROWN,
     STREAM_COLORS,
@@ -92,7 +93,7 @@ class _Raster:
         return self.pixels[y][x]
 
     def body_texts(self) -> list[tuple[str, int, int, int]]:
-        return [entry for entry in self.texts if entry[2] > 0]
+        return [entry for entry in self.texts if entry[2] >= _slot_y(0)]
 
     def body_strings(self) -> list[str]:
         return [text for text, *_ in self.body_texts()]
@@ -176,20 +177,17 @@ class TestLifecycle:
 
         assert display._visible == [()]
 
-    @pytest.mark.parametrize("failure", ["stream", "painter"])
-    def test_a_redraw_that_raises_pins_no_events_and_retries_at_the_next_minute(self, fake_ticks, failure):
+    def test_a_redraw_that_raises_pins_no_events_and_retries_at_the_next_minute(self, fake_ticks):
         def raise_memory_error(*args) -> None:
             raise MemoryError
 
-        streams = [[_ev("RAIN", _at(11, 0))]] + ([raise_memory_error] if failure == "stream" else [])
-        display, gfx, _clock = _display(*streams, now=_at(9, 12, 20))
-        if failure == "painter":
-            gfx.circle = raise_memory_error
+        display, gfx, _clock = _display([_ev("RAIN", _at(11, 0))], now=_at(9, 12, 20))
+        gfx.circle = raise_memory_error
 
         with pytest.raises(MemoryError):
             display.initialize()
 
-        assert display._visible == [()] * len(streams)
+        assert display._visible == [()]
         fake_ticks[0] = 39_999
         display.render()
         assert gfx.updates == 0
@@ -267,6 +265,68 @@ class TestFrame:
 
         assert ("Tomorrow", _FIELD_X, _slot_y(0) + 4, GRAY) in gfx.texts
         assert all(gfx.at(_RAIL_X, y) == DARK_GRAY for y in range(_slot_y(0), _slot_y(1)))
+
+
+# ---------------------------------------------------------------------------
+# A failing stream
+# ---------------------------------------------------------------------------
+
+_BADGE_X = 232  # the badge's centre
+_BADGE_Y = 10
+_BADGE_R = 7
+
+
+def _failing_stream(now_utc: int) -> list[Event]:
+    raise MemoryError
+
+
+class TestFailingStream:
+    def test_the_other_streams_are_drawn_under_a_red_date_and_a_badge(self, capsys):
+        display, gfx, _clock = _display([_ev("RAIN", _at(11, 0))], _failing_stream, [_ev("UV", _at(12, 0))])
+
+        display.initialize()
+
+        assert gfx.updates == 1
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["RAIN", "UV"]
+        assert ("Thu 4 Jun", 75, 0, RED) in gfx.texts
+        assert ("!", 231, 3, WHITE) in gfx.texts
+        assert {gfx.at(x, y) for x, y in circle_pixels(_BADGE_X, _BADGE_Y, _BADGE_R)} == {RED, WHITE}
+        assert display._visible == [(), (), ()]
+        assert "[calendar] stream err:" in capsys.readouterr().out
+
+    def test_the_mark_clears_once_every_stream_reads_again(self, fake_ticks):
+        reads = [0]
+
+        def flaky_stream(now_utc: int) -> list[Event]:
+            reads[0] += 1
+            if reads[0] == 1:
+                raise MemoryError
+            return [_ev("PAPER", _at(10, 0))]
+
+        display, gfx, clock = _display([_ev("RAIN", _at(11, 0))], flaky_stream, now=_at(9, 12, 20))
+        display.initialize()
+        fake_ticks[0] = 40_000
+        clock[0] = _at(9, 13)
+        display.render()
+
+        assert gfx.updates == 2
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["PAPER", "RAIN"]
+        assert ("Thu 4 Jun", 75, 0, GRAY) in gfx.texts
+        assert gfx.at(_BADGE_X, _BADGE_Y) == BLACK
+
+    def test_the_badge_clears_the_widest_date_by_a_character_gap(self):
+        gfx = _drawn(_failing_stream, now=time.mktime((2028, 3, 20, 9, 12, 0, 0, 0)))
+
+        assert ("Mon 20 Mar", 75, 0, RED) in gfx.texts
+        badge_left = min(x for x, _y in circle_pixels(_BADGE_X, _BADGE_Y, _BADGE_R))
+        assert badge_left - (75 + bitmap8_width("Mon 20 Mar", 3)) == 3
+
+    def test_a_header_without_room_for_the_badge_fails_at_construction(self):
+        gfx = _Raster()
+        gfx.get_bounds = lambda: (230, 240)
+
+        with pytest.raises(RuntimeError, match="no room for header"):
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
 
 
 # ---------------------------------------------------------------------------
