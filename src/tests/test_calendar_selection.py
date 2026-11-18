@@ -6,7 +6,7 @@ import config_defaults
 from displays.base import Display
 from displays.manager import DisplayManager
 from displays.palette import STREAM_YELLOW
-from scheduling.event import Event
+from scheduling.event import create_event, Event
 from scheduling.providers import waste
 from services.time_service import TimeService
 
@@ -86,7 +86,7 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         manager.next_ref(0)
     clock[0] += 30 * 86400
 
-    event_type = waste.Event
+    event_factory = waste.create_event
     produced = 0
 
     def budgeted_event(*args, **kwargs):
@@ -95,9 +95,9 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         # A redraw lists at most a slot count of pickups, however long the calendar was away.
         if produced > calendar._geom.slot_count:
             raise MemoryError("calendar entry built more waste events than it can show")
-        return event_type(*args, **kwargs)
+        return event_factory(*args, **kwargs)
 
-    monkeypatch.setattr(waste, "Event", budgeted_event)
+    monkeypatch.setattr(waste, "create_event", budgeted_event)
     if direction == "next":
         manager.next_ref(0)
         assert panel.presented == ("COUNTDOWN",)
@@ -126,7 +126,7 @@ def test_time_left_is_real_across_the_fall_back(app_module) -> None:
     calendar = app_module._build_calendar_display(
         app_module._build_calendar_geometry(panel),
         _time_service(lambda: utc),
-        [lambda now_utc: [Event("UV", utc - 600, end_utc - (utc - 600), color_index=STREAM_YELLOW)]],
+        [lambda now_utc: [create_event("UV", utc - 600, end_utc - (utc - 600), color_index=STREAM_YELLOW)]],
     )
 
     calendar.initialize()

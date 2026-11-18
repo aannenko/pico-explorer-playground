@@ -20,7 +20,7 @@ from displays.palette import (
     YELLOW,
 )
 from conftest import DST_END, DST_START, utc_epoch
-from scheduling.event import Event
+from scheduling.event import create_event, Event
 from services.time_service import TimeService
 
 from _fakes import bitmap8_width, circle_pixels
@@ -99,7 +99,7 @@ class _Raster:
 
 
 def _ev(label: str, start: int, duration_min: int = 60, color_index: int = STREAM_SKY) -> Event:
-    return Event(label, start, duration_min * 60, color_index=color_index)
+    return create_event(label, start, duration_min * 60, color_index=color_index)
 
 
 def _stream(events: list[Event]):  # -> (int) -> list[Event]

@@ -1,6 +1,6 @@
 import time
 
-from scheduling.event import Event
+from scheduling.event import create_event, Event
 from services.time_service import TimeService
 
 _SEC_PER_WEEK = 7 * 24 * 60 * 60
@@ -54,7 +54,7 @@ def _events(
         if pickup_index < 0:
             break
         _, label, color_index, duration_sec, period_sec = pickups[pickup_index]
-        events.append(Event(label, starts_utc[pickup_index], duration_sec, color_index))
+        events.append(create_event(label, starts_utc[pickup_index], duration_sec, color_index))
         if period_sec:
             starts_local[pickup_index] += period_sec
             starts_utc[pickup_index] = time_service.to_utc(starts_local[pickup_index])

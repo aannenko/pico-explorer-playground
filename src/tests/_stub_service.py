@@ -1,4 +1,4 @@
-from scheduling.event import Event
+from scheduling.event import create_event, Event
 from services._event_stream_service import EventStreamService
 from services.fetch_machine import FetchCoordinator
 
@@ -22,6 +22,6 @@ class StubService(EventStreamService):
         # loop counts it as a failure and backs off.
         payload = self._fetcher()
         return ([
-            Event(e["name"], e["start"], e["dur"], color_index=e.get("color", 0))
+            create_event(e["name"], e["start"], e["dur"], color_index=e.get("color", 0))
             for e in payload["events"]
         ],)

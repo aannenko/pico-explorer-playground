@@ -7,7 +7,7 @@ import displays.countdown as countdown
 import displays.ring as ring
 import displays.sensors as sensors
 from displays.manager import DisplayManager
-from scheduling.event import Event
+from scheduling.event import create_event
 from services.countdown_timer import DONE, PAUSED, RUNNING, CountdownTimer
 from services.sample_history import SampleHistory
 
@@ -107,7 +107,7 @@ def _build_calendar(panel: _Panel, clock: _Clock) -> calendar.Display:
             header_text_scale=3,
             label_text_scale=2,
         ),
-        streams=[lambda now_utc: [Event("WORK", _NOW_SEC - 600, 4 * 3600)]],
+        streams=[lambda now_utc: [create_event("WORK", _NOW_SEC - 600, 4 * 3600)]],
         get_utc_time=clock.now,
         to_local=lambda utc_epoch: utc_epoch,
     )

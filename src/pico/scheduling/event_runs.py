@@ -1,8 +1,8 @@
-"""Building calendar ``Event`` runs from per-hour warnings."""
+"""Building calendar event runs from per-hour warnings."""
 
 from micropython import const
 
-from scheduling.event import Event
+from scheduling.event import create_event, Event
 
 _SEC_PER_HOUR = const(3600)
 
@@ -72,4 +72,6 @@ class RunBuilder:
         if self._end_utc <= self._now_utc:
             return
         color_index = self._level_colors[self._level - 1]
-        self._events.append(Event(label, self._start_utc, self._end_utc - self._start_utc, color_index=color_index))
+        self._events.append(
+            create_event(label, self._start_utc, self._end_utc - self._start_utc, color_index=color_index)
+        )
