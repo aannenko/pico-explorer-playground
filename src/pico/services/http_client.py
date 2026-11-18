@@ -139,3 +139,63 @@ def _deliver(line: bytes, on_line, max_line_bytes: int) -> None:
     if len(line) > max_line_bytes:
         raise HttpParseError("line too long")
     on_line(line)
+
+
+class HttpClient:
+    """Run one complete fetch job at a time on the main thread, and stream HTTP lines with one socket timeout.
+
+    Share one client across sources and submit from periodic ticks.  Busy or offline submissions aren't queued: retry
+    on later ticks so competing fetches leave an opportunity for rendering between them.
+    """
+
+    def __init__(
+        self,
+        wifi,  # has is_connected() -> bool
+        schedule,  # (callback, arg) -> None
+        timeout_sec: int,
+        http_get_lines=get_lines,  # (url, on_line, timeout_sec, max_line_bytes, deadline_ms) -> None
+    ) -> None:
+        self._wifi = wifi
+        self._schedule = schedule
+        self._timeout_sec = timeout_sec
+        self._http_get_lines = http_get_lines
+        self._fetcher = None  # Callable[[], None] | None
+        self._run_ref = self._run
+
+    def try_fetch(self, fetcher) -> bool:  # fetcher: () -> None
+        """Queue ``fetcher`` if WiFi is up and no job is queued or running; return whether accepted.
+
+        Scheduling errors propagate after releasing the slot.
+        """
+        if self._fetcher is not None or not self._wifi.is_connected():
+            return False
+        self._fetcher = fetcher
+        try:
+            self._schedule(self._run_ref, 0)
+        except Exception:
+            self._fetcher = None
+            raise
+        return True
+
+    def _run(self, _: int) -> None:
+        try:
+            fetcher = self._fetcher
+            assert fetcher is not None
+            fetcher()
+        finally:
+            self._fetcher = None
+
+    def stream_lines(
+        self,
+        url: str,
+        on_line,  # (bytes) -> None
+        max_line_bytes: int = _MAX_LINE_BYTES,
+        deadline_ms: int = _DEADLINE_MS,
+    ) -> None:
+        """Pass lines to ``on_line`` as ``get_lines`` does, with the client's socket timeout.
+
+        Blocks the main thread, so call it from a submitted fetch job.
+        """
+        self._http_get_lines(
+            url, on_line, timeout_sec=self._timeout_sec, max_line_bytes=max_line_bytes, deadline_ms=deadline_ms
+        )

@@ -1,16 +1,10 @@
-"""End-to-end test of the network substrate via the stub service.
-
-Drives the full path a real network row uses: tick -> fetch_machine.tick -> schedule
-(fetch+parse) -> harvest (store) -> what the calendar reads from the stream's getter.
-
-Harvest model: a fetch's result lands in the FetchState during ``run_all()`` but
-is published on the *next* ``tick()`` (the harvest), so published-state asserts
-(_generation / visible / failures) come after an extra ``tick()``.
-"""
+import pytest
 
 from _stub_service import StubService
-from services.fetch_machine import FETCHING, INITIAL, FetchCoordinator
-from services.http_client import HttpConnectError
+from conftest import make_timer_factory
+import services._event_stream_service as event_stream_service
+from services.http_client import HttpClient, HttpConnectError
+from services.tick_scheduler import TickScheduler
 
 
 class _FakeWifi:
@@ -22,12 +16,13 @@ class _FakeWifi:
 
 
 class _FakeSchedule:
-    """Deferred schedule: queues callbacks; ``run_all`` runs them on demand."""
-
     def __init__(self) -> None:
         self.queue: list[tuple] = []
+        self.raise_next = False
 
     def __call__(self, callback, arg) -> None:
+        if self.raise_next:
+            raise RuntimeError("schedule queue full")
         self.queue.append((callback, arg))
 
     def run_all(self) -> None:
@@ -49,20 +44,20 @@ def _payload(*specs) -> dict:
 
 
 class _Harness:
-    def __init__(self, interval_ms: int = 1000, connected: bool = True, enabled: bool = True) -> None:
-        self.clock_val = 0
+    def __init__(
+        self, interval_ms: int = 1000, connected: bool = True, enabled: bool = True, start_ms: int = 0
+    ) -> None:
+        self.clock_val = start_ms
         self.wifi = _FakeWifi(connected)
         self.schedule = _FakeSchedule()
-        self.coord = FetchCoordinator()
+        self.http_client = HttpClient(self.wifi, self.schedule, timeout_sec=7)
         self.payload = _payload(("A", 0, 100))
         self.fetch_calls = 0
         self.raise_exc = None
         self.service = StubService(
             self._fetcher,
-            self.wifi,
-            self.coord,
+            self.http_client,
             interval_ms,
-            schedule=self.schedule,
             get_ticks_ms=lambda: self.clock_val,
             enabled=enabled,
         )
@@ -77,55 +72,53 @@ class _Harness:
     def advance(self, ms: int) -> None:
         self.clock_val += ms
 
-    def fetch_and_harvest(self) -> None:
-        """One full cycle: dispatch (tick), run the deferred fetch, harvest (tick)."""
+    def fetch(self) -> None:
         self.service.tick()
         self.schedule.run_all()
-        self.service.tick()
 
     def visible_names(self) -> list[str]:
         return [e.label for e in self.stream(0)]
 
 
-def test_disabled_service_never_fetches():
+def test_disabled_service_never_fetches() -> None:
     h = _Harness(enabled=False)
 
     for _ in range(5):
         h.service.tick()
 
     assert h.fetch_calls == 0
+    assert h.schedule.queue == []
     assert h.visible_names() == []
 
 
-def test_fetch_flows_through_to_visible_events():
+def test_fetch_publishes_in_callback_without_harvest_tick() -> None:
     h = _Harness()
 
-    h.service.tick()  # INITIAL -> FETCHING, fetch deferred
-    assert h.fetch_calls == 0  # blocking work not run inline
+    h.service.tick()
+    assert h.fetch_calls == 0
+    assert h.visible_names() == []
+    assert len(h.schedule.queue) == 1
 
-    h.schedule.run_all()  # _do_fetch: fetch + parse, result staged (not yet published)
+    h.schedule.run_all()
     assert h.fetch_calls == 1
-    assert h.service._generation == 0  # harvest hasn't run yet
-
-    h.service.tick()  # harvest: store, generation 0 -> 1
-    assert h.service._generation == 1
     assert h.visible_names() == ["A"]
 
 
-def test_second_fetch_refreshes_the_stream():
+def test_second_fetch_replaces_snapshot_seen_by_existing_getter() -> None:
     h = _Harness(interval_ms=1000)
-    h.fetch_and_harvest()
-    assert h.visible_names() == ["A"]
+    h.fetch()
+    previous = h.stream(0)
 
     h.payload = _payload(("B", 0, 100), ("C", 200, 100))
-    h.advance(1000)  # next interval due
-    h.fetch_and_harvest()
+    h.advance(1000)
+    h.fetch()
 
-    assert h.service._generation == 2
     assert h.visible_names() == ["B", "C"]
+    assert [e.label for e in previous] == ["A"]
+    assert h.stream(0) is not previous
 
 
-def test_wifi_down_holds_without_fetching():
+def test_wifi_down_holds_without_fetching() -> None:
     h = _Harness(connected=False)
 
     for _ in range(3):
@@ -136,116 +129,268 @@ def test_wifi_down_holds_without_fetching():
     assert h.visible_names() == []
 
 
-def test_http_error_backs_off_and_keeps_prior_snapshot():
+@pytest.mark.parametrize("failure", ["fetch", "parse"], ids=["fetch-error", "parse-error"])
+def test_failure_keeps_prior_snapshot_until_retry_deadline(failure: str) -> None:
     h = _Harness(interval_ms=1000)
-    h.fetch_and_harvest()  # first fetch ok -> ["A"]
+    h.fetch()
+    previous = h.stream(0)
+    h.service._backoff_base_ms = 100
+    h.service._backoff_max_ms = 300
+
+    if failure == "fetch":
+        h.raise_exc = HttpConnectError("down")
+    else:
+        h.payload = {"unexpected": "shape"}
+    h.advance(1000)
+    h.fetch()
+
+    assert h.service._failures == 1
+    assert h.stream(0) is previous
     assert h.visible_names() == ["A"]
 
-    h.raise_exc = HttpConnectError("down")
-    h.advance(1000)
-    h.fetch_and_harvest()  # fetch raises -> backoff, generation unchanged
+    h.raise_exc = None
+    h.payload = _payload(("B", 0, 100))
+    h.advance(99)
+    h.service.tick()
+    assert h.schedule.queue == []
+    assert h.fetch_calls == 2
 
-    assert h.service._failures == 1  # one failure recorded -> backing off
-    assert h.service._generation == 1  # no bump on failure
-    assert h.visible_names() == ["A"]  # prior snapshot retained
+    h.advance(1)
+    h.fetch()
+    assert h.fetch_calls == 3
+    assert h.visible_names() == ["B"]
+    assert h.service._failures == 0
 
 
-def test_malformed_payload_backs_off_and_emits_nothing():
+def test_malformed_payload_backs_off_and_emits_nothing() -> None:
     h = _Harness()
-    h.payload = {"unexpected": "shape"}  # missing "events" -> KeyError in parse
+    h.payload = {"unexpected": "shape"}
 
-    h.fetch_and_harvest()
+    h.fetch()
 
     assert h.fetch_calls == 1
-    assert h.service._failures == 1  # parse failure counts as a fetch failure
-    assert h.service._generation == 0  # parse failure -> no store
+    assert h.service._failures == 1
     assert h.visible_names() == []
 
 
-def test_backoff_grows_exponentially_and_caps():
+def test_backoff_grows_exponentially_and_caps() -> None:
     h = _Harness()
     s = h.service
     s._backoff_base_ms = 100
     s._backoff_max_ms = 300
 
-    s._failures = 1
-    assert s._backoff_delay() == 100
-    s._failures = 2
-    assert s._backoff_delay() == 200
-    s._failures = 3
-    assert s._backoff_delay() == 300  # 400 capped to 300
-    s._failures = 10
+    h.raise_exc = HttpConnectError("down")
+
+    for failure_count, delay_ms in enumerate((100, 200, 300, 300), start=1):
+        h.fetch()
+        assert s._failures == failure_count
+        h.advance(delay_ms - 1)
+        s.tick()
+        assert h.schedule.queue == []
+        assert h.fetch_calls == failure_count
+        h.advance(1)
+
+    s._failures = 30
     assert s._backoff_delay() == 300
 
 
-def test_store_exception_is_swallowed_but_success_recorded(capsys):
+def test_queue_full_is_logged_and_later_tick_retries(capsys) -> None:
     h = _Harness()
+    h.schedule.raise_next = True
 
-    def boom(_events):
-        raise RuntimeError("store blew up")
-
-    h.service._store = boom
-    h.fetch_and_harvest()
-
-    # The store error is swallowed (the success is recorded *before* the store call),
-    # so the fetch still counts as a success, but nothing gets published.
-    assert h.service._failures == 0
-    assert h.service._generation == 0  # store never completed its bump
-    out = capsys.readouterr().out
-    assert "[stub] store err:" in out
-    assert "RuntimeError: store blew up" in out
-
-
-def test_tick_exception_is_swallowed_and_printed(capsys):
-    h = _Harness()
-
-    def boom():
-        raise RuntimeError("advance blew up")
-
-    h.service._advance = boom
     h.service.tick()
 
+    assert h.schedule.queue == []
+    assert h.fetch_calls == 0
     out = capsys.readouterr().out
-    assert out.startswith("[stub] tick err:")
-    assert "RuntimeError: advance blew up" in out
+    assert "[stub] tick err:" in out
+    assert "RuntimeError: schedule queue full" in out
 
-
-def test_success_after_failure_resets_failures():
-    h = _Harness(interval_ms=1000)
-    h.raise_exc = HttpConnectError("down")
-    h.fetch_and_harvest()  # one failure
-    assert h.service._failures == 1
-
-    h.raise_exc = None  # recovery
-    h.advance(700_000)  # past the (capped) backoff so the retry is due
-    h.fetch_and_harvest()  # success
-
-    assert h.service._failures == 0  # a success clears the failure count
-
-
-def test_not_due_does_not_fetch_before_interval():
-    h = _Harness(interval_ms=1000)
-    h.fetch_and_harvest()  # success at clock 0 -> next due at 1000
+    h.schedule.raise_next = False
+    h.fetch()
+    assert h.visible_names() == ["A"]
     assert h.fetch_calls == 1
-    assert h.service._generation == 1
 
-    h.advance(999)  # still before the interval elapses
+
+def test_queue_full_service_does_not_skip_following_scheduler_subscriber(capsys) -> None:
+    h = _Harness()
+    h.schedule.raise_next = True
+    timer_factory, _ = make_timer_factory()
+    scheduler = TickScheduler(schedule=h.schedule, timer_factory=timer_factory)
+    calls = []
+    scheduler.register(h.service.tick)
+    scheduler.register(lambda: calls.append("following"))
+
+    scheduler._tick(0)
+
+    assert calls == ["following"]
+    assert h.schedule.queue == []
+    assert h.fetch_calls == 0
+    assert "RuntimeError: schedule queue full" in capsys.readouterr().out
+
+    h.schedule.raise_next = False
+    scheduler._tick(0)
+    h.schedule.run_all()
+    assert calls == ["following", "following"]
+    assert h.visible_names() == ["A"]
+
+
+def test_raising_success_print_preserves_publication_deadline_and_releases_gate(monkeypatch) -> None:
+    h = _Harness()
+    h.raise_exc = HttpConnectError("down")
+    h.fetch()
+    h.advance(5000)
+    h.raise_exc = None
+    h.payload = _payload(("B", 0, 100))
+    peer = StubService(lambda: _payload(("C", 0, 100)), h.http_client, 1000, lambda: h.clock_val)
+
+    def print_publication(message: str) -> None:
+        assert h.visible_names() == ["B"]
+        assert h.service._failures == 0
+        assert h.service._next_fetch_ms == 6000
+        h.service.tick()
+        peer.tick()
+        assert h.schedule.queue == []
+        raise RuntimeError("publication log failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(event_stream_service, "print", print_publication, raising=False)
+        h.service.tick()
+        with pytest.raises(RuntimeError, match="publication log failed"):
+            h.schedule.run_all()
+
+    assert h.visible_names() == ["B"]
+    assert h.service._failures == 0
+    assert h.service._next_fetch_ms == 6000
+    peer.tick()
+    h.schedule.run_all()
+    assert [e.label for e in peer.build_streams()[0](0)] == ["C"]
+
+
+def test_retry_deadline_precedes_raising_logger_and_gate_is_released(monkeypatch) -> None:
+    h = _Harness()
+    h.fetch()
+    previous = h.stream(0)
+    h.service._backoff_base_ms = 100
+    h.advance(1000)
+    h.raise_exc = HttpConnectError("down")
+    peer = StubService(lambda: _payload(("B", 0, 100)), h.http_client, 1000, lambda: h.clock_val)
+    logged = []
+
+    def log_exception(tag: str, exc: Exception) -> None:
+        logged.append((h.service._next_fetch_ms, exc))
+        assert h.stream(0) is previous
+        peer.tick()
+        assert h.schedule.queue == []
+        raise RuntimeError("logger failed")
+
+    monkeypatch.setattr(event_stream_service, "log_exception", log_exception)
+    h.service.tick()
+    with pytest.raises(RuntimeError, match="logger failed"):
+        h.schedule.run_all()
+
+    assert logged == [(1100, h.raise_exc)]
+    assert h.service._failures == 1
+    assert h.visible_names() == ["A"]
+    h.advance(99)
+    h.service.tick()
+    assert h.schedule.queue == []
+
+    peer.tick()
+    h.schedule.run_all()
+    assert [e.label for e in peer.build_streams()[0](0)] == ["B"]
+
+
+def test_refresh_interval_starts_at_callback_completion() -> None:
+    h = _Harness(interval_ms=1000)
+    h.service.tick()
+    h.advance(250)
+    h.schedule.run_all()
+    assert h.fetch_calls == 1
+
+    h.advance(999)
+    h.service.tick()
+    assert h.fetch_calls == 1
+    assert h.schedule.queue == []
+
+    h.advance(1)
+    h.fetch()
+    assert h.fetch_calls == 2
+
+
+@pytest.mark.parametrize("refusal", ["offline", "busy"], ids=["offline", "busy"])
+def test_due_fetch_survives_half_period_after_client_refusal(monkeypatch, refusal: str) -> None:
+    ticks_period_ms = 1 << 30
+    half_period_ms = ticks_period_ms // 2
+
+    def ticks_add(value_ms: int, delta_ms: int) -> int:
+        return (value_ms + delta_ms) % ticks_period_ms
+
+    def ticks_diff(current_ms: int, previous_ms: int) -> int:
+        return (current_ms - previous_ms + half_period_ms) % ticks_period_ms - half_period_ms
+
+    monkeypatch.setattr(event_stream_service.time, "ticks_add", ticks_add)
+    monkeypatch.setattr(event_stream_service.time, "ticks_diff", ticks_diff)
+    h = _Harness(start_ms=ticks_period_ms - 500)
+    h.fetch()
+    h.payload = _payload(("B", 0, 100))
+    h.clock_val = (h.clock_val + 1000) % ticks_period_ms
+    if refusal == "offline":
+        h.wifi.connected = False
+    else:
+        assert h.http_client.try_fetch(lambda: None) is True
+
+    h.service.tick()
+    assert h.fetch_calls == 1
+    assert h.visible_names() == ["A"]
+    assert len(h.schedule.queue) == (1 if refusal == "busy" else 0)
+
+    h.clock_val = (h.clock_val + half_period_ms + 1) % ticks_period_ms
+    if refusal == "offline":
+        h.wifi.connected = True
+    else:
+        h.schedule.run_all()
+
     h.service.tick()
 
-    assert h.fetch_calls == 1  # no second fetch yet
-    assert h.service._generation == 1
-    assert h.schedule.queue == []  # nothing dispatched
+    assert len(h.schedule.queue) == 1
+    h.schedule.run_all()
+    assert h.fetch_calls == 2
+    assert h.visible_names() == ["B"]
 
 
-def test_only_one_stub_fetches_under_shared_coordinator():
-    coord = FetchCoordinator()
-    wifi = _FakeWifi(True)
-    sched_a, sched_b = _FakeSchedule(), _FakeSchedule()
-    a = StubService(lambda: _payload(("A", 0, 100)), wifi, coord, 1000, schedule=sched_a, get_ticks_ms=lambda: 0)
-    b = StubService(lambda: _payload(("B", 0, 100)), wifi, coord, 1000, schedule=sched_b, get_ticks_ms=lambda: 0)
+def test_shared_client_blocks_pending_running_and_reentrant_ticks_without_chaining() -> None:
+    schedule = _FakeSchedule()
+    http_client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+    calls = []
+
+    def fetch_a() -> dict:
+        calls.append("A")
+        a.tick()
+        b.tick()
+        assert schedule.queue == []
+        return _payload(("A", 0, 100))
+
+    def fetch_b() -> dict:
+        calls.append("B")
+        return _payload(("B", 0, 100))
+
+    a = StubService(fetch_a, http_client, 1000, lambda: 0)
+    b = StubService(fetch_b, http_client, 1000, lambda: 0)
 
     a.tick()
+    a.tick()
     b.tick()
+    assert len(schedule.queue) == 1
+    assert calls == []
 
-    assert a._fetch_state.stage == FETCHING
-    assert b._fetch_state.stage == INITIAL  # held by the single-active invariant
+    schedule.run_all()
+    assert calls == ["A"]
+    assert [e.label for e in a.build_streams()[0](0)] == ["A"]
+    assert b.build_streams()[0](0) == []
+    assert schedule.queue == []
+
+    b.tick()
+    schedule.run_all()
+    assert calls == ["A", "B"]
+    assert [e.label for e in b.build_streams()[0](0)] == ["B"]

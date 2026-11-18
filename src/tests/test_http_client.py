@@ -1,11 +1,10 @@
-"""Tests for the shared HTTP client wrapper."""
-
 import micropython
 import pytest
 
 import services.http_client as http_client
 from services.http_client import (
     HttpConnectError,
+    HttpClient,
     HttpError,
     HttpParseError,
     HttpProtocolError,
@@ -267,3 +266,162 @@ def test_classified_failure_prints_nothing(fake_urequests, capsys):
         _lines()
 
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "bounds, expected_bounds",
+    [({}, (512, 10_000)), ({"max_line_bytes": 37, "deadline_ms": 850}, (37, 850))],
+    ids=["default-bounds", "explicit-bounds"],
+)
+def test_client_forwards_timeout_and_streaming_bounds(bounds: dict, expected_bounds: tuple[int, int]) -> None:
+    calls = []
+    received = []
+    on_line = received.append
+
+    def http_get_lines(url: str, callback, timeout_sec: int, max_line_bytes: int, deadline_ms: int) -> None:
+        calls.append((url, callback, timeout_sec, max_line_bytes, deadline_ms))
+        callback(b"hour,value")
+
+    client = HttpClient(None, None, timeout_sec=7, http_get_lines=http_get_lines)
+
+    client.stream_lines(_URL, on_line, **bounds)
+
+    assert calls == [(_URL, on_line, 7, *expected_bounds)]
+    assert received == [b"hour,value"]
+
+
+class _FakeWifi:
+    def __init__(self, connected: bool = True) -> None:
+        self.connected = connected
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+
+class _FakeSchedule:
+    def __init__(self) -> None:
+        self.queue: list[tuple] = []
+        self.raise_next = False
+
+    def __call__(self, callback, arg) -> None:
+        if self.raise_next:
+            raise RuntimeError("schedule queue full")
+        self.queue.append((callback, arg))
+
+    def run_all(self) -> None:
+        pending, self.queue = self.queue, []
+        for callback, arg in pending:
+            callback(arg)
+
+
+def test_offline_submission_leaves_no_job_and_reconnect_can_submit() -> None:
+    wifi = _FakeWifi(connected=False)
+    schedule = _FakeSchedule()
+    client = HttpClient(wifi, schedule, timeout_sec=7)
+    calls = []
+
+    assert client.try_fetch(lambda: calls.append("offline")) is False
+    assert schedule.queue == []
+
+    wifi.connected = True
+    assert client.try_fetch(lambda: calls.append("online")) is True
+    assert calls == []
+    assert len(schedule.queue) == 1
+
+    schedule.run_all()
+    assert calls == ["online"]
+
+
+def test_pending_and_running_jobs_refuse_peers_without_chaining() -> None:
+    schedule = _FakeSchedule()
+    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+    calls = []
+
+    def second() -> None:
+        calls.append("second")
+
+    def first() -> None:
+        calls.append("first")
+        assert client.try_fetch(second) is False
+
+    assert client.try_fetch(first) is True
+    assert client.try_fetch(second) is False
+    assert len(schedule.queue) == 1
+
+    schedule.run_all()
+    assert calls == ["first"]
+    assert schedule.queue == []
+
+    assert client.try_fetch(second) is True
+    schedule.run_all()
+    assert calls == ["first", "second"]
+
+
+def test_slot_is_reserved_before_schedule_can_reenter() -> None:
+    queue = []
+    calls = []
+
+    def peer() -> None:
+        calls.append("peer")
+
+    def schedule(callback, arg: int) -> None:
+        assert client.try_fetch(peer) is False
+        queue.append((callback, arg))
+
+    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+
+    assert client.try_fetch(lambda: calls.append("owner")) is True
+    assert len(queue) == 1
+    callback, arg = queue.pop()
+    callback(arg)
+    assert calls == ["owner"]
+    assert client.try_fetch(peer) is True
+
+
+def test_schedule_failure_reraises_and_rolls_back_for_later_submission() -> None:
+    schedule = _FakeSchedule()
+    schedule.raise_next = True
+    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+    calls = []
+
+    with pytest.raises(RuntimeError, match="schedule queue full"):
+        client.try_fetch(lambda: calls.append("rejected"))
+
+    assert schedule.queue == []
+    schedule.raise_next = False
+    assert client.try_fetch(lambda: calls.append("retry")) is True
+    schedule.run_all()
+    assert calls == ["retry"]
+
+
+def test_callback_exception_propagates_and_releases_for_later_submission() -> None:
+    schedule = _FakeSchedule()
+    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+    calls = []
+    error = RuntimeError("fetch failed")
+
+    def fail() -> None:
+        raise error
+
+    assert client.try_fetch(fail) is True
+    with pytest.raises(RuntimeError) as caught:
+        schedule.run_all()
+    assert caught.value is error
+
+    assert client.try_fetch(lambda: calls.append("recovered")) is True
+    schedule.run_all()
+    assert calls == ["recovered"]
+
+
+def test_scheduled_callback_is_cached_between_jobs() -> None:
+    schedule = _FakeSchedule()
+    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
+    calls = []
+
+    client.try_fetch(lambda: calls.append("first"))
+    first_callback = schedule.queue[0][0]
+    schedule.run_all()
+    client.try_fetch(lambda: calls.append("second"))
+    assert schedule.queue[0][0] is first_callback
+    schedule.run_all()
+    assert calls == ["first", "second"]

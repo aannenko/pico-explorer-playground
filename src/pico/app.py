@@ -21,10 +21,10 @@ from hardware.explorer import (
     BUTTON_Y_PIN,
 )
 from scheduling.providers import waste
-from services.fetch_machine import FetchCoordinator
 from services.button_dispatcher import ButtonDispatcher
 from services.countdown_timer import CountdownTimer
 from services.explorer_buzzer import ExplorerBuzzer
+from services.http_client import HttpClient
 from services.network_service import NetworkService
 from services.network_upkeep import NetworkUpkeep
 from services.openmeteo_service import OpenMeteoService
@@ -244,7 +244,7 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         tick_scheduler=tick_scheduler,
     )
 
-    fetch_coordinator = FetchCoordinator()
+    http_client = HttpClient(wifi_client, schedule, config.HTTP_TIMEOUT_SEC)
     calendar_geometry = _build_calendar_geometry(pico_graphics)
     stream_event_cap = _stream_event_cap(calendar_geometry)
     openmeteo_service = OpenMeteoService(
@@ -254,14 +254,11 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         uv_thresholds=config.UV_THRESHOLDS,
         aqi_thresholds=config.AQI_THRESHOLDS,
         pollen_thresholds=config.POLLEN_THRESHOLDS,
-        wifi=wifi_client,
-        coordinator=fetch_coordinator,
-        schedule=schedule,
+        http_client=http_client,
         interval_ms=_STREAM_REFRESH_MS,
         forecast_hours=_STREAM_FORECAST_HOURS,
         past_hours=_STREAM_PAST_HOURS,
         max_events=stream_event_cap,
-        timeout_sec=config.HTTP_TIMEOUT_SEC,
         tick_scheduler=tick_scheduler,
     )
 

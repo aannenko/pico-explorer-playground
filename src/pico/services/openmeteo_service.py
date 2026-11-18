@@ -5,10 +5,8 @@ from micropython import const
 from displays.palette import STREAM_SEVERITY
 from scheduling import event_runs
 from scheduling.event import Event
-from services import http_client
 from services._event_stream_service import EventStreamService
-from services.fetch_machine import FetchCoordinator
-from services.http_client import HttpParseError
+from services.http_client import HttpClient, HttpParseError
 from services.tick_scheduler import TickScheduler
 
 # HTTP (not HTTPS) on purpose: no TLS handshake and its large contiguous-heap block.
@@ -227,17 +225,13 @@ class OpenMeteoService(EventStreamService):
         uv_thresholds: tuple[float, float, float],
         aqi_thresholds: tuple[float, float, float],
         pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
-        wifi,  # has is_connected() -> bool
-        coordinator: FetchCoordinator,
-        schedule,  # (callback, arg) -> None
+        http_client: HttpClient,
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
         max_events: int,
         get_utc_time=time.time,  # () -> int
         get_ticks_ms=time.ticks_ms,  # () -> int
-        http_get_lines=http_client.get_lines,  # (url, on_line, timeout_sec) -> None
-        timeout_sec: int = 3,
         tick_scheduler: TickScheduler | None = None,
     ) -> None:
         self._lat = latitude
@@ -247,15 +241,13 @@ class OpenMeteoService(EventStreamService):
         self._aqi_thresholds = aqi_thresholds
         self._pollen_thresholds = pollen_thresholds
         self._air_metrics = ",".join(["european_aqi"] + [species + "_pollen" for species, _ in pollen_thresholds])
-        self._http_get_lines = http_get_lines
-        self._timeout_sec = timeout_sec
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
         self._max_events = max_events
         self._get_utc_time = get_utc_time
         enabled = not (latitude == 0.0 and longitude == 0.0)
         super().__init__(
-            wifi, coordinator, schedule, interval_ms, "meteo", enabled, stream_count=4,
+            http_client, interval_ms, "meteo", enabled, stream_count=4,
             get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,
         )
         if enabled:
@@ -291,15 +283,14 @@ class OpenMeteoService(EventStreamService):
         """Pass each hour of ``metrics`` at ``base_url``, from ``past_hours`` back to ``forecast_hours`` ahead, to
         ``on_hour``, as ``_HourlyCsv`` does.
 
-        Raises what ``_HourlyCsv`` and ``http_get_lines`` raise.
+        Raises what ``_HourlyCsv`` and ``HttpClient.stream_lines`` raise.
         """
         reader = _HourlyCsv(metrics, self._past_hours + forecast_hours, on_hour)
         # CSV, unlike JSON, parses a row at a time.  Rows are UTC Unix times: in a time zone, every row would take
         # the offset in force when it was requested, an hour out past a DST change.
-        self._http_get_lines(
+        self._http_client.stream_lines(
             "%s?format=csv&timeformat=unixtime&timezone=GMT&latitude=%s&longitude=%s&hourly=%s&past_hours=%s"
             "&forecast_hours=%s" % (base_url, self._lat, self._lon, metrics, self._past_hours, forecast_hours),
             reader.feed,
-            timeout_sec=self._timeout_sec,
         )
         reader.finish()

@@ -3,8 +3,7 @@
 import pytest
 
 from displays.palette import STREAM_COLORS, STREAM_ORANGE, STREAM_RED, STREAM_YELLOW
-from services.fetch_machine import FetchCoordinator
-from services.http_client import HttpConnectError, HttpParseError
+from services.http_client import HttpClient, HttpConnectError, HttpParseError
 from services.openmeteo_service import OpenMeteoService, _AirHours, _HourlyCsv, _precip_label, _WeatherHours
 
 _UV = (6, 8, 11)  # UV thresholds used across the suite
@@ -400,7 +399,7 @@ class _Harness:
         self.clock_val = 0
         self.wifi = _FakeWifi(connected)
         self.schedule = _FakeSchedule()
-        self.coord = FetchCoordinator()
+        self.http_client = HttpClient(self.wifi, self.schedule, timeout_sec=7, http_get_lines=self._http_get_lines)
         self.forecast_lines = _forecast_csv(b"80,1.0,61,0")  # rain
         self.air_lines = _air_csv(b"60,0.0,0.0,0.0,0.0,0.0")  # AQI warning
         self.forecast_exc = None
@@ -414,12 +413,8 @@ class _Harness:
             uv_thresholds=_UV,
             aqi_thresholds=_AQI_THR,
             pollen_thresholds=_POLLEN_THR,
-            wifi=self.wifi,
-            coordinator=self.coord,
-            schedule=self.schedule,
+            http_client=self.http_client,
             get_ticks_ms=lambda: self.clock_val,
-            http_get_lines=self._http_get_lines,
-            timeout_sec=7,
             interval_ms=1000,
             forecast_hours=forecast_hours,
             past_hours=_PAST_HOURS,
@@ -428,7 +423,9 @@ class _Harness:
         )
         self.streams = self.service.build_streams()
 
-    def _http_get_lines(self, url, on_line, timeout_sec=None):
+    def _http_get_lines(
+        self, url: str, on_line, timeout_sec: int, max_line_bytes: int, deadline_ms: int
+    ) -> None:
         self.get_calls.append((url, timeout_sec))
         is_air = url.startswith("http://air-quality-api.")
         exc = self.air_exc if is_air else self.forecast_exc
@@ -443,7 +440,6 @@ class _Harness:
     def fetch(self) -> None:
         self.service.tick()
         self.schedule.run_all()
-        self.service.tick()  # harvest
 
     def advance(self, ms: int) -> None:
         self.clock_val += ms
@@ -476,8 +472,6 @@ def test_one_fetch_publishes_all_four_streams_in_order():
     h.schedule.run_all()
     assert h.requested_hosts() == ["api.open-meteo.com", "air-quality-api.open-meteo.com"]
 
-    h.service.tick()  # harvest: publish the parsed snapshot
-    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], ["UV"], ["AQI"], ["RAGWEED"]]
     assert h.visible(_PRECIP_INDEX) == [("RAIN", _T0)]
     assert h.visible(_POLLEN_INDEX) == [("RAGWEED", _T0 + _HOUR)]
@@ -501,15 +495,15 @@ def test_urls_ask_for_csv_in_utc_unix_time_with_coordinates_metrics_and_timeout(
 
 def test_air_quality_forecast_is_capped_at_the_api_maximum():
     h = _Harness(forecast_hours=200)
-    h.forecast_lines = _csv(_FORECAST_HEADER, _FORECAST_QUIET_ROW, row_count=_PAST_HOURS + 200)
-    h.air_lines = _csv(_AIR_HEADER, _AIR_QUIET_ROW, row_count=_PAST_HOURS + 168)
+    h.forecast_lines = _csv(_FORECAST_HEADER, _FORECAST_QUIET_ROW, b"80,1.0,61,0", row_count=_PAST_HOURS + 200)
+    h.air_lines = _csv(_AIR_HEADER, _AIR_QUIET_ROW, b"60,0.0,0.0,0.0,0.0,0.0", row_count=_PAST_HOURS + 168)
 
     h.fetch()
 
     (forecast_url, _), (air_url, _) = h.get_calls
     assert "forecast_hours=200" in forecast_url
     assert "forecast_hours=168" in air_url
-    assert h.service._generation == 1
+    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
 
 
 def test_warnings_over_by_the_fetch_are_not_published():
@@ -532,7 +526,6 @@ def test_second_fetch_refreshes_the_streams():
     h.advance(1000)
     h.fetch()
 
-    assert h.service._generation == 2
     assert h.visible_names() == [["SNOW"], [], [], ["GRASS"]]
 
 
@@ -556,7 +549,6 @@ def test_a_failed_forecast_request_skips_the_air_request_and_keeps_the_prior_sna
 
     assert h.requested_hosts()[2:] == ["api.open-meteo.com"]
     assert h.service._failures == 1
-    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
 
 
@@ -570,7 +562,6 @@ def test_a_failed_air_request_publishes_no_stream_and_backs_off():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.service._generation == 1
     assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
 
 
@@ -581,5 +572,24 @@ def test_a_truncated_body_backs_off_without_publishing():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.service._generation == 0
     assert h.visible_names() == [[], [], [], []]
+
+
+@pytest.mark.parametrize("source", ["forecast", "air"], ids=["forecast-truncated", "air-truncated"])
+def test_a_parse_failure_keeps_every_previously_published_stream(source: str) -> None:
+    h = _Harness()
+    h.fetch()
+    previous = [stream(h.utc_now) for stream in h.streams]
+    h.forecast_lines = _forecast_csv(b"80,1.0,71,0")
+    h.air_lines = _air_csv(b"10,0.0,0.0,2.0,0.0,0.0")
+    if source == "forecast":
+        h.forecast_lines.pop()
+    else:
+        h.air_lines.pop()
+    h.advance(1000)
+
+    h.fetch()
+
+    assert h.service._failures == 1
+    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert all(stream(h.utc_now) is old for stream, old in zip(h.streams, previous))
