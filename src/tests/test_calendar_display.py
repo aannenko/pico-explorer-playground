@@ -107,16 +107,24 @@ def _stream(events: list[Event]):  # -> (int) -> list[Event]
     return lambda now_utc: events
 
 
-def _display(*streams, now: int = _NOW, to_local=None):  # to_local: (int) -> int
-    """Each stream is a list of events, or a getter; local time is UTC unless ``to_local`` says otherwise."""
+def _display(
+    *streams,
+    now: int = _NOW,
+    to_local=None,  # (int) -> int
+    refresh_failed: list[bool] | None = None,
+):
+    """Each stream is a list of events, or a getter; local time is UTC unless ``to_local`` says otherwise, and no
+    refresh has failed unless ``refresh_failed`` holds ``[True]``."""
     gfx = _Raster()
     geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
     clock = [now]
+    failed = refresh_failed if refresh_failed is not None else [False]
     display = calendar.Display(
         geometry,
         [_stream(stream) if isinstance(stream, list) else stream for stream in streams],
         get_utc_time=lambda: clock[0],
         to_local=to_local or (lambda utc_epoch: utc_epoch),
+        get_refresh_failed=lambda: failed[0],
     )
     return display, gfx, clock
 
@@ -202,7 +210,7 @@ class TestLifecycle:
         gfx = _Raster()
         display = calendar.Display(
             calendar.Geometry(gfx, "bitmap8", 8, 3, 2), [], get_utc_time=failing_utc_time,
-            to_local=lambda utc_epoch: utc_epoch,
+            to_local=lambda utc_epoch: utc_epoch, get_refresh_failed=lambda: False,
         )
         with pytest.raises(MemoryError):
             display.initialize()
@@ -327,6 +335,26 @@ class TestFailingStream:
 
         with pytest.raises(RuntimeError, match="no room for header"):
             calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
+
+    def test_a_failed_refresh_marks_the_frame_over_every_streams_events(self, fake_ticks):
+        failed = [True]
+        display, gfx, clock = _display(
+            [_ev("RAIN", _at(11, 0))], [_ev("UV", _at(12, 0))], now=_at(9, 12, 20), refresh_failed=failed
+        )
+
+        display.initialize()
+
+        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["RAIN", "UV"]
+        assert ("Thu 4 Jun", 75, 0, RED) in gfx.texts
+        assert ("!", 231, 3, WHITE) in gfx.texts
+
+        failed[0] = False
+        fake_ticks[0] = 40_000
+        clock[0] = _at(9, 13)
+        display.render()
+
+        assert ("Thu 4 Jun", 75, 0, GRAY) in gfx.texts
+        assert gfx.at(_BADGE_X, _BADGE_Y) == BLACK
 
 
 # ---------------------------------------------------------------------------

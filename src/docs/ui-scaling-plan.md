@@ -116,7 +116,7 @@ Panels are rarely an exact multiple of 240×240 (800×480 at `S = 2` leaves a
 320 px strip, for example). Width already flows into the space fillers
 (Sensors quadrants and graphs, Calendar fields); Ring, Status and the Sensors
 badge centre. Height gives the Calendar more slots, and each network stream
-keeps two events per slot (`app._stream_event_cap`).
+keeps one event per slot (`app._stream_event_cap`).
 
 ## Open questions (settle in the plan review)
 

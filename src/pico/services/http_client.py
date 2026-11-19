@@ -3,8 +3,6 @@ import time
 
 from micropython import const
 
-from utilities.log import log_exception
-
 try:
     import urequests as _requests
 except ImportError:
@@ -59,56 +57,58 @@ def _classify_oserror(exc: OSError) -> HttpError:
     return HttpConnectError(str(exc))
 
 
-def get_lines(
-    url: str,
-    on_line,  # (bytes) -> None
-    timeout_sec: int = 3,
-    max_line_bytes: int = _MAX_LINE_BYTES,
-    deadline_ms: int = _DEADLINE_MS,
-) -> None:
-    """GET ``url`` and pass each line of its body to ``on_line``, as bytes without its ``\\n`` or ``\\r\\n``.
+def _trim_line(line: bytes, max_line_bytes: int) -> bytes:
+    """Return ``line`` without a trailing ``\\r``; raise ``HttpParseError`` if the rest is over ``max_line_bytes``."""
+    if line.endswith(b"\r"):
+        line = line[:-1]
+    if len(line) > max_line_bytes:
+        raise HttpParseError("line too long")
+    return line
 
-    Streams the body, holding at most one read and one line, so its size doesn't matter.  ``timeout_sec`` bounds
-    each socket operation, and ``deadline_ms`` the body, checked between reads of up to 256 bytes: a peer that
-    trickles bytes can stretch one read well beyond it.  Raises an ``HttpError`` subclass for transport, status and
-    protocol failures, ``HttpParseError`` for a line longer than ``max_line_bytes`` and ``HttpTimeoutError`` past the
-    deadline; whatever ``on_line`` raises propagates, and anything else (e.g. ``MemoryError``) is logged and
-    re-raised.
+
+class Response:
+    """An open response body, read once; use it in a ``with`` block, which closes it however the block ends.
+
+    Holds only the body stream, not ``requests``' response, so its parsed headers can be collected while the body
+    streams.
     """
-    try:
-        _get_lines(url, on_line, timeout_sec, max_line_bytes, deadline_ms)
-    except HttpError:
-        raise
-    except Exception as exc:
-        log_exception("[http] unclassified failure:", exc)
-        raise
 
+    def __init__(self, body, deadline_ms: int) -> None:  # body: has readinto(buf) -> int and close()
+        self._body = body
+        self._deadline_ms = deadline_ms
 
-def _get_lines(url: str, on_line, timeout_sec: int, max_line_bytes: int, deadline_ms: int) -> None:
-    gc.collect()  # reduces fragmented-heap allocation failures
-    response = None
-    try:
-        try:
-            response = _requests.get(url, timeout=timeout_sec)
-        except OSError as exc:
-            raise _classify_oserror(exc)
-        except (ValueError, NotImplementedError) as exc:
-            # requests raises these for a bad status line, an unsupported scheme or a redirect it can't follow.
-            raise HttpProtocolError(str(exc))
+    def __enter__(self):  # -> Response
+        return self
 
-        status = response.status_code
-        if status < 200 or status > 299:
-            raise HttpStatusError(status)
+    def __exit__(self, exc_type: type | None, exc: BaseException | None, tb) -> None:  # tb: traceback | None
+        self.close()
 
+    def close(self) -> None:
+        """Close the socket; closing again does nothing."""
+        body = self._body
+        if body is not None:
+            self._body = None
+            body.close()
+
+    def lines(self, max_line_bytes: int = _MAX_LINE_BYTES):  # -> Iterator[bytes]
+        """Yield each line of the body as bytes without its ``\\n`` or ``\\r\\n``, the last one even without either.
+
+        Holds at most one read of up to 256 bytes and one line, so the body's size doesn't matter.  The deadline,
+        counted from the first read, is checked between reads: a peer that trickles bytes can stretch one read well
+        beyond it.  Raises ``HttpParseError`` for a line longer than ``max_line_bytes``, ``HttpTimeoutError`` past the
+        deadline, and an ``HttpError`` subclass for a failed read.
+        """
+        # Warning: close() closes the socket, not a finally here: MicroPython never finalises a generator that stops
+        # before its end, so such a finally would leave the socket open whenever a caller stops early.
+        body = self._body
         # A chunked or sized body is a BodyStream, which has no readline(), so lines are split here.  Reading into
         # one buffer saves the n-byte bytearray and its slice that each BodyStream.read(n) allocates.
-        body = response.raw
         buf = bytearray(_READ_BYTES)
         view = memoryview(buf)
         start_ms = time.ticks_ms()
         pending = b""
         while True:
-            if time.ticks_diff(time.ticks_ms(), start_ms) > deadline_ms:
+            if time.ticks_diff(time.ticks_ms(), start_ms) > self._deadline_ms:
                 raise HttpTimeoutError("body read deadline")
             try:
                 got = body.readinto(buf)
@@ -123,79 +123,54 @@ def _get_lines(url: str, on_line, timeout_sec: int, max_line_bytes: int, deadlin
             lines = (pending + view[:got]).split(b"\n")
             pending = lines.pop()
             for line in lines:
-                _deliver(line, on_line, max_line_bytes)
-            if len(pending) > max_line_bytes:
+                yield _trim_line(line, max_line_bytes)
+            # One byte over the limit is allowed only as the \r of a \r\n that the next read completes.
+            if len(pending) > max_line_bytes and (len(pending) > max_line_bytes + 1 or not pending.endswith(b"\r")):
                 raise HttpParseError("line too long")
         if pending:
-            _deliver(pending, on_line, max_line_bytes)
-    finally:
-        if response is not None:
-            response.close()
-
-
-def _deliver(line: bytes, on_line, max_line_bytes: int) -> None:
-    if line.endswith(b"\r"):
-        line = line[:-1]
-    if len(line) > max_line_bytes:
-        raise HttpParseError("line too long")
-    on_line(line)
+            yield _trim_line(pending, max_line_bytes)
 
 
 class HttpClient:
-    """Run one complete fetch job at a time on the main thread, and stream HTTP lines with one socket timeout.
+    """Plain-HTTP GETs whose bodies stream through a ``Response``, with one socket timeout.
 
-    Share one client across sources and submit from periodic ticks.  Busy or offline submissions aren't queued: retry
-    on later ticks so competing fetches leave an opportunity for rendering between them.
+    Warning: a request blocks the main thread, freezing rendering and button handling until it returns, so make it
+    from a deferred job (``TickScheduler.try_defer``).
     """
 
     def __init__(
         self,
         wifi,  # has is_connected() -> bool
-        schedule,  # (callback, arg) -> None
         timeout_sec: int,
-        http_get_lines=get_lines,  # (url, on_line, timeout_sec, max_line_bytes, deadline_ms) -> None
     ) -> None:
         self._wifi = wifi
-        self._schedule = schedule
         self._timeout_sec = timeout_sec
-        self._http_get_lines = http_get_lines
-        self._fetcher = None  # Callable[[], None] | None
-        self._run_ref = self._run
 
-    def try_fetch(self, fetcher) -> bool:  # fetcher: () -> None
-        """Queue ``fetcher`` if WiFi is up and no job is queued or running; return whether accepted.
+    def get(self, url: str, deadline_ms: int = _DEADLINE_MS) -> Response:
+        """GET ``url`` and return its body once the status is 2xx.
 
-        Scheduling errors propagate after releasing the slot.
+        ``timeout_sec`` bounds each socket operation but not the DNS lookup, and ``deadline_ms`` the body's reads, as
+        ``Response.lines`` says.  Raises ``HttpConnectError`` while WiFi is down, before any lookup or socket, and
+        otherwise an ``HttpError`` subclass for a transport, status or protocol failure.  Whatever this raises once
+        ``requests`` has returned a response, it closes it first.
         """
-        if self._fetcher is not None or not self._wifi.is_connected():
-            return False
-        self._fetcher = fetcher
+        if not self._wifi.is_connected():
+            raise HttpConnectError("offline")
+        gc.collect()  # reduces fragmented-heap allocation failures
         try:
-            self._schedule(self._run_ref, 0)
-        except Exception:
-            self._fetcher = None
+            # requests closes its socket itself only on OSError, leaving any other failure before it returns to the
+            # socket's finaliser at a later collection; a redirect also drops the timeout.
+            response = _requests.get(url, timeout=self._timeout_sec)
+        except OSError as exc:
+            raise _classify_oserror(exc)
+        except (ValueError, NotImplementedError) as exc:
+            # requests raises these for a bad status line, an unsupported scheme or a redirect it can't follow.
+            raise HttpProtocolError(str(exc))
+        try:
+            status = response.status_code
+            if status < 200 or status > 299:
+                raise HttpStatusError(status)
+            return Response(response.raw, deadline_ms)
+        except BaseException:
+            response.close()
             raise
-        return True
-
-    def _run(self, _: int) -> None:
-        try:
-            fetcher = self._fetcher
-            assert fetcher is not None
-            fetcher()
-        finally:
-            self._fetcher = None
-
-    def stream_lines(
-        self,
-        url: str,
-        on_line,  # (bytes) -> None
-        max_line_bytes: int = _MAX_LINE_BYTES,
-        deadline_ms: int = _DEADLINE_MS,
-    ) -> None:
-        """Pass lines to ``on_line`` as ``get_lines`` does, with the client's socket timeout.
-
-        Blocks the main thread, so call it from a submitted fetch job.
-        """
-        self._http_get_lines(
-            url, on_line, timeout_sec=self._timeout_sec, max_line_bytes=max_line_bytes, deadline_ms=deadline_ms
-        )

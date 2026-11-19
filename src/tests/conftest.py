@@ -390,15 +390,19 @@ def utc_epoch(*args) -> int:
     return int(_calendar_mod.timegm(args))
 
 
-class _FakeBody:
+class FakeBody:
     """Stub of a response's ``raw`` stream: ``readinto(buf)`` fills ``buf`` from the next chunk, then returns 0, or
-    raises ``raise_at_end`` once the chunks run out."""
+    raises ``raise_at_end`` once the chunks run out; ``read_sizes`` records each buffer's length and ``closed``
+    records ``close()``."""
 
-    def __init__(self, chunks, raise_at_end) -> None:
+    def __init__(self, chunks, raise_at_end=None) -> None:
         self._chunks = list(chunks)
         self._raise_at_end = raise_at_end
+        self.read_sizes: list[int] = []
+        self.closed = False
 
     def readinto(self, buf) -> int:
+        self.read_sizes.append(len(buf))
         if not self._chunks:
             if self._raise_at_end is not None:
                 raise self._raise_at_end
@@ -410,17 +414,24 @@ class _FakeBody:
         buf[:len(chunk)] = chunk
         return len(chunk)
 
+    def close(self) -> None:
+        self.closed = True
+
 
 class FakeResponse:
-    """Stub of a urequests Response: ``status_code``, ``raw``, ``close()``."""
+    """Stub of a urequests Response: ``status_code``, ``raw``, and ``close()``, which closes ``raw`` as requests'
+    does."""
 
     def __init__(self, status_code: int, chunks, raise_at_end) -> None:
         self.status_code = status_code
-        self.raw = _FakeBody(chunks, raise_at_end)
-        self.closed = False
+        self.raw = FakeBody(chunks, raise_at_end)
+
+    @property
+    def closed(self) -> bool:
+        return self.raw.closed
 
     def close(self) -> None:
-        self.closed = True
+        self.raw.close()
 
 
 class FakeUrequests:

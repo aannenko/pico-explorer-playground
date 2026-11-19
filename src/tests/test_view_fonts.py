@@ -110,6 +110,7 @@ def _build_calendar(panel: _Panel, clock: _Clock) -> calendar.Display:
         streams=[lambda now_utc: [create_event("WORK", _NOW_SEC - 600, 4 * 3600)]],
         get_utc_time=clock.now,
         to_local=lambda utc_epoch: utc_epoch,
+        get_refresh_failed=lambda: False,
     )
 
 

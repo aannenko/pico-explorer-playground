@@ -69,7 +69,7 @@ def _fitting_prefix(gfx: PicoGraphics, text: str, room_px: int, text_scale: int)
 class Geometry:
     """Pixel layout of the Calendar view: a header over ``slot_count`` equal slots, each a colour field with room
     for a progress bar under it, right of a rail with the start times left of it.  The header keeps room after the
-    widest date for the badge that marks a failed stream.
+    widest date for the badge that marks a failed source.
 
     Raises ``RuntimeError`` if the widest header and the badge don't fit the panel width or fewer than two slots fit
     under it.
@@ -129,8 +129,9 @@ class Display(_Display):
     Each of ``streams`` is a getter ``(now_utc) -> list[Event]`` of a stream's events in start order; they may include
     events already over or starting after the horizon.  The calendar reads each list only while drawing and never
     changes it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a
-    red date with a badge after it.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to the
-    local epoch the header, start times and days are drawn in.
+    red date with a badge after it; the same mark shows over every stream's events while ``get_refresh_failed`` says
+    a source's latest refresh failed.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to
+    the local epoch the header, start times and days are drawn in.
     """
 
     def __init__(
@@ -139,6 +140,7 @@ class Display(_Display):
         streams: list,  # list[(int) -> list[Event]]
         get_utc_time,  # () -> int
         to_local,  # (int) -> int
+        get_refresh_failed,  # () -> bool
     ) -> None:
         self._geom = geometry
         self._gfx = geometry.pico_graphics
@@ -149,6 +151,7 @@ class Display(_Display):
         self._cursors = [0] * len(streams)
         self._get_utc_time = get_utc_time
         self._to_local = to_local
+        self._get_refresh_failed = get_refresh_failed
         self._active = False
         self._next_redraw_ms = 0
 
@@ -183,7 +186,7 @@ class Display(_Display):
     def _draw(self, now_utc: int, now_local: int) -> None:
         window_end = now_utc + HORIZON_SEC
         streams = self._streams
-        stream_failed = False
+        source_failed = self._get_refresh_failed()
         for i in range(len(streams)):
             self._cursors[i] = 0
             try:
@@ -191,7 +194,7 @@ class Display(_Display):
                 self._skip_over(i, now_utc)
             except Exception as exc:
                 self._visible[i] = ()
-                stream_failed = True
+                source_failed = True
                 log_exception("[calendar] stream err:", exc)
 
         geom = self._geom
@@ -199,7 +202,7 @@ class Display(_Display):
         gfx.set_font(geom.font)
         gfx.set_pen(BLACK)
         gfx.clear()
-        self._draw_header(now_local, stream_failed)
+        self._draw_header(now_local, source_failed)
         gfx.set_pen(DARK_GRAY)
         gfx.rectangle(geom.rail_x - _RAIL_PX // 2, geom.body_top, _RAIL_PX, geom.height - geom.body_top)
 
@@ -250,15 +253,15 @@ class Display(_Display):
                     best_start = start
         return best_index
 
-    def _draw_header(self, now_local: int, stream_failed: bool) -> None:
+    def _draw_header(self, now_local: int, source_failed: bool) -> None:
         geom = self._geom
         gfx = self._gfx
         time_text, date_text = format_header_time(now_local)
         gfx.set_pen(WHITE)
         gfx.text(time_text, 0, 0, scale=geom.header_text_scale)
-        gfx.set_pen(RED if stream_failed else GRAY)
+        gfx.set_pen(RED if source_failed else GRAY)
         gfx.text(date_text, geom.date_x, 0, scale=geom.header_text_scale)
-        if stream_failed:
+        if source_failed:
             gfx.circle(geom.badge_x, geom.badge_y, _BADGE_R_PX)
             gfx.set_pen(LABEL_FOR_SLOT[RED])
             gfx.text("!", geom.badge_text_x, geom.badge_text_y, scale=_BADGE_TEXT_SCALE)

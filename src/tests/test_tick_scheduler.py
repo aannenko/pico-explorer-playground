@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from services.tick_scheduler import TickScheduler
 
 from conftest import make_timer_factory
@@ -130,4 +132,112 @@ def test_tick_clears_pending_even_if_subscriber_raises() -> None:
         sched._tick(0)
     except RuntimeError:
         pass
+    assert sched._pending is False
+
+
+def test_a_job_deferred_by_a_subscriber_runs_once_after_every_subscriber_of_that_tick() -> None:
+    sched, _, _ = _mk_scheduler()
+    calls: list[str] = []
+
+    def submit() -> None:
+        calls.append("submit")
+        if len(calls) == 1:
+            assert sched.try_defer(lambda: calls.append("job")) is True
+
+    sched.register(submit)
+    sched.register(lambda: calls.append("render"))
+
+    sched._tick(0)
+    sched._tick(0)
+
+    assert calls == ["submit", "render", "job", "submit", "render"]
+
+
+def test_a_job_deferred_between_ticks_runs_after_the_next_tick_s_subscribers() -> None:
+    sched, _, _ = _mk_scheduler()
+    calls: list[str] = []
+    sched.register(lambda: calls.append("render"))
+
+    assert sched.try_defer(lambda: calls.append("job")) is True
+    assert calls == []
+
+    sched._tick(0)
+
+    assert calls == ["render", "job"]
+
+
+def test_the_slot_refuses_another_job_while_one_is_held_or_running() -> None:
+    sched, _, _ = _mk_scheduler()
+    calls: list[str] = []
+
+    def second() -> None:
+        calls.append("second")
+
+    def first() -> None:
+        calls.append("first")
+        assert sched.try_defer(second) is False
+
+    assert sched.try_defer(first) is True
+    assert sched.try_defer(second) is False
+
+    sched._tick(0)
+    sched._tick(0)
+    assert calls == ["first"]
+
+    assert sched.try_defer(second) is True
+    sched._tick(0)
+    assert calls == ["first", "second"]
+
+
+def test_a_raising_job_is_logged_and_frees_the_slot(capsys) -> None:
+    sched, _, _ = _mk_scheduler()
+    calls: list[str] = []
+
+    def fail() -> None:
+        raise RuntimeError("fetch failed")
+
+    sched.try_defer(fail)
+    sched._tick(0)
+
+    out = capsys.readouterr().out
+    assert out.startswith("[tick] job err:")
+    assert "RuntimeError: fetch failed" in out
+    assert sched.try_defer(lambda: calls.append("recovered")) is True
+    sched._tick(0)
+    assert calls == ["recovered"]
+
+
+def test_a_raising_subscriber_still_runs_the_deferred_job() -> None:
+    sched, _, _ = _mk_scheduler()
+    calls: list[str] = []
+
+    def fail() -> None:
+        raise RuntimeError("boom")
+
+    sched.register(fail)
+    sched.try_defer(lambda: calls.append("job"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        sched._tick(0)
+
+    assert calls == ["job"]
+    assert sched.try_defer(lambda: None) is True
+
+
+def test_a_raising_job_does_not_hide_a_raising_subscriber(capsys) -> None:
+    sched, _, _ = _mk_scheduler()
+
+    def fail_subscriber() -> None:
+        raise RuntimeError("subscriber failed")
+
+    def fail_job() -> None:
+        raise ValueError("job failed")
+
+    sched.register(fail_subscriber)
+    sched.try_defer(fail_job)
+
+    with pytest.raises(RuntimeError, match="subscriber failed"):
+        sched._tick(0)
+
+    assert "ValueError: job failed" in capsys.readouterr().out
     assert sched._pending is False

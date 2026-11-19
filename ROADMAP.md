@@ -25,15 +25,17 @@ leaves them ambiguous.
   each later day. Every row is the same height, so events beyond the last
   row are just not shown. A stream that fails to list its events is left out
   of that minute's redraw, which still shows the other streams under a red
-  date with a red "!" badge after it.
+  date with a red "!" badge after it; the same mark shows while a network
+  source's latest refresh has failed or WiFi is down when one is due.
 
 - **Calendar streams** — built-in streams that work out of the box, each a
   long-lived data source the calendar reads passively:
   - **Waste collection** — local wall-clock pickups from `config`, computed on-device.
   - **Precipitation**, **UV**, **air quality** (European AQI) and **pollen**
     (the dominant species) — warning levels for the past day and the week
-    ahead from Open-Meteo's forecast and air-quality APIs, fetched together,
-    adjacent hours of one warning joined at their highest level; if either
+    ahead from Open-Meteo's forecast and air-quality APIs, fetched together
+    every hour, adjacent hours of one warning joined at their highest level;
+    each keeps only as many warnings as the calendar has rows. If either
     request fails, all four keep their last warnings until a retry succeeds.
     Disabled until coordinates are set in `config.py`.
 

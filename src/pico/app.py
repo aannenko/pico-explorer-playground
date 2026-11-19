@@ -43,7 +43,7 @@ _SECONDARY_TEXT_SCALE = const(2)
 # public NTP pool that often.
 _NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
 
-_STREAM_REFRESH_MS = const(30 * 60 * 1000)
+_STREAM_REFRESH_MS = const(60 * 60 * 1000)
 
 _STREAM_FORECAST_HOURS = calendar.HORIZON_SEC // _SEC_PER_HOUR
 # So a warning already in progress shows when it began, if that was within a day.
@@ -167,15 +167,18 @@ def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
 
 
 def _stream_event_cap(geometry: calendar.Geometry) -> int:
-    """Return how many events a network stream keeps: the calendar shows at most ``slot_count`` of one stream, and
-    as many more can end before the next fetch replaces them."""
-    return 2 * geometry.slot_count
+    """Return how many events a network stream keeps: as many as the calendar can show of one stream, to save heap.
+
+    Once one of them ends, its slot can stay empty until the next refresh brings a later event.
+    """
+    return geometry.slot_count
 
 
 def _build_calendar_display(
     geometry: calendar.Geometry,
     time_service: TimeService,
     warning_streams: list,  # list[(int) -> list[Event]]
+    get_refresh_failed,  # () -> bool
 ) -> calendar.Display:
     return calendar.Display(
         geometry=geometry,
@@ -185,6 +188,7 @@ def _build_calendar_display(
         ] + warning_streams,
         get_utc_time=time_service.utc_now,
         to_local=time_service.to_local,
+        get_refresh_failed=get_refresh_failed,
     )
 
 
@@ -244,7 +248,7 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
         tick_scheduler=tick_scheduler,
     )
 
-    http_client = HttpClient(wifi_client, schedule, config.HTTP_TIMEOUT_SEC)
+    http_client = HttpClient(wifi_client, config.HTTP_TIMEOUT_SEC)
     calendar_geometry = _build_calendar_geometry(pico_graphics)
     stream_event_cap = _stream_event_cap(calendar_geometry)
     openmeteo_service = OpenMeteoService(
@@ -264,7 +268,9 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
 
     countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
     # Warnings tie in this order: precipitation, UV, AQI, pollen.
-    calendar_display = _build_calendar_display(calendar_geometry, time_service, openmeteo_service.build_streams())
+    calendar_display = _build_calendar_display(
+        calendar_geometry, time_service, openmeteo_service.build_streams(), openmeteo_service.refresh_failed
+    )
 
     display_manager = DisplayManager(
         displays=[sensors_display, countdown_display, calendar_display],

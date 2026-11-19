@@ -122,44 +122,42 @@ class _AirHours:
         self.pollen.add(utc_epoch, self._pollen_labels[best_index] if best_level else None, best_level)
 
 
-class _HourlyCsv:
-    """Parser for Open-Meteo's hourly CSV body, fed a line at a time, that passes each row to ``on_hour``.
+def _parse_hourly_csv(
+    lines,  # Iterable[bytes]
+    metrics: str,
+    row_count: int,
+    on_hour,  # (int, list[int | float | None]) -> None
+) -> None:
+    """Parse Open-Meteo's hourly CSV body from ``lines``, passing each row to ``on_hour``, and read it to its end.
 
     ``on_hour(utc_epoch, values)`` gets each hour's UTC start, in ascending order, and its values in ``metrics``
     order: an int where the field has digits only, a float for any other number, ``None`` where one is missing.  A
     row's values list is new for each call.  Raises ``HttpParseError`` unless the header names ``time`` and then
     ``metrics`` in order, and the body holds ``row_count`` rows, an hour apart, of a number for each.
     """
-
-    def __init__(
-        self,
-        metrics: str,
-        row_count: int,
-        on_hour,  # (int, list[int | float | None]) -> None
-    ) -> None:
-        self._names = bytes(metrics, "utf-8").split(b",")
-        self._row_count = row_count
-        self._on_hour = on_hour
-        self._lines_before_header = 0
-        self._header_seen = False
-        self._rows_seen = 0
-        self._last_utc = 0
-
-    def feed(self, line: bytes) -> None:
-        # Error texts of up to 10 bytes are interned once, where longer ones would each be a str on the heap.
-        if not self._header_seen:
+    # One loop with locals rather than a reader fed a line at a time, whose method would allocate its frame on the heap
+    # for every line.  Error texts of up to 10 bytes are interned once, where longer ones would each be a str on the
+    # heap.
+    names = bytes(metrics, "utf-8").split(b",")
+    field_count = len(names) + 1
+    lines_before_header = 0
+    header_seen = False
+    rows_seen = 0
+    last_utc = 0
+    for line in lines:
+        if not header_seen:
             if line.startswith(b"time,"):
-                self._check_header(line)
-                self._header_seen = True
-                return
-            self._lines_before_header += 1
-            if self._lines_before_header > _MAX_LINES_BEFORE_HEADER:
+                _check_header(line, names)
+                header_seen = True
+                continue
+            lines_before_header += 1
+            if lines_before_header > _MAX_LINES_BEFORE_HEADER:
                 raise HttpParseError("bad header")
-            return
+            continue
         if not line:
-            return
+            continue
         values = line.split(b",")
-        if self._rows_seen == self._row_count or len(values) != len(self._names) + 1:
+        if rows_seen == row_count or len(values) != field_count:
             raise HttpParseError("bad row")
         # The values replace their fields in the split list, rather than filling a second list.
         try:
@@ -178,28 +176,25 @@ class _HourlyCsv:
                     values[i] = float(field)
         except ValueError:
             raise HttpParseError("bad row")
-        if self._rows_seen and utc_epoch != self._last_utc + _SEC_PER_HOUR:
+        if rows_seen and utc_epoch != last_utc + _SEC_PER_HOUR:
             raise HttpParseError("bad row")
-        self._last_utc = utc_epoch
-        self._rows_seen += 1
-        self._on_hour(utc_epoch, values)
+        last_utc = utc_epoch
+        rows_seen += 1
+        on_hour(utc_epoch, values)
+    if not header_seen or rows_seen != row_count:
+        raise HttpParseError("rows short")
 
-    def finish(self) -> None:
-        """Raise ``HttpParseError`` unless every row has been fed."""
-        if not self._header_seen or self._rows_seen != self._row_count:
-            raise HttpParseError("rows short")
 
-    def _check_header(self, line: bytes) -> None:
-        columns = line.split(b",")
-        names = self._names
-        if len(columns) != len(names) + 1:
+def _check_header(line: bytes, names: list[bytes]) -> None:
+    columns = line.split(b",")
+    if len(columns) != len(names) + 1:
+        raise HttpParseError("bad header")
+    for i in range(len(names)):
+        column = columns[i + 1]
+        name = names[i]
+        # Open-Meteo names a column "<metric> (<unit>)".
+        if column != name and not column.startswith(name + b" ("):
             raise HttpParseError("bad header")
-        for i in range(len(names)):
-            column = columns[i + 1]
-            name = names[i]
-            # Open-Meteo names a column "<metric> (<unit>)".
-            if column != name and not column.startswith(name + b" ("):
-                raise HttpParseError("bad header")
 
 
 class OpenMeteoService(EventStreamService):
@@ -207,8 +202,7 @@ class OpenMeteoService(EventStreamService):
     forecast request and one air-quality request.
 
     The streams are published together: if either request fails, none is, and both are retried after a backoff.
-    Warning: both requests run in one scheduled callback, which blocks rendering and button handling until both
-    return.
+    Warning: both requests run in one deferred job, which blocks rendering and button handling until both return.
 
     ``pollen_thresholds`` lists ``(species, levels)``: an Open-Meteo pollen name without its ``_pollen`` suffix, and
     the ascending grains/m³ that start levels 1-3.  Each stream looks from ``past_hours`` back to ``forecast_hours``
@@ -226,14 +220,15 @@ class OpenMeteoService(EventStreamService):
         aqi_thresholds: tuple[float, float, float],
         pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
         http_client: HttpClient,
+        tick_scheduler: TickScheduler,
         interval_ms: int,
         forecast_hours: int,
         past_hours: int,
         max_events: int,
         get_utc_time=time.time,  # () -> int
         get_ticks_ms=time.ticks_ms,  # () -> int
-        tick_scheduler: TickScheduler | None = None,
     ) -> None:
+        self._http_client = http_client
         self._lat = latitude
         self._lon = longitude
         self._prob_threshold_pct = prob_threshold_pct
@@ -246,10 +241,7 @@ class OpenMeteoService(EventStreamService):
         self._max_events = max_events
         self._get_utc_time = get_utc_time
         enabled = not (latitude == 0.0 and longitude == 0.0)
-        super().__init__(
-            http_client, interval_ms, "meteo", enabled, stream_count=4,
-            get_ticks_ms=get_ticks_ms, tick_scheduler=tick_scheduler,
-        )
+        super().__init__(tick_scheduler, interval_ms, "meteo", enabled, stream_count=4, get_ticks_ms=get_ticks_ms)
         if enabled:
             print("[meteo] enabled: lat=%s lon=%s" % (latitude, longitude))
         else:
@@ -281,16 +273,15 @@ class OpenMeteoService(EventStreamService):
         on_hour,  # (int, list[int | float | None]) -> None
     ) -> None:
         """Pass each hour of ``metrics`` at ``base_url``, from ``past_hours`` back to ``forecast_hours`` ahead, to
-        ``on_hour``, as ``_HourlyCsv`` does.
+        ``on_hour``, as ``_parse_hourly_csv`` does.
 
-        Raises what ``_HourlyCsv`` and ``HttpClient.stream_lines`` raise.
+        Raises what ``_parse_hourly_csv``, ``HttpClient.get`` and ``Response.lines`` raise.
         """
-        reader = _HourlyCsv(metrics, self._past_hours + forecast_hours, on_hour)
         # CSV, unlike JSON, parses a row at a time.  Rows are UTC Unix times: in a time zone, every row would take
-        # the offset in force when it was requested, an hour out past a DST change.
-        self._http_client.stream_lines(
+        # the offset in force when it was requested, an hour out past a DST change.  The URL isn't kept in a local,
+        # so it's garbage while the body streams.
+        with self._http_client.get(
             "%s?format=csv&timeformat=unixtime&timezone=GMT&latitude=%s&longitude=%s&hourly=%s&past_hours=%s"
-            "&forecast_hours=%s" % (base_url, self._lat, self._lon, metrics, self._past_hours, forecast_hours),
-            reader.feed,
-        )
-        reader.finish()
+            "&forecast_hours=%s" % (base_url, self._lat, self._lon, metrics, self._past_hours, forecast_hours)
+        ) as response:
+            _parse_hourly_csv(response.lines(), metrics, self._past_hours + forecast_hours, on_hour)

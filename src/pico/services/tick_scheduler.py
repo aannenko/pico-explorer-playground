@@ -3,12 +3,14 @@ from micropython import const
 
 from machine import Timer
 
+from utilities.log import log_exception
+
 
 _MIN_PERIOD_MS = const(100)
 
 
 class TickScheduler:
-    """Fixed-period tick on one ``machine.Timer``, shared by registered callbacks.
+    """Fixed-period tick on one ``machine.Timer``, shared by registered callbacks, and one deferred job.
 
     A ``tick_period_ms`` below ``_MIN_PERIOD_MS`` is raised to it.
     """
@@ -20,6 +22,7 @@ class TickScheduler:
         timer_factory=Timer,  # (int) -> Timer
     ) -> None:
         self._subscribers: list = []  # list[Callable[[], None]]
+        self._job = None  # Callable[[], None] | None
         self._schedule = schedule
         self._tick_ref = self._tick
         self._schedule_tick_ref = self._schedule_tick
@@ -47,8 +50,8 @@ class TickScheduler:
 
         Callbacks run from the ``schedule`` queue on the main thread, not in an
         IRQ, so they may allocate but should return quickly: blocking work
-        freezes rendering and delays button actions.  One that raises skips
-        the rest of that tick's callbacks.
+        freezes rendering and delays button actions, so defer it with
+        ``try_defer``.  One that raises skips the rest of that tick's callbacks.
         """
         if callback not in self._subscribers:
             self._subscribers.append(callback)
@@ -60,6 +63,20 @@ class TickScheduler:
         except ValueError:
             pass
 
+    def try_defer(self, job) -> bool:  # job: () -> None
+        """Run ``job()`` once, after every subscriber of the tick in progress, or else of the next tick; return
+        whether it was accepted.
+
+        For blocking work, such as a network fetch: the display, a subscriber, has had its turn to draw before the job
+        blocks.  One job is held at a time, and another is refused until it returns, so a refused caller should retry
+        on a later tick, which leaves a tick of rendering between two jobs.  The job runs even if a subscriber raised,
+        and what the job raises is logged rather than propagated, so it can't hide a subscriber's exception.
+        """
+        if self._job is not None:
+            return False
+        self._job = job
+        return True
+
     def _tick(self, _: int) -> None:
         try:
             for callback in self._subscribers:
@@ -68,6 +85,17 @@ class TickScheduler:
             # Always clear _pending so one bad subscriber can't wedge
             # the scheduler permanently.
             self._pending = False
+            if self._job is not None:
+                self._run_job()
+
+    def _run_job(self) -> None:
+        # Its own method, so the frame _tick allocates on every tick doesn't grow.
+        try:
+            self._job()
+        except Exception as exc:
+            log_exception("[tick] job err:", exc)
+        finally:
+            self._job = None
 
     def _schedule_tick(self, _: Timer) -> None:
         # _pending collapses firings queued behind blocking work into one scheduled run.

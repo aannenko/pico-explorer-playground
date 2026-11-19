@@ -71,6 +71,7 @@ def test_cycle_to_calendar_after_month_away_draws_first_frame(
         app_module._build_calendar_geometry(panel),
         _time_service(lambda: clock[0]),
         [_no_events] * 4,
+        lambda: False,
     )
     manager = DisplayManager(
         [
@@ -127,6 +128,7 @@ def test_time_left_is_real_across_the_fall_back(app_module) -> None:
         app_module._build_calendar_geometry(panel),
         _time_service(lambda: utc),
         [lambda now_utc: [create_event("UV", utc - 600, end_utc - (utc - 600), color_index=STREAM_YELLOW)]],
+        lambda: False,
     )
 
     calendar.initialize()
@@ -146,7 +148,7 @@ def test_time_left_is_real_across_the_fall_back(app_module) -> None:
 def test_pickups_past_a_dst_change_keep_their_wall_clock_time(app_module, utc: int, agenda: tuple) -> None:
     panel = _Panel()
     calendar = app_module._build_calendar_display(
-        app_module._build_calendar_geometry(panel), _time_service(lambda: utc), [_no_events] * 4
+        app_module._build_calendar_geometry(panel), _time_service(lambda: utc), [_no_events] * 4, lambda: False
     )
 
     calendar.initialize()

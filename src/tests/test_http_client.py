@@ -1,4 +1,3 @@
-import micropython
 import pytest
 
 import services.http_client as http_client
@@ -10,16 +9,26 @@ from services.http_client import (
     HttpProtocolError,
     HttpStatusError,
     HttpTimeoutError,
-    get_lines,
 )
 
 _URL = "http://example.test/data"
 
 
-def _lines(**kwargs) -> list[bytes]:
-    received: list[bytes] = []
-    get_lines(_URL, received.append, **kwargs)
-    return received
+class _FakeWifi:
+    def __init__(self, connected: bool = True) -> None:
+        self.connected = connected
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+
+def _client(connected: bool = True) -> HttpClient:
+    return HttpClient(_FakeWifi(connected), timeout_sec=7)
+
+
+def _lines(deadline_ms: int = 10_000, **line_bounds) -> list[bytes]:
+    with _client().get(_URL, deadline_ms=deadline_ms) as response:
+        return list(response.lines(**line_bounds))
 
 
 def test_delivers_each_line_without_its_line_ending(fake_urequests):
@@ -60,13 +69,35 @@ def test_reads_at_most_256_bytes_at_a_time(fake_urequests):
     fake_urequests.chunks = [b"x" * 300 + b"\n"]
 
     assert _lines() == [b"x" * 300]
+    assert set(fake_urequests.responses[-1].raw.read_sizes) == {256}
+
+
+def test_the_default_bounds_take_512_byte_lines_and_10_seconds(fake_urequests, fake_ticks):
+    fake_urequests.chunks = [b"x" * 512 + b"\n", b"y" * 513 + b"\n"]
+    received = []
+
+    with pytest.raises(HttpParseError):
+        with _client().get(_URL) as response:
+            for line in response.lines():
+                received.append(line)
+    assert received == [b"x" * 512]
+
+    fake_urequests.chunks = [b"a\n", b"b\n", b"c\n"]
+    received = []
+    with pytest.raises(HttpTimeoutError):
+        with _client().get(_URL) as response:
+            for line in response.lines():
+                received.append(line)
+                fake_ticks[0] += 6_000
+    assert received == [b"a", b"b"]
 
 
 @pytest.mark.parametrize(
     "chunks",
     [
         [b"x" * 9 + b"\nok\n"],  # a completed line
-        [b"x" * 9, b"x\n"],  # a line still pending after a read
+        [b"x" * 10, b"x\n"],  # a line still pending after a read
+        [b"x" * 9],  # the final line
     ],
 )
 def test_a_line_over_the_limit_raises_parse_error_and_closes(fake_urequests, chunks):
@@ -78,22 +109,35 @@ def test_a_line_over_the_limit_raises_parse_error_and_closes(fake_urequests, chu
     assert fake_urequests.responses[-1].closed is True
 
 
-def test_a_line_at_the_limit_is_delivered(fake_urequests):
-    fake_urequests.chunks = [b"x" * 8 + b"\r\n"]
+@pytest.mark.parametrize("chunk", [b"x" * 9, b"x" * 10], ids=["one-byte-over-not-cr", "two-bytes-over"])
+def test_a_pending_line_over_the_limit_raises_before_the_next_read(fake_urequests, chunk):
+    fake_urequests.chunks = [chunk]
+    fake_urequests.raise_at_end = ValueError("Connection closed before body complete")
 
-    assert _lines(max_line_bytes=8) == [b"x" * 8]
+    with pytest.raises(HttpParseError):
+        _lines(max_line_bytes=8)
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [[b"x" * 8 + b"\r\n"], [b"x" * 8 + b"\r", b"\nok\n"]],
+    ids=["one-read", "crlf-split-across-reads"],
+)
+def test_a_line_at_the_limit_is_delivered(fake_urequests, chunks):
+    fake_urequests.chunks = chunks
+
+    assert _lines(max_line_bytes=8)[0] == b"x" * 8
 
 
 def test_body_past_the_deadline_raises_timeout(fake_urequests, fake_ticks):
     fake_urequests.chunks = [b"a\n", b"b\n"]
     received = []
 
-    def on_line(line):
-        received.append(line)
-        fake_ticks[0] += 600
-
     with pytest.raises(HttpTimeoutError):
-        get_lines(_URL, on_line, deadline_ms=500)
+        with _client().get(_URL, deadline_ms=500) as response:
+            for line in response.lines():
+                received.append(line)
+                fake_ticks[0] += 600
 
     assert received == [b"a"]
     assert fake_urequests.responses[-1].closed is True
@@ -101,37 +145,84 @@ def test_body_past_the_deadline_raises_timeout(fake_urequests, fake_ticks):
 
 def test_body_within_the_deadline_completes(fake_urequests, fake_ticks):
     fake_urequests.chunks = [b"a\n", b"b\n"]
+    received = []
 
-    def on_line(line):
-        fake_ticks[0] += 250
+    with _client().get(_URL, deadline_ms=500) as response:
+        for line in response.lines():
+            received.append(line)
+            fake_ticks[0] += 250
 
-    get_lines(_URL, on_line, deadline_ms=500)
+    assert received == [b"a", b"b"]
 
 
-def test_what_on_line_raises_propagates_and_closes(fake_urequests):
+def test_an_exception_in_the_block_closes_the_response_and_propagates(fake_urequests):
     fake_urequests.chunks = [b"a\n"]
 
-    def on_line(line):
-        raise HttpParseError("bad row")
-
     with pytest.raises(HttpParseError, match="bad row"):
-        get_lines(_URL, on_line)
+        with _client().get(_URL) as response:
+            lines = response.lines()
+            for _ in lines:
+                raise HttpParseError("bad row")
+
+    # The generator stays referenced, so CPython's finaliser can't be what closed the response.
+    assert lines is not None
+    assert fake_urequests.responses[-1].closed is True
+
+
+def test_leaving_the_block_early_closes_the_response(fake_urequests):
+    fake_urequests.chunks = [b"a\nb\nc\n"]
+
+    with _client().get(_URL) as response:
+        lines = response.lines()
+        assert next(lines) == b"a"
+
+    assert lines is not None
+    assert fake_urequests.responses[-1].closed is True
+
+
+def test_closing_twice_closes_once(fake_urequests):
+    response = _client().get(_URL)
+    body = fake_urequests.responses[-1].raw
+    closes = []
+    body.close = lambda: closes.append(1)
+
+    response.close()
+    response.close()
+
+    assert closes == [1]
+
+
+def test_response_closed_on_success(fake_urequests):
+    _lines()
 
     assert fake_urequests.responses[-1].closed is True
+
+
+def test_offline_raises_before_collecting_or_connecting(fake_urequests, monkeypatch):
+    collections = []
+    monkeypatch.setattr(http_client.gc, "collect", lambda: collections.append(1))
+
+    with pytest.raises(HttpConnectError, match="offline"):
+        _client(connected=False).get(_URL)
+
+    assert collections == []
+    assert fake_urequests.calls == []
 
 
 def test_connect_failure_raises_connect_error(fake_urequests):
     fake_urequests.raise_on_get = OSError(9999, "unreachable")
 
     with pytest.raises(HttpConnectError):
-        _lines()
+        _client().get(_URL)
+
+    assert fake_urequests.responses == []
 
 
 def test_oserror_without_args_is_connect_error(fake_urequests):
     fake_urequests.raise_on_get = OSError()
 
     with pytest.raises(HttpConnectError):
-        _lines()
+        _client().get(_URL)
 
 
 @pytest.mark.parametrize("code", [http_client._ETIMEDOUT, http_client._EAGAIN])
@@ -139,7 +230,7 @@ def test_timeout_errnos_raise_timeout(fake_urequests, code):
     fake_urequests.raise_on_get = OSError(code, "timed out")
 
     with pytest.raises(HttpTimeoutError):
-        _lines()
+        _client().get(_URL)
 
 
 @pytest.mark.parametrize("status, ok", [(199, False), (200, True), (299, True), (300, False), (404, False)])
@@ -151,9 +242,24 @@ def test_status_boundaries(fake_urequests, status, ok):
         assert _lines() == [b"a"]
     else:
         with pytest.raises(HttpStatusError) as info:
-            _lines()
+            _client().get(_URL)
         assert info.value.status == status
         assert fake_urequests.responses[-1].closed is True
+
+
+def test_a_failure_building_the_response_closes_it(fake_urequests, monkeypatch):
+    error = MemoryError("memory allocation failed, allocating 32 bytes")
+
+    def raise_memory_error(body, deadline_ms: int):
+        raise error
+
+    monkeypatch.setattr(http_client, "Response", raise_memory_error)
+
+    with pytest.raises(MemoryError) as info:
+        _client().get(_URL)
+
+    assert info.value is error
+    assert fake_urequests.responses[-1].closed is True
 
 
 @pytest.mark.parametrize(
@@ -168,7 +274,7 @@ def test_malformed_response_raises_protocol_error(fake_urequests, exc):
     fake_urequests.raise_on_get = exc
 
     with pytest.raises(HttpProtocolError):
-        _lines()
+        _client().get(_URL)
 
 
 def test_body_read_timeout_raises_timeout_after_the_lines_before_it(fake_urequests):
@@ -177,7 +283,9 @@ def test_body_read_timeout_raises_timeout_after_the_lines_before_it(fake_ureques
     received = []
 
     with pytest.raises(HttpTimeoutError):
-        get_lines(_URL, received.append)
+        with _client().get(_URL) as response:
+            for line in response.lines():
+                received.append(line)
 
     assert received == [b"a"]
     assert fake_urequests.responses[-1].closed is True
@@ -193,40 +301,19 @@ def test_body_cut_short_raises_protocol_error(fake_urequests):
     assert fake_urequests.responses[-1].closed is True
 
 
-def test_response_closed_on_success(fake_urequests):
-    _lines()
-
-    assert fake_urequests.responses[-1].closed is True
-
-
-def test_connect_failure_creates_no_response_and_does_not_crash_on_close(fake_urequests):
-    fake_urequests.raise_on_get = OSError(9999, "unreachable")
-
-    with pytest.raises(HttpConnectError):
-        _lines()
-
-    assert fake_urequests.responses == []
-
-
 def test_gc_collected_once_before_request(fake_urequests, monkeypatch):
     calls = []
-    monkeypatch.setattr(http_client.gc, "collect", lambda: calls.append(1))
+    monkeypatch.setattr(http_client.gc, "collect", lambda: calls.append(len(fake_urequests.calls)))
 
     _lines()
 
-    assert len(calls) == 1
+    assert calls == [0]
 
 
-def test_timeout_passed_through(fake_urequests):
-    _lines(timeout_sec=5)
-
-    assert fake_urequests.calls[0] == (_URL, 5)
-
-
-def test_default_timeout_is_3s(fake_urequests):
+def test_the_client_timeout_reaches_the_request(fake_urequests):
     _lines()
 
-    assert fake_urequests.calls[0][1] == 3
+    assert fake_urequests.calls == [(_URL, 7)]
 
 
 def test_typed_exceptions_subclass_http_error():
@@ -238,190 +325,3 @@ def test_typed_exceptions_subclass_http_error():
         HttpProtocolError,
     ):
         assert issubclass(exc_type, HttpError)
-
-
-def test_unclassified_failure_prints_heap_and_traceback_then_propagates(
-    fake_urequests, monkeypatch, capsys
-):
-    error = MemoryError("memory allocation failed, allocating 2560 bytes")
-    fake_urequests.raise_at_end = error
-    heap_summaries = []
-    monkeypatch.setattr(micropython, "mem_info", lambda: heap_summaries.append(1))
-
-    with pytest.raises(MemoryError) as info:
-        _lines()
-
-    assert info.value is error
-    assert heap_summaries == [1]
-    out = capsys.readouterr().out
-    assert out.startswith("[http] unclassified failure:")
-    assert "MemoryError: memory allocation failed, allocating 2560 bytes" in out
-    assert fake_urequests.responses[-1].closed is True
-
-
-def test_classified_failure_prints_nothing(fake_urequests, capsys):
-    fake_urequests.status_code = 500
-
-    with pytest.raises(HttpStatusError):
-        _lines()
-
-    assert capsys.readouterr().out == ""
-
-
-@pytest.mark.parametrize(
-    "bounds, expected_bounds",
-    [({}, (512, 10_000)), ({"max_line_bytes": 37, "deadline_ms": 850}, (37, 850))],
-    ids=["default-bounds", "explicit-bounds"],
-)
-def test_client_forwards_timeout_and_streaming_bounds(bounds: dict, expected_bounds: tuple[int, int]) -> None:
-    calls = []
-    received = []
-    on_line = received.append
-
-    def http_get_lines(url: str, callback, timeout_sec: int, max_line_bytes: int, deadline_ms: int) -> None:
-        calls.append((url, callback, timeout_sec, max_line_bytes, deadline_ms))
-        callback(b"hour,value")
-
-    client = HttpClient(None, None, timeout_sec=7, http_get_lines=http_get_lines)
-
-    client.stream_lines(_URL, on_line, **bounds)
-
-    assert calls == [(_URL, on_line, 7, *expected_bounds)]
-    assert received == [b"hour,value"]
-
-
-class _FakeWifi:
-    def __init__(self, connected: bool = True) -> None:
-        self.connected = connected
-
-    def is_connected(self) -> bool:
-        return self.connected
-
-
-class _FakeSchedule:
-    def __init__(self) -> None:
-        self.queue: list[tuple] = []
-        self.raise_next = False
-
-    def __call__(self, callback, arg) -> None:
-        if self.raise_next:
-            raise RuntimeError("schedule queue full")
-        self.queue.append((callback, arg))
-
-    def run_all(self) -> None:
-        pending, self.queue = self.queue, []
-        for callback, arg in pending:
-            callback(arg)
-
-
-def test_offline_submission_leaves_no_job_and_reconnect_can_submit() -> None:
-    wifi = _FakeWifi(connected=False)
-    schedule = _FakeSchedule()
-    client = HttpClient(wifi, schedule, timeout_sec=7)
-    calls = []
-
-    assert client.try_fetch(lambda: calls.append("offline")) is False
-    assert schedule.queue == []
-
-    wifi.connected = True
-    assert client.try_fetch(lambda: calls.append("online")) is True
-    assert calls == []
-    assert len(schedule.queue) == 1
-
-    schedule.run_all()
-    assert calls == ["online"]
-
-
-def test_pending_and_running_jobs_refuse_peers_without_chaining() -> None:
-    schedule = _FakeSchedule()
-    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
-    calls = []
-
-    def second() -> None:
-        calls.append("second")
-
-    def first() -> None:
-        calls.append("first")
-        assert client.try_fetch(second) is False
-
-    assert client.try_fetch(first) is True
-    assert client.try_fetch(second) is False
-    assert len(schedule.queue) == 1
-
-    schedule.run_all()
-    assert calls == ["first"]
-    assert schedule.queue == []
-
-    assert client.try_fetch(second) is True
-    schedule.run_all()
-    assert calls == ["first", "second"]
-
-
-def test_slot_is_reserved_before_schedule_can_reenter() -> None:
-    queue = []
-    calls = []
-
-    def peer() -> None:
-        calls.append("peer")
-
-    def schedule(callback, arg: int) -> None:
-        assert client.try_fetch(peer) is False
-        queue.append((callback, arg))
-
-    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
-
-    assert client.try_fetch(lambda: calls.append("owner")) is True
-    assert len(queue) == 1
-    callback, arg = queue.pop()
-    callback(arg)
-    assert calls == ["owner"]
-    assert client.try_fetch(peer) is True
-
-
-def test_schedule_failure_reraises_and_rolls_back_for_later_submission() -> None:
-    schedule = _FakeSchedule()
-    schedule.raise_next = True
-    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
-    calls = []
-
-    with pytest.raises(RuntimeError, match="schedule queue full"):
-        client.try_fetch(lambda: calls.append("rejected"))
-
-    assert schedule.queue == []
-    schedule.raise_next = False
-    assert client.try_fetch(lambda: calls.append("retry")) is True
-    schedule.run_all()
-    assert calls == ["retry"]
-
-
-def test_callback_exception_propagates_and_releases_for_later_submission() -> None:
-    schedule = _FakeSchedule()
-    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
-    calls = []
-    error = RuntimeError("fetch failed")
-
-    def fail() -> None:
-        raise error
-
-    assert client.try_fetch(fail) is True
-    with pytest.raises(RuntimeError) as caught:
-        schedule.run_all()
-    assert caught.value is error
-
-    assert client.try_fetch(lambda: calls.append("recovered")) is True
-    schedule.run_all()
-    assert calls == ["recovered"]
-
-
-def test_scheduled_callback_is_cached_between_jobs() -> None:
-    schedule = _FakeSchedule()
-    client = HttpClient(_FakeWifi(), schedule, timeout_sec=7)
-    calls = []
-
-    client.try_fetch(lambda: calls.append("first"))
-    first_callback = schedule.queue[0][0]
-    schedule.run_all()
-    client.try_fetch(lambda: calls.append("second"))
-    assert schedule.queue[0][0] is first_callback
-    schedule.run_all()
-    assert calls == ["first", "second"]
