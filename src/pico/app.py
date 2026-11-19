@@ -39,9 +39,8 @@ _SEC_PER_HOUR = const(3600)
 
 _SECONDARY_TEXT_SCALE = const(2)
 
-# Also how often NTP is queried: shortening it to reconnect sooner would query the
-# public NTP pool that often.
-_NETWORK_UPKEEP_PERIOD_MS = const(12 * 60 * 60 * 1000)
+# Also how often ntptime queries pool.ntp.org, whose guidelines suggest at most 4-5 queries an hour.
+_NETWORK_UPKEEP_PERIOD_MS = const(4 * 60 * 60 * 1000)
 
 _STREAM_REFRESH_MS = const(60 * 60 * 1000)
 
