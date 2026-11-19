@@ -10,13 +10,13 @@ from services.tick_scheduler import TickScheduler
 
 _UV = (6, 8, 11)  # UV thresholds used across the suite
 _POLLEN_THR = [
-    ("alder", (1, 11, 101)),
-    ("birch", (1, 11, 51)),
-    ("grass", (1, 6, 31)),
-    ("mugwort", (1, 6, 11)),
-    ("ragweed", (1, 6, 11)),
+    ("alder", "ALDER", (1, 11, 101)),
+    ("birch", "BIRCH", (1, 11, 51)),
+    ("grass", "GRASS", (1, 6, 31)),
+    ("mugwort", "MGWRT", (1, 6, 11)),
+    ("ragweed", "RGWD", (1, 6, 11)),
 ]
-_SPECIES = [species for species, _ in _POLLEN_THR]
+_SPECIES = [species for species, _, _ in _POLLEN_THR]
 _AQI_THR = (60, 80, 100)
 _T0 = 1_794_855_600
 _HOUR = 3600
@@ -168,27 +168,35 @@ def _row(aqi, **pollen) -> list:
 
 
 def _air_hours(*rows, pollen_thresholds=_POLLEN_THR, max_events=10):
-    """Feed hourly rows from ``_T0``; return the AQI and pollen events."""
+    """Feed hourly rows from ``_T0``; return the AQI events and each species' pollen events."""
     hours = _AirHours(_AQI_THR, pollen_thresholds, max_events, 0)
     for i, row in enumerate(rows):
         hours.add_hour(_T0 + i * _HOUR, row)
-    return hours.aqi.events(), hours.pollen.events()
+    return hours.aqi.events(), [builder.events() for builder in hours.pollen]
 
 
 def _aqi(*rows):
     return _air_hours(*rows)[0]
 
 
-def _pollen(*rows):
-    return _air_hours(*rows)[1]
+def _pollen(*rows) -> dict[str, list[tuple[str, int]]]:
+    """Each species' pollen events, as ``(label, color_index)``, by species."""
+    return {
+        species: [(e.label, e.color_index) for e in events] for species, events in zip(_SPECIES, _air_hours(*rows)[1])
+    }
+
+
+def _by_species(**pollen) -> dict[str, list[tuple[str, int]]]:
+    """The expected ``_pollen`` result: ``pollen``'s species, and no events for the others."""
+    return {species: pollen.get(species, []) for species in _SPECIES}
 
 
 def test_air_below_threshold_hours_emit_nothing():
-    assert _air_hours(_row(10)) == ([], [])
+    assert _air_hours(_row(10)) == ([], [[]] * len(_SPECIES))
 
 
 def test_none_values_emit_nothing():
-    assert _air_hours(_row(None, grass=None)) == ([], [])
+    assert _air_hours(_row(None, grass=None)) == ([], [[]] * len(_SPECIES))
 
 
 def test_single_aqi_hour_is_one_event():
@@ -211,27 +219,21 @@ def test_aqi_sets_the_level(aqi, expected_index):
     "grains, expected_index", [(1, STREAM_YELLOW), (11, STREAM_ORANGE), (51, STREAM_RED)]
 )
 def test_pollen_level_uses_the_species_thresholds(grains, expected_index):
-    assert [(e.label, e.color_index) for e in _pollen(_row(10, birch=grains))] == [("BIRCH", expected_index)]
+    assert _pollen(_row(10, birch=grains)) == _by_species(birch=[("BIRCH", expected_index)])
 
 
-def test_dominant_pollen_compares_levels_by_each_species_thresholds():
+def test_each_species_warns_in_its_own_stream_at_its_own_level():
     # 20 grass grains is level 2, while 12 mugwort grains is already level 3.
-    assert [(e.label, e.color_index) for e in _pollen(_row(0, grass=20, mugwort=12))] == [("MUGWORT", STREAM_RED)]
-
-
-def test_dominant_pollen_tie_goes_to_the_first_listed_not_the_higher_count():
-    assert [e.label for e in _pollen(_row(0, grass=7, mugwort=10))] == ["GRASS"]
-
-
-def test_dominant_pollen_skips_none_values():
-    assert [e.label for e in _pollen(_row(0, grass=None, mugwort=2))] == ["MUGWORT"]
+    assert _pollen(_row(0, grass=20, mugwort=12)) == _by_species(
+        grass=[("GRASS", STREAM_ORANGE)], mugwort=[("MGWRT", STREAM_RED)]
+    )
 
 
 def test_aqi_and_pollen_in_the_same_hour_both_emit():
     aqi, pollen = _air_hours(_row(60, grass=40))
 
     assert [(e.label, e.color_index) for e in aqi] == [("AQI", STREAM_YELLOW)]
-    assert [(e.label, e.color_index) for e in pollen] == [("GRASS", STREAM_RED)]
+    assert [(e.label, e.color_index) for e in pollen[_SPECIES.index("grass")]] == [("GRASS", STREAM_RED)]
 
 
 def test_aqi_contiguous_hours_merge_at_their_highest_level():
@@ -240,10 +242,15 @@ def test_aqi_contiguous_hours_merge_at_their_highest_level():
     assert [(e.duration_sec, e.color_index) for e in events] == [(3 * _HOUR, STREAM_ORANGE)]
 
 
-def test_species_change_splits_run_even_at_same_level():
-    events = _pollen(_row(0, grass=2), _row(0, birch=2))
+def test_a_species_run_continues_through_another_species_hours():
+    _, pollen = _air_hours(_row(0, grass=2), _row(0, grass=2, birch=60), _row(0, grass=2))
 
-    assert [(e.label, e.color_index) for e in events] == [("GRASS", STREAM_YELLOW), ("BIRCH", STREAM_YELLOW)]
+    grass = pollen[_SPECIES.index("grass")]
+    birch = pollen[_SPECIES.index("birch")]
+    assert [(e.start_utc, e.duration_sec) for e in grass] == [(_T0, 3 * _HOUR)]
+    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in birch] == [
+        ("BIRCH", _T0 + _HOUR, _HOUR, STREAM_RED)
+    ]
 
 
 def test_aqi_gap_hour_breaks_the_run():
@@ -259,16 +266,19 @@ def test_no_species_is_aqi_only():
     assert pollen == []
 
 
-def test_air_streams_keep_at_most_max_events():
-    _, pollen = _air_hours(_row(0, grass=2), _row(0, birch=2), _row(0, grass=2), max_events=2)
+def test_each_pollen_stream_keeps_at_most_max_events():
+    _, pollen = _air_hours(
+        _row(0, grass=2), _row(0), _row(0, grass=2, birch=2), _row(0), _row(0, grass=2), max_events=2
+    )
 
-    assert [e.label for e in pollen] == ["GRASS", "BIRCH"]
+    assert [e.start_utc for e in pollen[_SPECIES.index("grass")]] == [_T0, _T0 + 2 * _HOUR]
+    assert [e.start_utc for e in pollen[_SPECIES.index("birch")]] == [_T0 + 2 * _HOUR]
 
 
 def test_air_color_indices_are_valid_palette_indices():
     aqi, pollen = _air_hours(_row(60, grass=2), _row(100, grass=40))
 
-    for ev in aqi + pollen:
+    for ev in aqi + [ev for events in pollen for ev in events]:
         assert 0 <= ev.color_index < len(STREAM_COLORS)
 
 
@@ -343,7 +353,14 @@ def test_a_malformed_body_raises_parse_error(lines):
 # Service integration
 # ---------------------------------------------------------------------------
 
-_PRECIP_INDEX, _UV_INDEX, _AQI_INDEX, _POLLEN_INDEX = range(4)
+_PRECIP_INDEX, _UV_INDEX, _AQI_INDEX = range(3)
+_RAGWEED_INDEX = 3 + _SPECIES.index("ragweed")
+
+
+def _names(precip: list[str], uv: list[str], aqi: list[str], **pollen) -> list[list[str]]:
+    """The expected ``_Harness.visible_names()``: these streams' labels, then ``pollen``'s species' labels and no
+    others'."""
+    return [precip, uv, aqi] + [pollen.get(species, []) for species in _SPECIES]
 
 _FORECAST_HEADER = b"time,precipitation_probability (%),precipitation (mm),weathercode (wmo code),uv_index ()"
 _FORECAST_QUIET_ROW = b"0,0.00,0,0.00"
@@ -400,7 +417,7 @@ class _FakeHttpClient:
 class _Harness:
     """An ``OpenMeteoService`` on a real ``TickScheduler``, whose ticks the test runs, and a ``_FakeHttpClient``."""
 
-    def __init__(self, lat=50.0, lon=14.0, forecast_hours=_FORECAST_HOURS) -> None:
+    def __init__(self, lat=50.0, lon=14.0, forecast_hours=_FORECAST_HOURS, pollen_thresholds=_POLLEN_THR) -> None:
         self.clock_val = 0
         timer_factory, _ = make_timer_factory()
         self.scheduler = TickScheduler(schedule=lambda callback, arg: None, timer_factory=timer_factory)
@@ -412,7 +429,7 @@ class _Harness:
             prob_threshold_pct=30,
             uv_thresholds=_UV,
             aqi_thresholds=_AQI_THR,
-            pollen_thresholds=_POLLEN_THR,
+            pollen_thresholds=pollen_thresholds,
             http_client=self.http_client,
             tick_scheduler=self.scheduler,
             get_ticks_ms=lambda: self.clock_val,
@@ -449,18 +466,33 @@ def test_disabled_only_when_both_coordinates_are_zero(lat, lon, enabled):
     assert bool(h.http_client.urls) == enabled
 
 
-def test_one_fetch_publishes_all_four_streams_in_order():
+def test_one_fetch_publishes_every_stream_in_order():
     h = _Harness()
     h.http_client.forecast_lines = _forecast_csv(b"80,1.0,61,0", b"0,0.0,0,9")
-    h.http_client.air_lines = _air_csv(b"60,0.0,0.0,0.0,0.0,0.0", b"0,0.0,0.0,0.0,0.0,3.0")
+    h.http_client.air_lines = _air_csv(b"60,0.0,0.0,0.0,0.0,0.0", b"0,0.0,2.0,0.0,0.0,3.0")
 
     h.fetch()
 
     assert h.requested_hosts() == ["api.open-meteo.com", "air-quality-api.open-meteo.com"]
-    assert h.visible_names() == [["RAIN"], ["UV"], ["AQI"], ["RAGWEED"]]
+    assert h.visible_names() == [["RAIN"], ["UV"], ["AQI"], [], ["BIRCH"], [], [], ["RGWD"]]
     assert h.visible(_PRECIP_INDEX) == [("RAIN", _T0)]
-    assert h.visible(_POLLEN_INDEX) == [("RAGWEED", _T0 + _HOUR)]
+    assert h.visible(_RAGWEED_INDEX) == [("RGWD", _T0 + _HOUR)]
     assert [body.closed for body in h.http_client.bodies] == [True, True]
+
+
+def test_pollen_streams_follow_the_configured_species_in_their_order():
+    h = _Harness(pollen_thresholds=[("ragweed", "RGWD", (1, 6, 11)), ("birch", "BIRCH", (1, 11, 51))])
+    h.http_client.air_lines = _csv(
+        b"time,european_aqi (EAQI),ragweed_pollen (grains/m\xc2\xb3),birch_pollen (grains/m\xc2\xb3)",
+        b"10,0.0,0.0",
+        b"10,NaN,60.0",
+        b"10,7.0,0.0",
+    )
+
+    h.fetch()
+
+    assert "&hourly=european_aqi,ragweed_pollen,birch_pollen&" in h.http_client.urls[1]
+    assert h.visible_names() == [["RAIN"], [], [], ["RGWD"], ["BIRCH"]]
 
 
 def test_urls_ask_for_csv_in_utc_unix_time_with_coordinates_and_metrics():
@@ -492,7 +524,7 @@ def test_air_quality_forecast_is_capped_at_the_api_maximum():
     forecast_url, air_url = h.http_client.urls
     assert "forecast_hours=200" in forecast_url
     assert "forecast_hours=168" in air_url
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
 
 
 def test_warnings_over_by_the_fetch_are_not_published():
@@ -508,14 +540,14 @@ def test_warnings_over_by_the_fetch_are_not_published():
 def test_second_fetch_refreshes_the_streams():
     h = _Harness()
     h.fetch()
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
 
     h.http_client.forecast_lines = _forecast_csv(b"80,1.0,71,0")
     h.http_client.air_lines = _air_csv(b"10,0.0,0.0,2.0,0.0,0.0")
     h.advance(1000)
     h.fetch()
 
-    assert h.visible_names() == [["SNOW"], [], [], ["GRASS"]]
+    assert h.visible_names() == _names(["SNOW"], [], [], grass=["GRASS"])
 
 
 def test_an_offline_refresh_fails_and_keeps_the_streams_until_one_succeeds():
@@ -528,14 +560,14 @@ def test_an_offline_refresh_fails_and_keeps_the_streams_until_one_succeeds():
     h.fetch()
 
     assert h.service.refresh_failed() is True
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
 
     h.http_client.connected = True
     h.advance(5000)
     h.fetch()
 
     assert h.service.refresh_failed() is False
-    assert h.visible_names() == [["SNOW"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["SNOW"], [], ["AQI"])
 
 
 def test_a_failed_forecast_request_skips_the_air_request_and_keeps_the_prior_snapshot():
@@ -548,7 +580,7 @@ def test_a_failed_forecast_request_skips_the_air_request_and_keeps_the_prior_sna
 
     assert h.requested_hosts()[2:] == ["api.open-meteo.com"]
     assert h.service._failures == 1
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
 
 
 def test_a_failed_air_request_publishes_no_stream_and_backs_off():
@@ -561,7 +593,7 @@ def test_a_failed_air_request_publishes_no_stream_and_backs_off():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
 
 
 def test_a_failed_read_backs_off_and_closes_the_body():
@@ -571,7 +603,7 @@ def test_a_failed_read_backs_off_and_closes_the_body():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.visible_names() == [[], [], [], []]
+    assert h.visible_names() == _names([], [], [])
     assert [body.closed for body in h.http_client.bodies] == [True]
 
 
@@ -582,7 +614,7 @@ def test_a_truncated_body_backs_off_without_publishing_and_closes_it():
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.visible_names() == [[], [], [], []]
+    assert h.visible_names() == _names([], [], [])
     assert [body.closed for body in h.http_client.bodies] == [True, True]
 
 
@@ -602,5 +634,5 @@ def test_a_parse_failure_keeps_every_previously_published_stream(source: str) ->
     h.fetch()
 
     assert h.service._failures == 1
-    assert h.visible_names() == [["RAIN"], [], ["AQI"], []]
+    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
     assert all(stream(h.utc_now) is old for stream, old in zip(h.streams, previous))

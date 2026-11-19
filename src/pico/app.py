@@ -266,7 +266,7 @@ def build_app(pico_graphics: PicoGraphics, schedule) -> App:  # schedule: (callb
     )
 
     countdown_display = _build_countdown_display(pico_graphics, tick_scheduler)
-    # Warnings tie in this order: precipitation, UV, AQI, pollen.
+    # Warnings tie in this order: precipitation, UV, AQI, then each pollen species as configured.
     calendar_display = _build_calendar_display(
         calendar_geometry, time_service, openmeteo_service.build_streams(), openmeteo_service.refresh_failed
     )

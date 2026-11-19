@@ -136,6 +136,24 @@ def test_time_left_is_real_across_the_fall_back(app_module) -> None:
     assert "1d22 left" in panel.presented
 
 
+def test_default_pollen_labels_fit_beside_the_widest_time_left(app_module) -> None:
+    utc = utc_epoch(2026, 8, 14, 11, 8, 0)
+    # Every digit but 1 is as wide as the others, so no note is wider.
+    end_utc = utc + 23 * 3600 + 23 * 60
+    labels = [label for _, label, _ in config_defaults.POLLEN_THRESHOLDS]
+    start_utc = utc - 600
+    events = [create_event(label, start_utc, end_utc - start_utc, STREAM_YELLOW) for label in labels]
+    panel = _Panel()
+    calendar = app_module._build_calendar_display(
+        app_module._build_calendar_geometry(panel), _time_service(lambda: utc), [lambda now_utc: events], lambda: False
+    )
+
+    calendar.initialize()
+
+    assert [text for text in panel.presented if text in labels] == labels
+    assert panel.presented.count("23h23 left") == len(labels)
+
+
 @pytest.mark.parametrize(
     "utc, agenda",
     [

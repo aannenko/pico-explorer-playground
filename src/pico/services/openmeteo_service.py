@@ -22,6 +22,9 @@ _MAX_LINES_BEFORE_HEADER = const(3)
 
 _FORECAST_METRICS = "precipitation_probability,precipitation,weathercode,uv_index"
 
+# Precipitation, UV and AQI.
+_STREAMS_BEFORE_POLLEN = const(3)
+
 # Any amount, then the standard meteorological moderate and heavy rain rates (mm/h).
 _PRECIP_THRESHOLDS_MM = (0.0, 2.5, 7.6)
 
@@ -87,39 +90,33 @@ class _WeatherHours:
 
 
 class _AirHours:
-    """The AQI and pollen events of an air-quality forecast, built an hour at a time.
+    """The AQI and per-species pollen events of an air-quality forecast, built an hour at a time.
 
-    An hour's pollen warning is the species with the highest level, each measured against its own thresholds, so raw
-    counts aren't compared: a tie goes to the species listed first.
+    ``pollen`` holds a builder per species, in ``pollen_thresholds`` order, each measuring its counts against its own
+    thresholds and labelling its events with the species' label.
     """
 
     def __init__(
         self,
         aqi_thresholds: tuple[float, float, float],
-        pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
+        pollen_thresholds: list[tuple[str, str, tuple[float, float, float]]],
         max_events: int,
         now_utc: int,
     ) -> None:
         self._aqi_thresholds = aqi_thresholds
-        self._pollen_labels = tuple(species.upper() for species, _ in pollen_thresholds)
-        self._species_thresholds = tuple(edges for _, edges in pollen_thresholds)
+        self._pollen_labels = tuple(label for _, label, _ in pollen_thresholds)
+        self._species_thresholds = tuple(edges for _, _, edges in pollen_thresholds)
         self.aqi = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
-        self.pollen = event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc)
+        self.pollen = [event_runs.RunBuilder(STREAM_SEVERITY, max_events, now_utc) for _ in pollen_thresholds]
 
     def add_hour(self, utc_epoch: int, values: list[float | None]) -> None:
         """Add one hour's values: the AQI, then each species' count in ``pollen_thresholds`` order."""
         self.aqi.add(utc_epoch, "AQI", event_runs.level(values[0], self._aqi_thresholds))
-        # Inline, rather than a helper taking values[1:], as that slice and a returned tuple would cost two
-        # allocations a row.
+        builders = self.pollen
+        labels = self._pollen_labels
         thresholds = self._species_thresholds
-        best_level = 0
-        best_index = 0
-        for i in range(len(thresholds)):
-            species_level = event_runs.level(values[i + 1], thresholds[i])
-            if species_level > best_level:
-                best_level = species_level
-                best_index = i
-        self.pollen.add(utc_epoch, self._pollen_labels[best_index] if best_level else None, best_level)
+        for i in range(len(builders)):
+            builders[i].add(utc_epoch, labels[i], event_runs.level(values[i + 1], thresholds[i]))
 
 
 def _parse_hourly_csv(
@@ -198,17 +195,17 @@ def _check_header(line: bytes, names: list[bytes]) -> None:
 
 
 class OpenMeteoService(EventStreamService):
-    """Precipitation, UV, AQI and pollen streams, in that order, coloured by warning level, from one Open-Meteo
-    forecast request and one air-quality request.
+    """Precipitation, UV and AQI streams, then a pollen stream per species in ``pollen_thresholds`` order, each
+    coloured by warning level, from one Open-Meteo forecast request and one air-quality request.
 
     The streams are published together: if either request fails, none is, and both are retried after a backoff.
     Warning: both requests run in one deferred job, which blocks rendering and button handling until both return.
 
-    ``pollen_thresholds`` lists ``(species, levels)``: an Open-Meteo pollen name without its ``_pollen`` suffix, and
-    the ascending grains/m³ that start levels 1-3.  Each stream looks from ``past_hours`` back to ``forecast_hours``
-    ahead, but AQI and pollen at most 168 hours ahead, the air-quality API's limit.  Each stream keeps at most
-    ``max_events`` events not over by the fetch, at ``get_utc_time``.  Stays disabled unless the coordinates are set:
-    0.0/0.0, a point at sea, means unset.
+    ``pollen_thresholds`` lists ``(species, label, levels)``: an Open-Meteo pollen name without its ``_pollen``
+    suffix, the label of its events, and the ascending grains/m³ that start levels 1-3.  Each stream looks from
+    ``past_hours`` back to ``forecast_hours`` ahead, but AQI and pollen at most 168 hours ahead, the air-quality API's
+    limit.  Each stream keeps at most ``max_events`` events not over by the fetch, at ``get_utc_time``.  Stays disabled
+    unless the coordinates are set: 0.0/0.0, a point at sea, means unset.
     """
 
     def __init__(
@@ -218,7 +215,7 @@ class OpenMeteoService(EventStreamService):
         prob_threshold_pct: int,
         uv_thresholds: tuple[float, float, float],
         aqi_thresholds: tuple[float, float, float],
-        pollen_thresholds: list[tuple[str, tuple[float, float, float]]],
+        pollen_thresholds: list[tuple[str, str, tuple[float, float, float]]],
         http_client: HttpClient,
         tick_scheduler: TickScheduler,
         interval_ms: int,
@@ -235,19 +232,22 @@ class OpenMeteoService(EventStreamService):
         self._uv_thresholds = uv_thresholds
         self._aqi_thresholds = aqi_thresholds
         self._pollen_thresholds = pollen_thresholds
-        self._air_metrics = ",".join(["european_aqi"] + [species + "_pollen" for species, _ in pollen_thresholds])
+        self._air_metrics = ",".join(["european_aqi"] + [species + "_pollen" for species, _, _ in pollen_thresholds])
         self._forecast_hours = forecast_hours
         self._past_hours = past_hours
         self._max_events = max_events
         self._get_utc_time = get_utc_time
         enabled = not (latitude == 0.0 and longitude == 0.0)
-        super().__init__(tick_scheduler, interval_ms, "meteo", enabled, stream_count=4, get_ticks_ms=get_ticks_ms)
+        super().__init__(
+            tick_scheduler, interval_ms, "meteo", enabled, stream_count=_STREAMS_BEFORE_POLLEN + len(pollen_thresholds),
+            get_ticks_ms=get_ticks_ms,
+        )
         if enabled:
             print("[meteo] enabled: lat=%s lon=%s" % (latitude, longitude))
         else:
             print("[meteo] disabled: set LATITUDE/LONGITUDE in config.py")
 
-    def _fetch_and_parse(self) -> tuple[list[Event], list[Event], list[Event], list[Event]]:
+    def _fetch_and_parse(self) -> tuple[list[Event], ...]:
         now_utc = self._get_utc_time()
         print("[meteo] fetching %s lat=%s lon=%s" % ("forecast", self._lat, self._lon))
         weather = _WeatherHours(self._prob_threshold_pct, self._uv_thresholds, self._max_events, now_utc)
@@ -263,7 +263,7 @@ class OpenMeteoService(EventStreamService):
             _AIR_QUALITY_URL, self._air_metrics, min(self._forecast_hours, _AIR_QUALITY_MAX_FORECAST_HOURS),
             air.add_hour,
         )
-        return precip, uv, air.aqi.events(), air.pollen.events()
+        return (precip, uv, air.aqi.events()) + tuple([builder.events() for builder in air.pollen])
 
     def _fetch_hourly(
         self,

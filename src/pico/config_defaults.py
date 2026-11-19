@@ -61,18 +61,20 @@ PRECIP_PROB_THRESHOLD_PCT = const(30)
 UV_THRESHOLDS = (6, 8, 11)
 
 # Calendar: air quality and pollen streams (Open-Meteo air quality).
-# Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps both streams disabled).
+# Shares LATITUDE/LONGITUDE above (0.0/0.0 keeps these streams disabled).
 # AQI_THRESHOLDS: European AQI poor / very poor / extremely poor.
 # POLLEN_THRESHOLDS: per Open-Meteo pollen species (without the ``_pollen``
-# suffix), grains/m³ for DWD's low / medium / high burden.  Add or remove
-# species freely; when species share the highest level, the first listed is shown.
+# suffix), the non-empty label its warnings show, and grains/m³ for DWD's
+# low / medium / high burden.  Each species is its own stream; add or remove
+# species freely.  A label is cut to fit beside the time left: 5 letters fit.
+# Species warnings starting together are listed in this order.
 AQI_THRESHOLDS = (60, 80, 100)
 POLLEN_THRESHOLDS = [
-    ("alder",   (1, 11, 101)),
-    ("birch",   (1, 11, 51)),
-    ("grass",   (1, 6, 31)),
-    ("mugwort", (1, 6, 11)),
-    ("ragweed", (1, 6, 11)),
+    ("alder",   "ALDER", (1, 11, 101)),
+    ("birch",   "BIRCH", (1, 11, 51)),
+    ("grass",   "GRASS", (1, 6, 31)),
+    ("mugwort", "MGWRT", (1, 6, 11)),
+    ("ragweed", "RGWD",  (1, 6, 11)),
 ]
 
 # Calendar: waste collection schedule.  Each entry:

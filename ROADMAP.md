@@ -32,11 +32,11 @@ leaves them ambiguous.
   long-lived data source the calendar reads passively:
   - **Waste collection** — local wall-clock pickups from `config`, computed on-device.
   - **Precipitation**, **UV**, **air quality** (European AQI) and **pollen**
-    (the dominant species) — warning levels for the past day and the week
+    (a stream per species) — warning levels for the past day and the week
     ahead from Open-Meteo's forecast and air-quality APIs, fetched together
     every hour, adjacent hours of one warning joined at their highest level;
     each keeps only as many warnings as the calendar has rows. If either
-    request fails, all four keep their last warnings until a retry succeeds.
+    request fails, all of them keep their last warnings until a retry succeeds.
     Disabled until coordinates are set in `config.py`.
 
 - **Sensor dashboard** — BME690 readings (temperature, pressure, humidity,
