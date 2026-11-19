@@ -6,6 +6,7 @@ import config_defaults
 from displays.base import Display
 from displays.manager import DisplayManager
 from displays.palette import STREAM_YELLOW
+from displays.shared import _icons_data
 from scheduling.event import create_event, Event
 from scheduling.providers import waste
 from services.time_service import TimeService
@@ -152,6 +153,37 @@ def test_default_pollen_labels_fit_beside_the_widest_time_left(app_module) -> No
 
     assert [text for text in panel.presented if text in labels] == labels
     assert panel.presented.count("23h23 left") == len(labels)
+
+
+def test_streams_are_marked_waste_then_in_the_open_meteo_order(app_module) -> None:
+    meteo_streams = [(lambda now_utc: []) for _ in range(3 + len(config_defaults.POLLEN_THRESHOLDS))]
+    panel = _Panel()
+    calendar = app_module._build_calendar_display(
+        app_module._build_calendar_geometry(panel), _time_service(lambda: 0), meteo_streams, lambda: False
+    )
+
+    assert [glyph for glyph, _ in calendar._streams] == [
+        _icons_data.GLYPH_WASTE, _icons_data.GLYPH_PRECIP, _icons_data.GLYPH_SUN, _icons_data.GLYPH_AIR
+    ] + [_icons_data.GLYPH_FLOWER] * len(config_defaults.POLLEN_THRESHOLDS)
+    assert [getter for _, getter in calendar._streams[1:]] == meteo_streams
+
+
+def test_the_widest_glyph_sets_where_the_fields_start(app_module, monkeypatch) -> None:
+    monkeypatch.setattr(_icons_data, "GLYPH_AIR", (10, 7, bytes([0x33] * 35)))
+    utc = utc_epoch(2026, 8, 14, 11, 8, 0)
+    aqi = [create_event("AQI", utc - 600, 3600, STREAM_YELLOW)]
+    panel = _Panel()
+    calendar = app_module._build_calendar_display(
+        app_module._build_calendar_geometry(panel),
+        _time_service(lambda: utc),
+        [_no_events, _no_events, lambda now_utc: aqi],
+        lambda: False,
+    )
+
+    calendar.initialize()
+
+    # After the start times' right edge at 42: a 20-px glyph cell with 8 px either side, then the 6-px text inset.
+    assert [args[1] for name, args, _ in panel.calls if name == "text" and args[0] == "AQI"] == [84]
 
 
 @pytest.mark.parametrize(

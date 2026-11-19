@@ -66,7 +66,7 @@ UV_THRESHOLDS = (6, 8, 11)
 # POLLEN_THRESHOLDS: per Open-Meteo pollen species (without the ``_pollen``
 # suffix), the non-empty label its warnings show, and grains/m³ for DWD's
 # low / medium / high burden.  Each species is its own stream; add or remove
-# species freely.  A label is cut to fit beside the time left: 5 letters fit.
+# species freely.  A label is cut to fit beside the time left: MGWRT just fits.
 # Species warnings starting together are listed in this order.
 AQI_THRESHOLDS = (60, 80, 100)
 POLLEN_THRESHOLDS = [

@@ -47,7 +47,7 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 | `sensors.py` | `_BADGE_PADDING_PX` 5, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | black space inside the ring; the ring; black border outside it |
 | `calendar.py` | `_BODY_MARGIN_PX` 3, `_SLOT_GAP_PX` 5 | header→first slot, gap between slots |
 | `calendar.py` | `_FIELD_PAD_PX` 4, `_TEXT_INSET_PX` 6, `_BAR_PX` 4 | above and below a field's text, from a field's edges to its texts, the progress bar under a field |
-| `calendar.py` | `_RAIL_PX` 2, `_DOT_R_PX` 5, `_DOT_GAP_PX` 4 | the rail, its dots, a dot→start time and →field |
+| `calendar.py` | `_RAIL_PX` 2, `_GLYPH_GAP_PX` 8 | the rail, a glyph→start time and →field; glyphs draw at the slot text scale |
 | `ring.py` | `_RING_OUTER_MARGIN_PX` 2 | ring→edge |
 | `status.py` | `h // 2 + 5` | subtext offset |
 
@@ -129,8 +129,8 @@ keeps one event per slot (`app._stream_event_cap`).
    `S×` the commit's in-place shift, about 6 ms at today's 119 columns),
    while `S`-px columns keep today's resolution and visual weight.
 3. **Art for larger panels.** Upscale the 16 px set, or ship a native
-   higher-resolution set? Today's 20 icons, trimmed to their ink, pack to
-   1,444 bytes, so a set at twice the resolution costs about 4× that in
+   higher-resolution set? Today's 25 icons, trimmed to their ink, pack to
+   1,596 bytes, so a set at twice the resolution costs about 4× that in
    flash.
 
 ## Steps (one commit each)

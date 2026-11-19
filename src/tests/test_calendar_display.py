@@ -36,8 +36,11 @@ def _at(hour: int, minute: int, second: int = 0, day: int = 0) -> int:
 
 _NOW = _at(9, 12)
 _SLOT_COUNT = 7
-_RAIL_X = 50  # the rail's left column
-_FIELD_X = 60
+_GLYPH_X = 50  # the glyph cell's left column
+_RAIL_X = 57  # the rail's left column
+_FIELD_X = 74
+_TEXT_INSET = 6
+_LABEL_X = _FIELD_X + _TEXT_INSET
 _FIELD_HEIGHT = 22
 
 
@@ -107,21 +110,30 @@ def _stream(events: list[Event]):  # -> (int) -> list[Event]
     return lambda now_utc: events
 
 
+# Inked down its left column only, so the rail's columns fall in its transparent part.
+_GLYPH = (8, 8, bytes([0x30, 0x00, 0x00, 0x00] * 8))
+
+
 def _display(
     *streams,
     now: int = _NOW,
     to_local=None,  # (int) -> int
     refresh_failed: list[bool] | None = None,
 ):
-    """Each stream is a list of events, or a getter; local time is UTC unless ``to_local`` says otherwise, and no
-    refresh has failed unless ``refresh_failed`` holds ``[True]``."""
+    """Each stream is a list of events or a getter, marked by ``_GLYPH``, or a ``(glyph, events or getter)`` pair;
+    local time is UTC unless ``to_local`` says otherwise, and no refresh has failed unless ``refresh_failed`` holds
+    ``[True]``."""
     gfx = _Raster()
-    geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
+    geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 2, 8)
     clock = [now]
     failed = refresh_failed if refresh_failed is not None else [False]
+    pairs = []
+    for stream in streams:
+        glyph, stream = stream if isinstance(stream, tuple) else (_GLYPH, stream)
+        pairs.append((glyph, _stream(stream) if isinstance(stream, list) else stream))
     display = calendar.Display(
         geometry,
-        [_stream(stream) if isinstance(stream, list) else stream for stream in streams],
+        pairs,
         get_utc_time=lambda: clock[0],
         to_local=to_local or (lambda utc_epoch: utc_epoch),
         get_refresh_failed=lambda: failed[0],
@@ -136,7 +148,7 @@ def _drawn(*streams, **kwargs) -> _Raster:
 
 
 def _right_x(text: str) -> int:
-    return 240 - 6 - bitmap8_width(text, 2)
+    return 240 - _TEXT_INSET - bitmap8_width(text, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -186,11 +198,11 @@ class TestLifecycle:
         assert display._visible == [()]
 
     def test_a_redraw_that_raises_pins_no_events_and_retries_at_the_next_minute(self, fake_ticks):
-        def raise_memory_error(*args) -> None:
+        def raise_memory_error(*args, **kwargs) -> None:
             raise MemoryError
 
         display, gfx, _clock = _display([_ev("RAIN", _at(11, 0))], now=_at(9, 12, 20))
-        gfx.circle = raise_memory_error
+        gfx.measure_text = raise_memory_error
 
         with pytest.raises(MemoryError):
             display.initialize()
@@ -209,7 +221,7 @@ class TestLifecycle:
 
         gfx = _Raster()
         display = calendar.Display(
-            calendar.Geometry(gfx, "bitmap8", 8, 3, 2), [], get_utc_time=failing_utc_time,
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2, 8), [], get_utc_time=failing_utc_time,
             to_local=lambda utc_epoch: utc_epoch, get_refresh_failed=lambda: False,
         )
         with pytest.raises(MemoryError):
@@ -241,11 +253,24 @@ class TestLifecycle:
 
     def test_too_wide_a_header_fails_at_construction(self):
         with pytest.raises(RuntimeError, match="no room for header"):
-            calendar.Geometry(_Raster(), "bitmap8", 8, 4, 2)
+            calendar.Geometry(_Raster(), "bitmap8", 8, 4, 2, 8)
 
     def test_too_few_slots_fail_at_construction(self):
         with pytest.raises(RuntimeError, match="no room for two slots"):
-            calendar.Geometry(_Raster(), "bitmap8", 8, 3, 14)
+            calendar.Geometry(_Raster(), "bitmap8", 8, 3, 14, 8)
+
+    def test_narrower_glyphs_widen_the_field(self):
+        gfx = _Raster()
+        display = calendar.Display(
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2, 5),
+            [((5, 5, bytes(13)), _stream([_ev("RAIN", _at(16, 0), color_index=STREAM_YELLOW)]))],
+            get_utc_time=lambda: _NOW, to_local=lambda utc_epoch: utc_epoch, get_refresh_failed=lambda: False,
+        )
+
+        display.initialize()
+
+        # After the start times' right edge at 42: a 10-px glyph cell with 8 px either side.
+        assert [gfx.at(67, _slot_y(0) + 2), gfx.at(68, _slot_y(0) + 2)] == [BLACK, YELLOW]
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +320,7 @@ class TestFailingStream:
         display.initialize()
 
         assert gfx.updates == 1
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["RAIN", "UV"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["RAIN", "UV"]
         assert ("Thu 4 Jun", 75, 0, RED) in gfx.texts
         assert ("!", 231, 3, WHITE) in gfx.texts
         assert {gfx.at(x, y) for x, y in circle_pixels(_BADGE_X, _BADGE_Y, _BADGE_R)} == {RED, WHITE}
@@ -318,7 +343,7 @@ class TestFailingStream:
         display.render()
 
         assert gfx.updates == 2
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["PAPER", "RAIN"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["PAPER", "RAIN"]
         assert ("Thu 4 Jun", 75, 0, GRAY) in gfx.texts
         assert gfx.at(_BADGE_X, _BADGE_Y) == BLACK
 
@@ -334,7 +359,7 @@ class TestFailingStream:
         gfx.get_bounds = lambda: (230, 240)
 
         with pytest.raises(RuntimeError, match="no room for header"):
-            calendar.Geometry(gfx, "bitmap8", 8, 3, 2)
+            calendar.Geometry(gfx, "bitmap8", 8, 3, 2, 8)
 
     def test_a_failed_refresh_marks_the_frame_over_every_streams_events(self, fake_ticks):
         failed = [True]
@@ -344,7 +369,7 @@ class TestFailingStream:
 
         display.initialize()
 
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["RAIN", "UV"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["RAIN", "UV"]
         assert ("Thu 4 Jun", 75, 0, RED) in gfx.texts
         assert ("!", 231, 3, WHITE) in gfx.texts
 
@@ -363,21 +388,65 @@ class TestFailingStream:
 
 
 class TestSlots:
-    def test_an_upcoming_event_fills_its_field_beside_its_dot(self):
+    def test_an_upcoming_event_fills_its_field_beside_its_glyph_in_its_colour(self):
         gfx = _drawn([_ev("RAIN", _at(16, 0), color_index=STREAM_YELLOW)])
         y = _slot_y(0)
 
         assert [gfx.at(_FIELD_X - 1, y + 2), gfx.at(_FIELD_X, y), gfx.at(239, y + 21)] == [BLACK, YELLOW, YELLOW]
         assert gfx.at(_FIELD_X, y + 22) == BLACK
-        assert [gfx.at(51, y + 11), gfx.at(46, y + 11), gfx.at(45, y + 11)] == [YELLOW, YELLOW, BLACK]
+        # The 16-px glyph is centred in the field's 22 rows: its left column, from row 3 to row 18.
+        glyph_column = [gfx.at(x, y + row) for x in (_GLYPH_X, _GLYPH_X + 1) for row in range(3, 19)]
+        assert glyph_column == [YELLOW] * 32
+        assert [gfx.at(_GLYPH_X, y + 2), gfx.at(_GLYPH_X, y + 19), gfx.at(_GLYPH_X + 2, y + 10)] == [BLACK] * 3
         assert ("16:00", 42 - bitmap8_width("16:00", 2), y + 4, GRAY) in gfx.texts
-        assert ("RAIN", 66, y + 4, BLACK) in gfx.texts
+        assert ("RAIN", _LABEL_X, y + 4, BLACK) in gfx.texts
         assert ("in 6h48", _right_x("in 6h48"), y + 4, BLACK) in gfx.texts
+
+    def test_the_rail_breaks_beside_a_field_and_runs_on_between_fields(self):
+        gfx = _drawn([_ev("RAIN", _at(16, 0))])
+        y = _slot_y(0)
+
+        rail = (_RAIL_X, _RAIL_X + 1)
+        assert all(gfx.at(x, row) == BLACK for x in rail for row in range(y, y + 22))
+        assert all(gfx.at(x, row) == DARK_GRAY for x in rail for row in range(y + 22, y + 31))
+
+    def test_the_rail_breaks_beside_a_field_even_where_it_is_wider_than_the_glyphs(self):
+        gfx = _Raster()
+        geometry = calendar.Geometry(gfx, "bitmap8", 8, 3, 1, 1)
+        display = calendar.Display(
+            geometry,
+            [((1, 1, bytes(1)), _stream([_ev("RAIN", _at(16, 0))]))],
+            get_utc_time=lambda: _NOW, to_local=lambda utc_epoch: utc_epoch, get_refresh_failed=lambda: False,
+        )
+
+        display.initialize()
+
+        y = geometry.body_top
+        assert [gfx.at(x, y + 2) for x in (geometry.rail_x - 1, geometry.rail_x)] == [BLACK, BLACK]
+
+    def test_each_event_shows_its_streams_glyph(self):
+        right_glyph = (8, 8, bytes([0x00, 0x00, 0x00, 0x03] * 8))
+        gfx = _drawn(
+            [_ev("LEFT", _at(10, 0), color_index=STREAM_YELLOW)],
+            (right_glyph, [_ev("RIGHT", _at(11, 0), color_index=STREAM_BROWN)]),
+        )
+
+        assert [gfx.at(_GLYPH_X, _slot_y(0) + 10), gfx.at(_GLYPH_X + 15, _slot_y(0) + 10)] == [YELLOW, BLACK]
+        assert [gfx.at(_GLYPH_X, _slot_y(1) + 10), gfx.at(_GLYPH_X + 15, _slot_y(1) + 10)] == [BLACK, BROWN]
+
+    def test_a_glyph_smaller_than_its_cell_is_centred_on_the_rail(self):
+        gfx = _drawn(((3, 2, bytes([0x33, 0x33, 0x33])), [_ev("RAIN", _at(16, 0), color_index=STREAM_YELLOW)]))
+        y = _slot_y(0)
+
+        # 6 by 4 px: three columns either side of the rail's middle, rows 9 to 12 of the field's 22.
+        assert all(gfx.at(x, y + row) == YELLOW for x in range(_RAIL_X - 2, _RAIL_X + 4) for row in range(9, 13))
+        around = [(_RAIL_X - 3, 10), (_RAIL_X + 4, 10), (_RAIL_X, 8), (_RAIL_X, 13)]
+        assert [gfx.at(x, y + row) for x, row in around] == [BLACK] * 4
 
     def test_slots_follow_one_another_at_a_fixed_pitch(self):
         gfx = _drawn([_ev("A", _at(10, 0)), _ev("B", _at(11, 0)), _ev("C", _at(12, 0))])
 
-        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x == 66] == [
+        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x == _LABEL_X] == [
             ("A", _slot_y(0) + 4), ("B", _slot_y(1) + 4), ("C", _slot_y(2) + 4)
         ]
         assert [gfx.at(100, _slot_y(1) - 1), gfx.at(100, _slot_y(1))] == [BLACK, SKY]
@@ -385,15 +454,15 @@ class TestSlots:
     def test_an_event_in_progress_has_a_progress_bar_under_its_field(self):
         gfx = _drawn([_ev("BIO", _at(8, 0), 120, STREAM_BROWN)])
         y = _slot_y(0)
-        # 72 of 120 minutes gone: 108 of the field's 180 px.
-        elapsed_end = _FIELD_X + 108
+        # 72 of 120 minutes gone: 99 of the field's 166 px.
+        elapsed_end = _FIELD_X + 99
 
         assert gfx.at(100, y + 21) == BROWN
         assert all(gfx.at(x, y + row) == WHITE for x in (_FIELD_X, elapsed_end - 1) for row in range(22, 26))
         assert all(gfx.at(x, y + row) == DARK_GRAY for x in (elapsed_end, 239) for row in range(22, 26))
         assert gfx.at(_FIELD_X, y + 26) == BLACK
         assert ("08:00", 0, y + 4, WHITE) in gfx.texts
-        assert ("BIO", 66, y + 4, WHITE) in gfx.texts
+        assert ("BIO", _LABEL_X, y + 4, WHITE) in gfx.texts
         assert ("48m left", _right_x("48m left"), y + 4, WHITE) in gfx.texts
 
     def test_events_in_progress_come_first_in_start_order_across_streams(self):
@@ -402,13 +471,13 @@ class TestSlots:
             [_ev("GRASS", _at(7, 0), 12 * 60, STREAM_RED), _ev("UV", _at(11, 0), 300, STREAM_RED)],
         )
 
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["GRASS", "BIO", "PLAST", "UV"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["GRASS", "BIO", "PLAST", "UV"]
         assert [gfx.at(_FIELD_X, _slot_y(slot) + 22) for slot in range(4)] == [WHITE, WHITE, BLACK, BLACK]
 
     def test_events_starting_together_keep_their_streams_order(self):
         gfx = _drawn([_ev("FIRST", _at(10, 0))], [_ev("SECOND", _at(10, 0))])
 
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["FIRST", "SECOND"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["FIRST", "SECOND"]
 
     def test_ended_events_are_gone(self):
         gfx = _drawn([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
@@ -418,7 +487,7 @@ class TestSlots:
     def test_an_event_in_progress_outlives_a_later_one_that_ended(self):
         gfx = _drawn([_ev("LONG", _at(8, 0), 180), _ev("SHORT", _at(8, 30), 30), _ev("NEXT", _at(10, 0))])
 
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["LONG", "NEXT"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["LONG", "NEXT"]
 
     def test_a_zero_duration_event_starting_now_is_upcoming(self):
         gfx = _drawn([_ev("NOW", _NOW, 0)])
@@ -434,24 +503,26 @@ class TestSlots:
     def test_events_beyond_the_last_slot_are_not_shown(self):
         gfx = _drawn([_ev(str(i), _at(10 + i, 0)) for i in range(_SLOT_COUNT + 2)])
 
-        labels = [text for text, x, *_ in gfx.body_texts() if x == 66]
+        labels = [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X]
         assert labels == [str(i) for i in range(_SLOT_COUNT)]
 
     def test_label_is_cut_to_end_before_the_time_left(self):
         gfx = _drawn([_ev("PLASTIC+METAL", _at(9, 0), 120, STREAM_YELLOW)])
         note_x = _right_x("1h48 left")
 
-        label = next(text for text, x, *_ in gfx.body_texts() if x == 66)
+        label = next(text for text, x, *_ in gfx.body_texts() if x == _LABEL_X)
         assert "PLASTIC+METAL".startswith(label)
-        assert 66 + bitmap8_width(label, 2) <= note_x - 6 < 66 + bitmap8_width("PLASTIC+METAL"[:len(label) + 1], 2)
+        next_prefix = "PLASTIC+METAL"[:len(label) + 1]
+        assert _LABEL_X + bitmap8_width(label, 2) <= note_x - _TEXT_INSET < _LABEL_X + bitmap8_width(next_prefix, 2)
 
     def test_a_long_label_without_a_note_reaches_the_field_inset(self):
         full = "PLASTIC AND METAL WASTE"
         gfx = _drawn([_ev(full, _at(8, 0, day=1))])
 
-        label = next(text for text, x, *_ in gfx.body_texts() if x == 66)
+        label = next(text for text, x, *_ in gfx.body_texts() if x == _LABEL_X)
         assert full.startswith(label)
-        assert 66 + bitmap8_width(label, 2) <= 240 - 6 < 66 + bitmap8_width(full[:len(label) + 1], 2)
+        next_prefix = full[:len(label) + 1]
+        assert _LABEL_X + bitmap8_width(label, 2) <= 240 - _TEXT_INSET < _LABEL_X + bitmap8_width(next_prefix, 2)
 
     def test_an_event_in_progress_since_before_today_shows_its_weekday(self):
         gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60, STREAM_RED)])
@@ -487,7 +558,7 @@ class TestDayHeaders:
         gfx = _drawn([_ev("RAIN", _at(14, 0)), _ev("PLAST", _at(8, 0, day=1)), _ev("BIO", _at(9, 0, day=1)),
                       _ev("MIXED", _at(8, 0, day=6))])
 
-        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x in (_FIELD_X, 66)] == [
+        assert [(text, y) for text, x, y, _pen in gfx.body_texts() if x in (_FIELD_X, _LABEL_X)] == [
             ("RAIN", _slot_y(0) + 4),
             ("Tomorrow", _slot_y(1) + 4),
             ("PLAST", _slot_y(2) + 4),
@@ -512,7 +583,7 @@ class TestDayHeaders:
         gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60)])
 
         assert "Tomorrow" not in gfx.body_strings()
-        assert ("BIRCH", 66, _slot_y(0) + 4, BLACK) in gfx.texts
+        assert ("BIRCH", _LABEL_X, _slot_y(0) + 4, BLACK) in gfx.texts
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +618,7 @@ class TestTimeFrames:
 
         assert ("02:00", 0, y + 4, WHITE) in gfx.texts
         assert "1h30 left" in gfx.body_strings()
-        assert [gfx.at(_FIELD_X + 89, y + 22), gfx.at(_FIELD_X + 90, y + 22)] == [WHITE, DARK_GRAY]
+        assert [gfx.at(_FIELD_X + 82, y + 22), gfx.at(_FIELD_X + 83, y + 22)] == [WHITE, DARK_GRAY]
 
     def test_an_event_in_the_repeated_hours_second_pass_is_upcoming_during_the_first(self):
         # Now 02:45 CEST; the event starts at 02:30 CET, 45 minutes later.
@@ -566,7 +637,7 @@ class TestTimeFrames:
         )
         display.initialize()
 
-        assert [text for text, x, *_ in gfx.body_texts() if x == 66] == ["EARLIER", "LATER"]
+        assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["EARLIER", "LATER"]
 
     def test_days_are_local_dates(self):
         # 23:30 CET on Thursday 8 Jan, and an event at 00:30 CET, still 8 Jan in UTC.

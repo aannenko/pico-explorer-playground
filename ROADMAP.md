@@ -19,7 +19,8 @@ leaves them ambiguous.
 - **Calendar view** — an agenda of every stream's events in start order, from
   those in progress to those starting within a week, under the time and date;
   redrawn as each minute starts, no button interaction. Each event is a colour
-  field beside a dot on a rail, with its start time on the left; events in
+  field beside its stream's glyph on a rail (a bin, a rain cloud, a sun, air
+  or a flower) in the field's colour, with its start time on the left; events in
   progress come first, each with the time left and a progress bar under its
   field, today's later events say how soon they start, and a header names
   each later day. Every row is the same height, so events beyond the last

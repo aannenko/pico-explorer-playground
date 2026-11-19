@@ -13,6 +13,7 @@ from displays.palette import (
     ORANGE,
     WHITE,
 )
+from displays.shared import _icons_data
 from displays.status import StatusDisplay
 from hardware.explorer import (
     BUTTON_A_PIN,
@@ -155,6 +156,14 @@ def _build_sensors_display(
     )
 
 
+def _calendar_glyphs() -> tuple[tuple[int, int, bytes], ...]:
+    """Return the glyph of each of the calendar's streams, in their order: waste, then the Open-Meteo service's
+    precipitation, UV, AQI and a stream per pollen species."""
+    return (
+        _icons_data.GLYPH_WASTE, _icons_data.GLYPH_PRECIP, _icons_data.GLYPH_SUN, _icons_data.GLYPH_AIR
+    ) + (_icons_data.GLYPH_FLOWER,) * len(config.POLLEN_THRESHOLDS)
+
+
 def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
     return calendar.Geometry(
         pico_graphics=pico_graphics,
@@ -162,6 +171,7 @@ def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
         font_height=config.FONT_HEIGHT_PX,
         header_text_scale=config.TEXT_SCALE,
         label_text_scale=_SECONDARY_TEXT_SCALE,
+        glyph_width=max(glyph[0] for glyph in _calendar_glyphs()),
     )
 
 
@@ -176,15 +186,20 @@ def _stream_event_cap(geometry: calendar.Geometry) -> int:
 def _build_calendar_display(
     geometry: calendar.Geometry,
     time_service: TimeService,
-    warning_streams: list,  # list[(int) -> list[Event]]
+    meteo_streams: list,  # list[(int) -> list[Event]]
     get_refresh_failed,  # () -> bool
 ) -> calendar.Display:
+    """Build the calendar of the waste stream and ``meteo_streams``, the Open-Meteo service's streams in its order."""
+    glyphs = _calendar_glyphs()
+    # The waste stream first, so its events come before warnings that start with them.
+    streams = [
+        (glyphs[0], waste.build_stream(time_service, config.WASTE_SCHEDULE, calendar.HORIZON_SEC, geometry.slot_count))
+    ]
+    for i in range(len(meteo_streams)):
+        streams.append((glyphs[i + 1], meteo_streams[i]))
     return calendar.Display(
         geometry=geometry,
-        # The waste stream first, so its events come before warnings that start with them.
-        streams=[
-            waste.build_stream(time_service, config.WASTE_SCHEDULE, calendar.HORIZON_SEC, geometry.slot_count)
-        ] + warning_streams,
+        streams=streams,
         get_utc_time=time_service.utc_now,
         to_local=time_service.to_local,
         get_refresh_failed=get_refresh_failed,

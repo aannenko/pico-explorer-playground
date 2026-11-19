@@ -5,6 +5,7 @@ from picographics import PicoGraphics  # type: ignore
 
 from displays.base import Display as _Display
 from displays.palette import BLACK, DARK_GRAY, GRAY, LABEL_FOR_SLOT, RED, STREAM_COLORS, WHITE
+from displays.shared import icons_p4
 from displays.shared.header import (
     WEEKDAY_NAMES,
     WIDEST_TIME_TEXT,
@@ -34,9 +35,8 @@ _TEXT_INSET_PX = const(6)
 _BAR_PX = const(4)
 _SLOT_GAP_PX = const(5)
 _RAIL_PX = const(2)
-_DOT_R_PX = const(5)
-# Either side of a dot: to the start times and to the fields.
-_DOT_GAP_PX = const(4)
+# Either side of a glyph: to the start times and to the fields.
+_GLYPH_GAP_PX = const(8)
 _BADGE_R_PX = const(7)
 _BADGE_TEXT_SCALE = const(2)
 _NO_STREAM = const(-1)
@@ -68,11 +68,12 @@ def _fitting_prefix(gfx: PicoGraphics, text: str, room_px: int, text_scale: int)
 
 class Geometry:
     """Pixel layout of the Calendar view: a header over ``slot_count`` equal slots, each a colour field with room
-    for a progress bar under it, right of a rail with the start times left of it.  The header keeps room after the
-    widest date for the badge that marks a failed source.
+    for a progress bar under it, right of a rail of stream glyphs with the start times left of it.  The header keeps
+    room after the widest date for the badge that marks a failed source.
 
-    Raises ``RuntimeError`` if the widest header and the badge don't fit the panel width or fewer than two slots fit
-    under it.
+    ``glyph_width`` is the widest glyph's width in its own pixels; glyphs are drawn at ``label_text_scale``.  Raises
+    ``RuntimeError`` if the widest header and the badge don't fit the panel width or fewer than two slots fit under
+    it.
     """
 
     def __init__(
@@ -82,6 +83,7 @@ class Geometry:
         font_height: int,
         header_text_scale: int,
         label_text_scale: int,
+        glyph_width: int,
     ) -> None:
         self.pico_graphics = pico_graphics
         self.width, self.height = pico_graphics.get_bounds()
@@ -105,8 +107,9 @@ class Geometry:
             pico_graphics.measure_text(widest_name(pico_graphics, WEEKDAY_NAMES, label_text_scale),
                                        scale=label_text_scale),
         )
-        self.rail_x = self.time_right + _DOT_GAP_PX + _DOT_R_PX
-        self.field_x = self.rail_x + _DOT_R_PX + _DOT_GAP_PX
+        glyph_cell_width = glyph_width * label_text_scale
+        self.rail_x = self.time_right + _GLYPH_GAP_PX + glyph_cell_width // 2
+        self.field_x = self.time_right + _GLYPH_GAP_PX + glyph_cell_width + _GLYPH_GAP_PX
 
         self.field_height = (font_height - _DESCENDER_ROWS) * label_text_scale + 2 * _FIELD_PAD_PX
         self.slot_pitch = self.field_height + _BAR_PX + _SLOT_GAP_PX
@@ -126,18 +129,21 @@ class Display(_Display):
     starting together keep their streams' order.  Labels are drawn as given, cut to fit, on a field of
     ``STREAM_COLORS[color_index]``, or of its last colour for an index past its end.
 
-    Each of ``streams`` is a getter ``(now_utc) -> list[Event]`` of a stream's events in start order; they may include
-    events already over or starting after the horizon.  The calendar reads each list only while drawing and never
-    changes it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a
-    red date with a badge after it; the same mark shows over every stream's events while ``get_refresh_failed`` says
-    a source's latest refresh failed.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to
+    Each of ``streams`` is a ``(glyph, getter)`` pair.  The glyph, an icon as ``icons_p4.draw_icon`` takes it, no
+    wider than the geometry's ``glyph_width`` nor taller than a field, marks each of the stream's events on the rail,
+    in the event's colour.
+    The getter ``(now_utc) -> list[Event]`` returns the stream's events in start order; they may include events
+    already over or starting after the horizon.  The calendar reads each list only while drawing and never changes
+    it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a red date
+    with a badge after it; the same mark shows over every stream's events while ``get_refresh_failed`` says a
+    source's latest refresh failed.  ``get_utc_time`` returns UTC epoch seconds, and ``to_local`` converts them to
     the local epoch the header, start times and days are drawn in.
     """
 
     def __init__(
         self,
         geometry: Geometry,
-        streams: list,  # list[(int) -> list[Event]]
+        streams: list,  # list[tuple[tuple[int, int, bytes], (int) -> list[Event]]]
         get_utc_time,  # () -> int
         to_local,  # (int) -> int
         get_refresh_failed,  # () -> bool
@@ -190,7 +196,7 @@ class Display(_Display):
         for i in range(len(streams)):
             self._cursors[i] = 0
             try:
-                self._visible[i] = streams[i](now_utc)
+                self._visible[i] = streams[i][1](now_utc)
                 self._skip_over(i, now_utc)
             except Exception as exc:
                 self._visible[i] = ()
@@ -225,7 +231,7 @@ class Display(_Display):
                     break
                 self._draw_day_header(slot, start_local, today)
                 slot += 1
-            self._draw_event(slot, event, now_utc, start_local, in_progress, today)
+            self._draw_event(slot, event, self._streams[stream_index][0], now_utc, start_local, in_progress, today)
             slot += 1
         gfx.update()
 
@@ -278,9 +284,17 @@ class Display(_Display):
         )
 
     def _draw_event(
-        self, slot: int, event: Event, now_utc: int, start_local: int, in_progress: bool, today: int
+        self,
+        slot: int,
+        event: Event,
+        glyph: tuple[int, int, bytes],
+        now_utc: int,
+        start_local: int,
+        in_progress: bool,
+        today: int,
     ) -> None:
-        """Draw ``event`` in ``slot``: its dot, field, label, time left or to go, progress bar and start time."""
+        """Draw ``event`` in ``slot``: its stream's ``glyph``, its field, label, time left or to go, progress bar and
+        start time."""
         geom = self._geom
         gfx = self._gfx
         scale = geom.label_text_scale
@@ -290,8 +304,19 @@ class Display(_Display):
         start = event.start_utc
         pen = _pen(event.color_index)
 
+        # The rail breaks beside the field, so it doesn't show through the glyph.
+        gfx.set_pen(BLACK)
+        gfx.rectangle(geom.rail_x - _RAIL_PX // 2, y, _RAIL_PX, geom.field_height)
+        glyph_width, glyph_height, _ = glyph
+        icons_p4.draw_icon(
+            gfx,
+            glyph,
+            geom.rail_x - glyph_width * scale // 2,
+            y + (geom.field_height - glyph_height * scale) // 2,
+            scale,
+            pen=pen,
+        )
         gfx.set_pen(pen)
-        gfx.circle(geom.rail_x, y + geom.field_height // 2, _DOT_R_PX)
         gfx.rectangle(geom.field_x, y, field_width, geom.field_height)
 
         # Only today's events say how soon they start: a later day's header dates them.

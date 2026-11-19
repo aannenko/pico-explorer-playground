@@ -68,6 +68,19 @@ def test_pixels_sharing_a_slot_set_its_pen_once_even_across_a_transparent_gap() 
     ]
 
 
+def test_a_pen_draws_every_opaque_pixel_in_it_whatever_its_own_colour() -> None:
+    gfx = FakeGfx()
+    icons_p4.draw_icon(gfx, _ICON_2x2, x=10, y=20, scale=1, pen=7)
+    assert gfx.calls == [("set_pen", 7), ("rectangle", 10, 20, 1, 1), ("rectangle", 11, 21, 1, 1)]
+
+
+def test_black_is_a_pen_and_transparency_still_follows_the_icons_own_slots() -> None:
+    gfx = FakeGfx()
+    # 2x1 icon: (0,0)=4, (1,0)=0 -> byte 0x40; slot 4 is transparent, so only slot 0's pixel takes the pen.
+    icons_p4.draw_icon(gfx, (2, 1, bytes([0x40])), x=0, y=0, scale=1, transparent=4, pen=0)
+    assert gfx.calls == [("set_pen", 0), ("rectangle", 1, 0, 1, 1)]
+
+
 def test_real_icon_decodes_within_bounds_and_palette() -> None:
     gfx = FakeGfx()
     w, h, _blob = _icons_data.ICON_THERMO_RED
