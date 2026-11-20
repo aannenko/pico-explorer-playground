@@ -30,9 +30,12 @@ _BODY_MARGIN_PX = const(3)
 _DESCENDER_ROWS = const(1)
 # Above and below a field's text.
 _FIELD_PAD_PX = const(4)
-# From a field's edges to its texts, and between them.
-_TEXT_INSET_PX = const(6)
 _BAR_PX = const(4)
+_STRIPE_PX = const(_BAR_PX)
+# From the stripe to the label, and from the time left or to go to the field's right edge.
+_TEXT_INSET_PX = const(4)
+# Between a label and the time left or to go.
+_NOTE_GAP_PX = const(6)
 _SLOT_GAP_PX = const(5)
 _RAIL_PX = const(2)
 # Either side of a glyph: to the start times and to the fields.
@@ -126,12 +129,13 @@ class Display(_Display):
 
     Each event fills a slot: those in progress come first, each with a progress bar, and the first event of each
     later day follows a day header in a slot of its own.  Events beyond the last slot aren't shown, and events
-    starting together keep their streams' order.  Labels are drawn as given, cut to fit, on a field of
-    ``STREAM_COLORS[color_index]``, or of its last colour for an index past its end.
+    starting together keep their streams' order.  Labels are drawn as given, cut to fit.  A colour index picks
+    ``STREAM_COLORS[index]``, or its last colour for an index past its end.
 
-    Each of ``streams`` is a ``(glyph, getter)`` pair.  The glyph, an icon as ``icons_p4.draw_icon`` takes it, no
-    wider than the geometry's ``glyph_width`` nor taller than a field, marks each of the stream's events on the rail,
-    in the event's colour.
+    Each of ``streams`` is a ``(glyph, color_index, getter)`` triple.  Each of the stream's events fills a field of
+    the stream's ``color_index``, beside the glyph on the rail and behind a stripe at the field's left edge, both in
+    the event's own colour.  The glyph, an icon as ``icons_p4.draw_icon`` takes it, is no wider than the geometry's
+    ``glyph_width`` nor taller than a field.
     The getter ``(now_utc) -> list[Event]`` returns the stream's events in start order; they may include events
     already over or starting after the horizon.  The calendar reads each list only while drawing and never changes
     it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a red date
@@ -143,7 +147,7 @@ class Display(_Display):
     def __init__(
         self,
         geometry: Geometry,
-        streams: list,  # list[tuple[tuple[int, int, bytes], (int) -> list[Event]]]
+        streams: list,  # list[tuple[tuple[int, int, bytes], int, (int) -> list[Event]]]
         get_utc_time,  # () -> int
         to_local,  # (int) -> int
         get_refresh_failed,  # () -> bool
@@ -196,7 +200,7 @@ class Display(_Display):
         for i in range(len(streams)):
             self._cursors[i] = 0
             try:
-                self._visible[i] = streams[i][1](now_utc)
+                self._visible[i] = streams[i][2](now_utc)
                 self._skip_over(i, now_utc)
             except Exception as exc:
                 self._visible[i] = ()
@@ -231,7 +235,7 @@ class Display(_Display):
                     break
                 self._draw_day_header(slot, start_local, today)
                 slot += 1
-            self._draw_event(slot, event, self._streams[stream_index][0], now_utc, start_local, in_progress, today)
+            self._draw_event(slot, event, self._streams[stream_index], now_utc, start_local, in_progress, today)
             slot += 1
         gfx.update()
 
@@ -287,14 +291,14 @@ class Display(_Display):
         self,
         slot: int,
         event: Event,
-        glyph: tuple[int, int, bytes],
+        stream: tuple,  # tuple[tuple[int, int, bytes], int, (int) -> list[Event]]
         now_utc: int,
         start_local: int,
         in_progress: bool,
         today: int,
     ) -> None:
-        """Draw ``event`` in ``slot``: its stream's ``glyph``, its field, label, time left or to go, progress bar and
-        start time."""
+        """Draw ``event`` in ``slot``: its ``stream``'s glyph, its field and stripe, label, time left or to go,
+        progress bar and start time."""
         geom = self._geom
         gfx = self._gfx
         scale = geom.label_text_scale
@@ -302,7 +306,9 @@ class Display(_Display):
         text_y = y + _FIELD_PAD_PX
         field_width = geom.width - geom.field_x
         start = event.start_utc
+        glyph, field_color_index, _ = stream
         pen = _pen(event.color_index)
+        field_pen = _pen(field_color_index)
 
         # The rail breaks beside the field, so it doesn't show through the glyph.
         gfx.set_pen(BLACK)
@@ -316,8 +322,10 @@ class Display(_Display):
             scale,
             pen=pen,
         )
-        gfx.set_pen(pen)
+        gfx.set_pen(field_pen)
         gfx.rectangle(geom.field_x, y, field_width, geom.field_height)
+        gfx.set_pen(pen)
+        gfx.rectangle(geom.field_x, y, _STRIPE_PX, geom.field_height)
 
         # Only today's events say how soon they start: a later day's header dates them.
         if in_progress:
@@ -326,12 +334,12 @@ class Display(_Display):
             note = "in " + _format_duration(start - now_utc)
         else:
             note = ""
-        label_x = geom.field_x + _TEXT_INSET_PX
+        label_x = geom.field_x + _STRIPE_PX + _TEXT_INSET_PX
         label_end = geom.width - _TEXT_INSET_PX
         if note:
             note_x = label_end - gfx.measure_text(note, scale=scale)
-            label_end = note_x - _TEXT_INSET_PX
-        gfx.set_pen(LABEL_FOR_SLOT[pen])
+            label_end = note_x - _NOTE_GAP_PX
+        gfx.set_pen(LABEL_FOR_SLOT[field_pen])
         gfx.text(_fitting_prefix(gfx, event.label, label_end - label_x, scale), label_x, text_y, scale=scale)
         if note:
             gfx.text(note, note_x, text_y, scale=scale)

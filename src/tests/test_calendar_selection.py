@@ -5,7 +5,7 @@ import pytest
 import config_defaults
 from displays.base import Display
 from displays.manager import DisplayManager
-from displays.palette import STREAM_YELLOW
+from displays.palette import STREAM_BLUE, STREAM_GRAY, STREAM_GREEN, STREAM_PINK, STREAM_SKY, STREAM_YELLOW
 from displays.shared import _icons_data
 from scheduling.event import create_event, Event
 from scheduling.providers import waste
@@ -155,17 +155,21 @@ def test_default_pollen_labels_fit_beside_the_widest_time_left(app_module) -> No
     assert panel.presented.count("23h23 left") == len(labels)
 
 
-def test_streams_are_marked_waste_then_in_the_open_meteo_order(app_module) -> None:
+def test_streams_are_marked_and_coloured_by_type_waste_then_in_the_open_meteo_order(app_module) -> None:
     meteo_streams = [(lambda now_utc: []) for _ in range(3 + len(config_defaults.POLLEN_THRESHOLDS))]
     panel = _Panel()
     calendar = app_module._build_calendar_display(
         app_module._build_calendar_geometry(panel), _time_service(lambda: 0), meteo_streams, lambda: False
     )
 
-    assert [glyph for glyph, _ in calendar._streams] == [
-        _icons_data.GLYPH_WASTE, _icons_data.GLYPH_PRECIP, _icons_data.GLYPH_SUN, _icons_data.GLYPH_AIR
-    ] + [_icons_data.GLYPH_FLOWER] * len(config_defaults.POLLEN_THRESHOLDS)
-    assert [getter for _, getter in calendar._streams[1:]] == meteo_streams
+    pollen = [(_icons_data.GLYPH_FLOWER, STREAM_GREEN)] * len(config_defaults.POLLEN_THRESHOLDS)
+    assert [(glyph, color_index) for glyph, color_index, _ in calendar._streams] == [
+        (_icons_data.GLYPH_WASTE, STREAM_GRAY),
+        (_icons_data.GLYPH_PRECIP, STREAM_BLUE),
+        (_icons_data.GLYPH_SUN, STREAM_PINK),
+        (_icons_data.GLYPH_AIR, STREAM_SKY),
+    ] + pollen
+    assert [getter for _, _, getter in calendar._streams[1:]] == meteo_streams
 
 
 def test_the_widest_glyph_sets_where_the_fields_start(app_module, monkeypatch) -> None:
@@ -182,8 +186,9 @@ def test_the_widest_glyph_sets_where_the_fields_start(app_module, monkeypatch) -
 
     calendar.initialize()
 
-    # After the start times' right edge at 42: a 20-px glyph cell with 8 px either side, then the 6-px text inset.
-    assert [args[1] for name, args, _ in panel.calls if name == "text" and args[0] == "AQI"] == [84]
+    # After the start times' right edge at 42: a 20-px glyph cell with 8 px either side, then the 4-px stripe and the
+    # 4-px text inset.
+    assert [args[1] for name, args, _ in panel.calls if name == "text" and args[0] == "AQI"] == [86]
 
 
 @pytest.mark.parametrize(

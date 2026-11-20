@@ -11,6 +11,11 @@ from displays.palette import (
     BLACK,
     GRAY,
     ORANGE,
+    STREAM_BLUE,
+    STREAM_GRAY,
+    STREAM_GREEN,
+    STREAM_PINK,
+    STREAM_SKY,
     WHITE,
 )
 from displays.shared import _icons_data
@@ -156,12 +161,15 @@ def _build_sensors_display(
     )
 
 
-def _calendar_glyphs() -> tuple[tuple[int, int, bytes], ...]:
-    """Return the glyph of each of the calendar's streams, in their order: waste, then the Open-Meteo service's
-    precipitation, UV, AQI and a stream per pollen species."""
+def _calendar_stream_types() -> tuple[tuple[tuple[int, int, bytes], int], ...]:
+    """Return the glyph and field colour index of each of the calendar's streams, in their order: waste, then the
+    Open-Meteo service's precipitation, UV, AQI and a stream per pollen species."""
     return (
-        _icons_data.GLYPH_WASTE, _icons_data.GLYPH_PRECIP, _icons_data.GLYPH_SUN, _icons_data.GLYPH_AIR
-    ) + (_icons_data.GLYPH_FLOWER,) * len(config.POLLEN_THRESHOLDS)
+        (_icons_data.GLYPH_WASTE, STREAM_GRAY),
+        (_icons_data.GLYPH_PRECIP, STREAM_BLUE),
+        (_icons_data.GLYPH_SUN, STREAM_PINK),
+        (_icons_data.GLYPH_AIR, STREAM_SKY),
+    ) + ((_icons_data.GLYPH_FLOWER, STREAM_GREEN),) * len(config.POLLEN_THRESHOLDS)
 
 
 def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
@@ -171,7 +179,7 @@ def _build_calendar_geometry(pico_graphics: PicoGraphics) -> calendar.Geometry:
         font_height=config.FONT_HEIGHT_PX,
         header_text_scale=config.TEXT_SCALE,
         label_text_scale=_SECONDARY_TEXT_SCALE,
-        glyph_width=max(glyph[0] for glyph in _calendar_glyphs()),
+        glyph_width=max(glyph[0] for glyph, _ in _calendar_stream_types()),
     )
 
 
@@ -190,13 +198,19 @@ def _build_calendar_display(
     get_refresh_failed,  # () -> bool
 ) -> calendar.Display:
     """Build the calendar of the waste stream and ``meteo_streams``, the Open-Meteo service's streams in its order."""
-    glyphs = _calendar_glyphs()
+    types = _calendar_stream_types()
+    glyph, color_index = types[0]
     # The waste stream first, so its events come before warnings that start with them.
     streams = [
-        (glyphs[0], waste.build_stream(time_service, config.WASTE_SCHEDULE, calendar.HORIZON_SEC, geometry.slot_count))
+        (
+            glyph,
+            color_index,
+            waste.build_stream(time_service, config.WASTE_SCHEDULE, calendar.HORIZON_SEC, geometry.slot_count),
+        )
     ]
     for i in range(len(meteo_streams)):
-        streams.append((glyphs[i + 1], meteo_streams[i]))
+        glyph, color_index = types[i + 1]
+        streams.append((glyph, color_index, meteo_streams[i]))
     return calendar.Display(
         geometry=geometry,
         streams=streams,

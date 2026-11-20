@@ -79,7 +79,8 @@ POLLEN_THRESHOLDS = [
 
 # Calendar: waste collection schedule.  Each entry:
 #   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
-# label is shown on its field; color_index picks the field color, 0-based:
+# label is shown on its field; color_index picks the colour of its glyph and of
+# the stripe at its field's left edge (waste fields are light gray), 0-based:
 #   0=orange 1=sky 2=yellow 3=pink 4=blue 5=brown 6=gray 7=green 8=red 9=dark gray
 # period_weeks: 1=weekly, 2=biweekly, 0=once.  Set to [] to disable the stream.
 # Labels are shown upper-cased.

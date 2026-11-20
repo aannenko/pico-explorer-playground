@@ -46,7 +46,7 @@ Values are at `S = 1`. All of these would be multiplied by `S` unless noted.
 | `sensors.py` | `_GUTTER_PX` 3, `_MARGIN_PX` 8 | quadrant gutters; every gap between neighbouring texts, icons and graphs, and from a text or icon to the edges and gutter |
 | `sensors.py` | `_BADGE_PADDING_PX` 5, `_BADGE_RING_PX` 2, `_BADGE_BORDER_PX` 2 | black space inside the ring; the ring; black border outside it |
 | `calendar.py` | `_BODY_MARGIN_PX` 3, `_SLOT_GAP_PX` 5 | header→first slot, gap between slots |
-| `calendar.py` | `_FIELD_PAD_PX` 4, `_TEXT_INSET_PX` 6, `_BAR_PX` 4 | above and below a field's text, from a field's edges to its texts, the progress bar under a field |
+| `calendar.py` | `_FIELD_PAD_PX` 4, `_TEXT_INSET_PX` 4, `_NOTE_GAP_PX` 6, `_BAR_PX` 4, `_STRIPE_PX` 4 | above and below a field's text, from the stripe to the label and from the note to the field's right edge, between label and note, the progress bar under a field, the stripe at its left edge |
 | `calendar.py` | `_RAIL_PX` 2, `_GLYPH_GAP_PX` 8 | the rail, a glyph→start time and →field; glyphs draw at the slot text scale |
 | `ring.py` | `_RING_OUTER_MARGIN_PX` 2 | ring→edge |
 | `status.py` | `h // 2 + 5` | subtext offset |

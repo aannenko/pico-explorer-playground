@@ -18,9 +18,12 @@ leaves them ambiguous.
 
 - **Calendar view** — an agenda of every stream's events in start order, from
   those in progress to those starting within a week, under the time and date;
-  redrawn as each minute starts, no button interaction. Each event is a colour
-  field beside its stream's glyph on a rail (a bin, a rain cloud, a sun, air
-  or a flower) in the field's colour, with its start time on the left; events in
+  redrawn as each minute starts, no button interaction. Each event is a field
+  coloured by its type (waste light gray, rain blue, UV pink, air quality sky,
+  pollen green) beside its stream's glyph on a rail (a bin, a rain cloud, a
+  sun, air or a flower); the glyph and a stripe at the field's left edge show
+  the warning's level, or the pickup's colour for waste. Its start time is on
+  the left; events in
   progress come first, each with the time left and a progress bar under its
   field, today's later events say how soon they start, and a header names
   each later day. Every row is the same height, so events beyond the last

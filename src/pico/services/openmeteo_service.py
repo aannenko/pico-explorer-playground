@@ -195,8 +195,8 @@ def _check_header(line: bytes, names: list[bytes]) -> None:
 
 
 class OpenMeteoService(EventStreamService):
-    """Precipitation, UV and AQI streams, then a pollen stream per species in ``pollen_thresholds`` order, each
-    coloured by warning level, from one Open-Meteo forecast request and one air-quality request.
+    """Precipitation, UV and AQI streams, then a pollen stream per species in ``pollen_thresholds`` order, their
+    events coloured by warning level, from one Open-Meteo forecast request and one air-quality request.
 
     The streams are published together: if either request fails, none is, and both are retried after a backoff.
     Warning: both requests run in one deferred job, which blocks rendering and button handling until both return.
