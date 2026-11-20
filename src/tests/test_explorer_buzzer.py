@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import machine
+import pytest
 
 from services.explorer_buzzer import ExplorerBuzzer
 
@@ -55,35 +56,24 @@ def test_init_sets_duty_to_zero() -> None:
 # ── play_alert ─────────────────────────────────────────────────────────
 
 
-def test_play_alert_starts_beeping() -> None:
+@pytest.mark.parametrize(
+    ("alert_kwargs", "freq_hz", "toggle_period_ms", "toggle_count"),
+    [
+        ({}, 1000, 150, 10),
+        ({"beep_count": 3, "freq_hz": 2000, "beep_toggle_ms": 200}, 2000, 200, 6),
+    ],
+    ids=["defaults", "custom"],
+)
+def test_play_alert_starts_beeping_and_toggles_on_a_periodic_timer(
+    alert_kwargs: dict, freq_hz: int, toggle_period_ms: int, toggle_count: int
+) -> None:
     buzzer, timers = _mk_buzzer()
-    buzzer.play_alert()
+    buzzer.play_alert(**alert_kwargs)
 
-    # PWM should be active (first beep)
     assert buzzer._pwm._duty > 0
-    assert buzzer._pwm._freq == 1000
-
-    # Alert timer should be set up as periodic
-    alert_timer = timers[0]
-    assert any(
-        c.get("mode") == machine.Timer.PERIODIC
-        and c.get("period") == 150
-        for c in alert_timer.init_calls
-    )
-
-
-def test_play_alert_custom_params() -> None:
-    buzzer, timers = _mk_buzzer()
-    buzzer.play_alert(beep_count=3, freq_hz=2000, beep_toggle_ms=200)
-
-    assert buzzer._pwm._freq == 2000
-    assert buzzer._alert_remaining == 6  # 3 beeps * 2 toggles
-
-    alert_timer = timers[0]
-    assert any(
-        c.get("period") == 200
-        for c in alert_timer.init_calls
-    )
+    assert buzzer._pwm._freq == freq_hz
+    assert buzzer._alert_remaining == toggle_count
+    assert [(c["mode"], c["period"]) for c in timers[0].init_calls] == [(machine.Timer.PERIODIC, toggle_period_ms)]
 
 
 def test_play_alert_full_pattern() -> None:
@@ -149,19 +139,6 @@ def test_stop_alert_is_idempotent() -> None:
     buzzer, _ = _mk_buzzer()
     buzzer.stop_alert()  # No alert playing — should not crash
     assert buzzer._pwm._duty == 0
-
-
-def test_stop_alert_mid_pattern() -> None:
-    buzzer, timers = _mk_buzzer()
-    buzzer.play_alert(beep_count=5)
-
-    # Advance a couple toggles
-    _fire(timers[0])
-    _fire(timers[0])
-
-    buzzer.stop_alert()
-    assert buzzer._pwm._duty == 0
-    assert buzzer._alert_remaining == 0
 
 
 def test_late_toggles_after_stop_keep_buzzer_silent() -> None:

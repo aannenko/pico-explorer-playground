@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import machine
 import pytest
 
 from services.tick_scheduler import TickScheduler
@@ -21,29 +22,25 @@ def _mk_scheduler(**overrides):
     return sched, timer_factory_created, scheduled
 
 
-def test_start_initializes_periodic_timer() -> None:
-    sched, timers, _ = _mk_scheduler()
+@pytest.mark.parametrize(
+    ("tick_period_ms", "expected_period_ms"),
+    [
+        (250, 250),
+        # The floor keeps absurdly short periods from flooding the schedule queue.
+        (1, 100),
+    ],
+)
+def test_start_runs_a_periodic_timer_at_the_tick_period_raised_to_its_floor(
+    tick_period_ms: int, expected_period_ms: int
+) -> None:
+    sched, timers, _ = _mk_scheduler(tick_period_ms=tick_period_ms)
+    assert sched.tick_period_ms == expected_period_ms
+
     sched.start()
-    timer = timers[0]
-    assert len(timer.init_calls) == 1
-    call = timer.init_calls[0]
-    assert call["period"] == 100
-    import machine
-    assert call["mode"] == machine.Timer.PERIODIC
 
-
-def test_tick_period_ms_exposes_period() -> None:
-    sched, _, _ = _mk_scheduler(tick_period_ms=250)
-    assert sched.tick_period_ms == 250
-
-
-def test_period_below_floor_is_clamped() -> None:
-    sched, _, _ = _mk_scheduler(tick_period_ms=1)
-    # Clamp protects against schedule-queue pressure from absurdly
-    # short periods; see _MIN_PERIOD_MS in tick_scheduler.
-    assert sched.tick_period_ms >= 100
-    sched.start()
-    assert sched.tick_period_ms >= 100
+    assert [(call["mode"], call["period"]) for call in timers[0].init_calls] == [
+        (machine.Timer.PERIODIC, expected_period_ms)
+    ]
 
 
 def test_stop_deinits_timer() -> None:
@@ -124,17 +121,6 @@ def test_schedule_tick_clears_pending_if_schedule_raises() -> None:
     assert calls["n"] == 1
 
 
-def test_tick_clears_pending_even_if_subscriber_raises() -> None:
-    sched, _, _ = _mk_scheduler()
-    sched.register(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    sched._pending = True
-    try:
-        sched._tick(0)
-    except RuntimeError:
-        pass
-    assert sched._pending is False
-
-
 def test_a_job_deferred_by_a_subscriber_runs_once_after_every_subscriber_of_that_tick() -> None:
     sched, _, _ = _mk_scheduler()
     calls: list[str] = []
@@ -207,7 +193,7 @@ def test_a_raising_job_is_logged_and_frees_the_slot(capsys) -> None:
     assert calls == ["recovered"]
 
 
-def test_a_raising_subscriber_still_runs_the_deferred_job() -> None:
+def test_a_raising_subscriber_still_clears_pending_and_runs_the_deferred_job() -> None:
     sched, _, _ = _mk_scheduler()
     calls: list[str] = []
 
@@ -216,10 +202,12 @@ def test_a_raising_subscriber_still_runs_the_deferred_job() -> None:
 
     sched.register(fail)
     sched.try_defer(lambda: calls.append("job"))
+    sched._pending = True
 
     with pytest.raises(RuntimeError, match="boom"):
         sched._tick(0)
 
+    assert sched._pending is False
     assert calls == ["job"]
     assert sched.try_defer(lambda: None) is True
 

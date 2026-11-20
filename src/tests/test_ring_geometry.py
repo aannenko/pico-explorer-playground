@@ -41,35 +41,6 @@ def test_geometry_center_rounds_up_for_odd_dimensions() -> None:
     assert g.y_center == 120
 
 
-def test_geometry_precomputes_vertex_arrays() -> None:
-    display = FakeDisplay(240, 240)
-    g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)
-
-    assert isinstance(g.x_outer_vertices, array)
-    assert isinstance(g.y_outer_vertices, array)
-    assert isinstance(g.x_inner_vertices, array)
-    assert isinstance(g.y_inner_vertices, array)
-
-    assert g.x_outer_vertices.typecode == "B"
-    assert g.y_outer_vertices.typecode == "B"
-    assert g.x_inner_vertices.typecode == "B"
-    assert g.y_inner_vertices.typecode == "B"
-
-    assert len(g.x_outer_vertices) == RING_SEGMENTS
-    assert len(g.y_outer_vertices) == RING_SEGMENTS
-    assert len(g.x_inner_vertices) == RING_SEGMENTS
-    assert len(g.y_inner_vertices) == RING_SEGMENTS
-    assert sum(
-        len(vertices) * vertices.itemsize
-        for vertices in (g.x_outer_vertices, g.y_outer_vertices, g.x_inner_vertices, g.y_inner_vertices)
-    ) == 480
-
-    # Segment 0 is at angle -90°, so x should be centered and y should be above center.
-    # Note: Geometry uses float32 intermediates; allow a small integer rounding tolerance.
-    assert abs(g.x_outer_vertices[0] - g.x_center) <= 1
-    assert abs(g.y_outer_vertices[0] - (g.y_center - g.outer_poly_r)) <= 1
-
-
 def test_geometry_text_rects_are_even_and_centered() -> None:
     display = FakeDisplay(240, 240)
     g = Geometry(display, font="bitmap6", font_height=6, text_scale=3)

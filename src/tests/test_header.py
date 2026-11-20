@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from _fakes import FakePicoGraphics
 from displays.shared.header import format_header_time, header_date_x, header_fits
 
@@ -9,15 +11,15 @@ _DAY_SEC = 86400
 
 
 class TestFormatHeaderTime:
-    def test_typical_timestamp(self):
-        epoch = time.mktime((2026, 4, 10, 17, 56, 0, 0, 0))
-
-        assert format_header_time(epoch) == ("17:56", "Fri 10 Apr")
-
-    def test_midnight_and_single_digit_day(self):
-        epoch = time.mktime((2026, 1, 1, 0, 0, 0, 0, 0))
-
-        assert format_header_time(epoch) == ("00:00", "Thu 1 Jan")
+    @pytest.mark.parametrize(
+        "fields, header",
+        [
+            ((2026, 4, 10, 17, 56, 0, 0, 0), ("17:56", "Fri 10 Apr")),
+            ((2026, 1, 1, 0, 0, 0, 0, 0), ("00:00", "Thu 1 Jan")),
+        ],
+    )
+    def test_formats_a_zero_padded_24_hour_time_and_a_date_with_an_unpadded_day(self, fields, header):
+        assert format_header_time(time.mktime(fields)) == header
 
 
 class TestHeaderDateX:
@@ -46,17 +48,13 @@ class TestHeaderFits:
             for day in range(731)
         )
 
-    def test_shipped_font_and_scale_fit_the_panel(self):
+    @pytest.mark.parametrize("scale, fits", [(3, True), (4, False)])
+    def test_the_header_fits_the_panel_at_the_shipped_scale_but_not_the_next(self, scale, fits):
         """bitmap8/scale 3 must clear the 240 px Explorer, or the Calendar view halts."""
         gfx = FakePicoGraphics()
         width, _height = gfx.get_bounds()
 
-        assert header_fits(gfx, "bitmap8", 3, width)
-
-    def test_rejects_a_scale_that_overflows(self):
-        gfx = FakePicoGraphics()
-
-        assert not header_fits(gfx, "bitmap8", 4, 240)
+        assert header_fits(gfx, "bitmap8", scale, width) is fits
 
     def test_boundary_is_the_widest_real_header(self):
         """The check must bound every date the formatter emits, and no more: it fits exactly the widest one."""

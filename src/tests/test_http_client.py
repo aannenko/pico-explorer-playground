@@ -31,38 +31,24 @@ def _lines(deadline_ms: int = 10_000, **line_bounds) -> list[bytes]:
         return list(response.lines(**line_bounds))
 
 
-def test_delivers_each_line_without_its_line_ending(fake_urequests):
-    fake_urequests.chunks = [b"a,1\nb,2\r\nc,3\n"]
+@pytest.mark.parametrize(
+    "chunks, expected",
+    [
+        ([b"a,1\nb,2\r\nc,3\n"], [b"a,1", b"b,2", b"c,3"]),
+        (
+            [b"time,v\n17", b"94855600,", b"1\r", b"\n17948", b"59200,2\n"],
+            [b"time,v", b"1794855600,1", b"1794859200,2"],
+        ),
+        ([b"a\nlast"], [b"a", b"last"]),
+        ([b"meta\n\ntime\n"], [b"meta", b"", b"time"]),
+        ([], []),
+    ],
+    ids=["lf-and-crlf", "split-across-reads", "final-line-without-newline", "blank-line", "empty-body"],
+)
+def test_delivers_each_line_of_the_body_without_its_line_ending(fake_urequests, chunks, expected):
+    fake_urequests.chunks = chunks
 
-    assert _lines() == [b"a,1", b"b,2", b"c,3"]
-
-
-def test_joins_lines_split_across_reads(fake_urequests):
-    fake_urequests.chunks = [b"time,v\n17", b"94855600,", b"1\r", b"\n17948", b"59200,2\n"]
-
-    assert _lines() == [b"time,v", b"1794855600,1", b"1794859200,2"]
-
-
-def test_reads_bytearray_chunks_as_a_chunked_body_returns_them(fake_urequests):
-    fake_urequests.chunks = [bytearray(b"a\nb"), bytearray(b"c\n")]
-
-    assert _lines() == [b"a", b"bc"]
-
-
-def test_delivers_a_final_line_without_a_newline(fake_urequests):
-    fake_urequests.chunks = [b"a\nlast"]
-
-    assert _lines() == [b"a", b"last"]
-
-
-def test_delivers_blank_lines(fake_urequests):
-    fake_urequests.chunks = [b"meta\n\ntime\n"]
-
-    assert _lines() == [b"meta", b"", b"time"]
-
-
-def test_empty_body_delivers_nothing(fake_urequests):
-    assert _lines() == []
+    assert _lines() == expected
 
 
 def test_reads_at_most_256_bytes_at_a_time(fake_urequests):
@@ -94,28 +80,17 @@ def test_the_default_bounds_take_512_byte_lines_and_10_seconds(fake_urequests, f
 
 @pytest.mark.parametrize(
     "chunks",
-    [
-        [b"x" * 9 + b"\nok\n"],  # a completed line
-        [b"x" * 10, b"x\n"],  # a line still pending after a read
-        [b"x" * 9],  # the final line
-    ],
+    [[b"x" * 9 + b"\nok\n"], [b"x" * 9], [b"x" * 10]],
+    ids=["completed-line", "pending-one-byte-over-not-cr", "pending-two-bytes-over"],
 )
-def test_a_line_over_the_limit_raises_parse_error_and_closes(fake_urequests, chunks):
+def test_a_line_over_the_limit_raises_parse_error_before_the_next_read_and_closes(fake_urequests, chunks):
     fake_urequests.chunks = chunks
+    fake_urequests.raise_at_end = ValueError("Connection closed before body complete")
 
     with pytest.raises(HttpParseError):
         _lines(max_line_bytes=8)
 
     assert fake_urequests.responses[-1].closed is True
-
-
-@pytest.mark.parametrize("chunk", [b"x" * 9, b"x" * 10], ids=["one-byte-over-not-cr", "two-bytes-over"])
-def test_a_pending_line_over_the_limit_raises_before_the_next_read(fake_urequests, chunk):
-    fake_urequests.chunks = [chunk]
-    fake_urequests.raise_at_end = ValueError("Connection closed before body complete")
-
-    with pytest.raises(HttpParseError):
-        _lines(max_line_bytes=8)
 
 
 @pytest.mark.parametrize(
@@ -209,27 +184,26 @@ def test_offline_raises_before_collecting_or_connecting(fake_urequests, monkeypa
     assert fake_urequests.calls == []
 
 
-def test_connect_failure_raises_connect_error(fake_urequests):
-    fake_urequests.raise_on_get = OSError(9999, "unreachable")
+@pytest.mark.parametrize(
+    "exc, error_type",
+    [
+        (OSError(http_client._ETIMEDOUT, "timed out"), HttpTimeoutError),
+        (OSError(http_client._EAGAIN, "timed out"), HttpTimeoutError),
+        (OSError(9999, "unreachable"), HttpConnectError),
+        (OSError(), HttpConnectError),
+        (ValueError("Unsupported protocol: ftp"), HttpProtocolError),
+        (ValueError("HTTP error: BadStatusLine:\nb''"), HttpProtocolError),
+        (NotImplementedError("Redirect 305 not yet supported"), HttpProtocolError),
+    ],
+    ids=[
+        "etimedout", "eagain", "other-errno", "no-errno", "unsupported-scheme", "bad-status-line",
+        "unfollowable-redirect",
+    ],
+)
+def test_a_failed_request_raises_its_http_error(fake_urequests, exc, error_type):
+    fake_urequests.raise_on_get = exc
 
-    with pytest.raises(HttpConnectError):
-        _client().get(_URL)
-
-    assert fake_urequests.responses == []
-
-
-def test_oserror_without_args_is_connect_error(fake_urequests):
-    fake_urequests.raise_on_get = OSError()
-
-    with pytest.raises(HttpConnectError):
-        _client().get(_URL)
-
-
-@pytest.mark.parametrize("code", [http_client._ETIMEDOUT, http_client._EAGAIN])
-def test_timeout_errnos_raise_timeout(fake_urequests, code):
-    fake_urequests.raise_on_get = OSError(code, "timed out")
-
-    with pytest.raises(HttpTimeoutError):
+    with pytest.raises(error_type):
         _client().get(_URL)
 
 
@@ -263,41 +237,24 @@ def test_a_failure_building_the_response_closes_it(fake_urequests, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "exc",
+    "raise_at_end, error_type",
     [
-        ValueError("Unsupported protocol: ftp"),
-        ValueError("HTTP error: BadStatusLine:\nb''"),
-        NotImplementedError("Redirect 305 not yet supported"),
+        (OSError(http_client._ETIMEDOUT, "read timeout"), HttpTimeoutError),
+        (ValueError("Connection closed before body complete"), HttpProtocolError),
     ],
+    ids=["read-timeout", "cut-short"],
 )
-def test_malformed_response_raises_protocol_error(fake_urequests, exc):
-    fake_urequests.raise_on_get = exc
-
-    with pytest.raises(HttpProtocolError):
-        _client().get(_URL)
-
-
-def test_body_read_timeout_raises_timeout_after_the_lines_before_it(fake_urequests):
+def test_a_failed_body_read_raises_after_the_lines_before_it_and_closes(fake_urequests, raise_at_end, error_type):
     fake_urequests.chunks = [b"a\n"]
-    fake_urequests.raise_at_end = OSError(http_client._ETIMEDOUT, "read timeout")
+    fake_urequests.raise_at_end = raise_at_end
     received = []
 
-    with pytest.raises(HttpTimeoutError):
+    with pytest.raises(error_type):
         with _client().get(_URL) as response:
             for line in response.lines():
                 received.append(line)
 
     assert received == [b"a"]
-    assert fake_urequests.responses[-1].closed is True
-
-
-def test_body_cut_short_raises_protocol_error(fake_urequests):
-    fake_urequests.chunks = [b"a\n"]
-    fake_urequests.raise_at_end = ValueError("Connection closed before body complete")
-
-    with pytest.raises(HttpProtocolError):
-        _lines()
-
     assert fake_urequests.responses[-1].closed is True
 
 

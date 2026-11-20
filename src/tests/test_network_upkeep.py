@@ -75,11 +75,18 @@ def test_first_check_comes_a_full_period_after_construction(fake_ticks):
     assert recorder.calls == ["reconnect"]
 
 
-def test_syncs_at_the_check_when_the_link_is_up(fake_ticks):
+@pytest.mark.parametrize("sync_ok", [True, False], ids=["sync-succeeds", "sync-fails"])
+def test_each_check_reconnects_and_syncs_once_until_the_next_one(fake_ticks, sync_ok: bool):
     recorder = _Recorder()
+    recorder.sync_ok = sync_ok
     scheduler = _scheduled_upkeep(_FakeWifi(connected=True), recorder)
     _tick_at(scheduler, fake_ticks, _PERIOD_MS)
     assert recorder.calls == ["reconnect", "sync"]
+    for ticks_ms in (_PERIOD_MS + 500, 2 * _PERIOD_MS - 1):
+        _tick_at(scheduler, fake_ticks, ticks_ms)
+    assert recorder.calls == ["reconnect", "sync"]
+    _tick_at(scheduler, fake_ticks, 2 * _PERIOD_MS)
+    assert recorder.calls == ["reconnect", "sync"] * 2
 
 
 def test_syncs_right_after_a_dropped_link_reconnects(fake_ticks):
@@ -94,16 +101,6 @@ def test_syncs_right_after_a_dropped_link_reconnects(fake_ticks):
     assert recorder.calls == ["reconnect", "sync"]
     _tick_at(scheduler, fake_ticks, _PERIOD_MS + 1_500)
     assert recorder.calls == ["reconnect", "sync"]
-
-
-def test_checks_once_per_period(fake_ticks):
-    recorder = _Recorder()
-    scheduler = _scheduled_upkeep(_FakeWifi(connected=True), recorder)
-    for ticks_ms in (_PERIOD_MS, _PERIOD_MS + 500, 2 * _PERIOD_MS - 1):
-        _tick_at(scheduler, fake_ticks, ticks_ms)
-    assert recorder.calls == ["reconnect", "sync"]
-    _tick_at(scheduler, fake_ticks, 2 * _PERIOD_MS)
-    assert recorder.calls == ["reconnect", "sync"] * 2
 
 
 def test_slow_sync_doesnt_shift_the_next_check(fake_ticks):
@@ -134,15 +131,6 @@ def test_late_sync_doesnt_shift_the_next_check(fake_ticks):
     assert recorder.calls == ["reconnect", "sync"]
     _tick_at(scheduler, fake_ticks, 2 * _PERIOD_MS)
     assert recorder.calls == ["reconnect", "sync"] * 2
-
-
-def test_failed_sync_waits_for_the_next_check(fake_ticks):
-    recorder = _Recorder()
-    recorder.sync_ok = False
-    scheduler = _scheduled_upkeep(_FakeWifi(connected=True), recorder)
-    _tick_at(scheduler, fake_ticks, _PERIOD_MS)
-    _tick_at(scheduler, fake_ticks, _PERIOD_MS + 500)
-    assert recorder.calls == ["reconnect", "sync"]
 
 
 @pytest.mark.parametrize("start_ms", [0, _TICKS_PERIOD_MS - 3 * 24 * _HOUR_MS])

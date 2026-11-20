@@ -176,17 +176,6 @@ def test_presses_count_again_after_a_press_callback_raises(fake_ticks) -> None:
     assert calls == [0, 0]
 
 
-def test_presses_while_the_main_thread_is_busy_run_afterwards_collapsed(fake_ticks) -> None:
-    dispatcher, queue, pins, presses = _build(fake_ticks)
-
-    _tap(fake_ticks, pins[0])
-    _tap(fake_ticks, pins[0])
-    _dispatch(dispatcher, queue)
-    _dispatch(dispatcher, queue)
-
-    assert presses == [0]
-
-
 def test_press_while_its_run_is_queued_collapses_into_it(fake_ticks) -> None:
     dispatcher, queue, pins, presses = _build(fake_ticks)
 
@@ -225,12 +214,13 @@ def test_press_while_another_buttons_run_is_queued_runs_afterwards(fake_ticks) -
     assert presses == [0, 1]
 
 
-def test_collapsed_presses_keep_their_first_press_order(fake_ticks) -> None:
+def test_presses_while_the_main_thread_is_busy_run_afterwards_collapsed_in_first_press_order(fake_ticks) -> None:
     dispatcher, queue, pins, presses = _build(fake_ticks, pin_count=2)
 
     _tap(fake_ticks, pins[0])
     _tap(fake_ticks, pins[1])
     _tap(fake_ticks, pins[0])
+    _dispatch(dispatcher, queue)
     _dispatch(dispatcher, queue)
     _dispatch(dispatcher, queue)
 

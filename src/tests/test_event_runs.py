@@ -23,18 +23,25 @@ def _spans(events) -> list[tuple]:
 
 
 @pytest.mark.parametrize(
-    "value, expected",
-    [(None, 0), (0, 0), (59, 0), (60, 1), (79, 1), (80, 2), (99, 2), (100, 3), (500, 3)],
+    "value, thresholds, expected",
+    [
+        (None, (60, 80, 100), 0),
+        (0, (60, 80, 100), 0),
+        (59, (60, 80, 100), 0),
+        (60, (60, 80, 100), 1),
+        (79, (60, 80, 100), 1),
+        (80, (60, 80, 100), 2),
+        (99, (60, 80, 100), 2),
+        (100, (60, 80, 100), 3),
+        (500, (60, 80, 100), 3),
+        # Precipitation's level 1 starts at any amount, including a reported 0.0 mm.
+        (0.0, (0.0, 2.5, 7.6), 1),
+        (2.49, (0.0, 2.5, 7.6), 1),
+        (7.6, (0.0, 2.5, 7.6), 3),
+    ],
 )
-def test_level_counts_the_thresholds_reached(value, expected):
-    assert level(value, (60, 80, 100)) == expected
-
-
-def test_level_reaches_a_zero_threshold_with_zero():
-    # Precipitation's level 1 starts at any amount, including a reported 0.0 mm.
-    assert level(0.0, (0.0, 2.5, 7.6)) == 1
-    assert level(2.49, (0.0, 2.5, 7.6)) == 1
-    assert level(7.6, (0.0, 2.5, 7.6)) == 3
+def test_level_counts_the_thresholds_reached(value, thresholds, expected):
+    assert level(value, thresholds) == expected
 
 
 # ---------------------------------------------------------------------------

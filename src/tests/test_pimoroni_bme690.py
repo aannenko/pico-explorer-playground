@@ -70,25 +70,6 @@ def test_read_applies_offsets_converts_units_and_stable_status() -> None:
     assert heater == "Stable"
 
 
-def test_read_maps_unstable_status() -> None:
-    FakeBreakoutBME69X.next_reading = (
-        0.0,
-        101_325.0,
-        0.0,
-        0.0,
-        0,  # heater unstable
-    )
-
-    reader = pimoroni_bme690.PimoroniBME690(
-        temp_offset_c=0.0,
-        hum_offset_pct=0.0,
-        prsr_offset_hpa=0.0,
-    )
-
-    *_vals, heater = reader.read()
-    assert heater == "Unstable"
-
-
 def test_gas_is_nan_while_heater_unstable() -> None:
     # Gas resistance is meaningless during heater warm-up, so it must report NaN
     # — a real value would enter SampleHistory as a spurious history column.  The

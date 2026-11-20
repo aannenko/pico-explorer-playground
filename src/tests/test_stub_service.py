@@ -61,14 +61,16 @@ class _Harness:
         return [e.label for e in self.stream(0)]
 
 
-def test_disabled_service_never_fetches() -> None:
+def test_a_disabled_service_never_fetches_or_reports_a_failed_refresh() -> None:
     h = _Harness(enabled=False)
+    h.raise_exc = HttpConnectError("offline")
 
     for _ in range(5):
         h.tick()
 
     assert h.fetch_calls == 0
     assert h.visible_names() == []
+    assert h.service.refresh_failed() is False
 
 
 def test_a_due_refresh_publishes_after_the_tick_s_other_subscribers() -> None:
@@ -81,27 +83,6 @@ def test_a_due_refresh_publishes_after_the_tick_s_other_subscribers() -> None:
     assert seen_by_render == [(0, [])]
     assert h.fetch_calls == 1
     assert h.visible_names() == ["A"]
-
-
-def test_two_due_sources_get_a_render_between_their_refreshes() -> None:
-    scheduler = _scheduler()
-    calls = []
-
-    def fetcher(name: str):
-        def fetch() -> dict:
-            calls.append(name)
-            return _payload((name, 0, 100))
-
-        return fetch
-
-    StubService(fetcher("A"), scheduler, 1000, lambda: 0)
-    StubService(fetcher("B"), scheduler, 1000, lambda: 0)
-    scheduler.register(lambda: calls.append("render"))
-
-    for _ in range(3):
-        scheduler._tick(0)
-
-    assert calls == ["render", "A", "render", "B", "render"]
 
 
 def test_second_fetch_replaces_snapshot_seen_by_existing_getter() -> None:
@@ -118,39 +99,11 @@ def test_second_fetch_replaces_snapshot_seen_by_existing_getter() -> None:
     assert h.stream(0) is not previous
 
 
-def test_a_failed_refresh_is_reported_until_a_refresh_succeeds() -> None:
-    h = _Harness(interval_ms=1000)
-    h.service._backoff_base_ms = 100
-    h.tick()
-    assert h.service.refresh_failed() is False
-
-    h.raise_exc = HttpConnectError("offline")
-    h.advance(1000)
-    h.tick()
-    assert h.service.refresh_failed() is True
-    h.advance(99)
-    h.tick()
-    assert h.service.refresh_failed() is True
-
-    h.raise_exc = None
-    h.advance(1)
-    h.tick()
-    assert h.service.refresh_failed() is False
-
-
-def test_a_disabled_service_never_reports_a_failed_refresh() -> None:
-    h = _Harness(enabled=False)
-    h.raise_exc = HttpConnectError("offline")
-
-    h.tick()
-
-    assert h.service.refresh_failed() is False
-
-
 @pytest.mark.parametrize("failure", ["fetch", "parse"], ids=["fetch-error", "parse-error"])
-def test_failure_keeps_prior_snapshot_until_retry_deadline(failure: str) -> None:
+def test_a_failure_keeps_the_prior_snapshot_and_is_reported_until_a_retry_succeeds(failure: str) -> None:
     h = _Harness(interval_ms=1000)
     h.tick()
+    assert h.service.refresh_failed() is False
     previous = h.stream(0)
     h.service._backoff_base_ms = 100
     h.service._backoff_max_ms = 300
@@ -163,6 +116,7 @@ def test_failure_keeps_prior_snapshot_until_retry_deadline(failure: str) -> None
     h.tick()
 
     assert h.service._failures == 1
+    assert h.service.refresh_failed() is True
     assert h.stream(0) is previous
     assert h.visible_names() == ["A"]
 
@@ -171,23 +125,14 @@ def test_failure_keeps_prior_snapshot_until_retry_deadline(failure: str) -> None
     h.advance(99)
     h.tick()
     assert h.fetch_calls == 2
+    assert h.service.refresh_failed() is True
 
     h.advance(1)
     h.tick()
     assert h.fetch_calls == 3
     assert h.visible_names() == ["B"]
     assert h.service._failures == 0
-
-
-def test_malformed_payload_backs_off_and_emits_nothing() -> None:
-    h = _Harness()
-    h.payload = {"unexpected": "shape"}
-
-    h.tick()
-
-    assert h.fetch_calls == 1
-    assert h.service._failures == 1
-    assert h.visible_names() == []
+    assert h.service.refresh_failed() is False
 
 
 def test_backoff_grows_exponentially_and_caps() -> None:
@@ -344,6 +289,7 @@ def test_a_shared_scheduler_refuses_pending_running_and_reentrant_refreshes_with
 
     a = StubService(fetch_a, scheduler, 1000, lambda: 0)
     b = StubService(fetch_b, scheduler, 1000, lambda: 0)
+    scheduler.register(lambda: calls.append("render"))
 
     a.tick()
     a.tick()
@@ -352,10 +298,10 @@ def test_a_shared_scheduler_refuses_pending_running_and_reentrant_refreshes_with
     assert scheduler._job is a._refresh_ref
 
     scheduler._tick(0)
-    assert calls == ["A"]
+    assert calls == ["render", "A"]
     assert [e.label for e in a.build_streams()[0](0)] == ["A"]
     assert b.build_streams()[0](0) == []
 
     scheduler._tick(0)
-    assert calls == ["A", "B"]
+    assert calls == ["render", "A", "render", "B"]
     assert [e.label for e in b.build_streams()[0](0)] == ["B"]

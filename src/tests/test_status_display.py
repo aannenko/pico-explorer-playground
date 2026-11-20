@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from displays.status import StatusDisplay
 
 
@@ -46,22 +48,20 @@ def _mk_display(width: int = 240, height: int = 240) -> tuple[StatusDisplay, Fak
     return display, gfx
 
 
-def test_show_sets_font_clears_and_draws_centered_text() -> None:
+@pytest.mark.parametrize("subtext_args", [pytest.param((), id="no subtext"), pytest.param(("",), id="empty subtext")])
+def test_show_without_subtext_sets_font_clears_and_draws_centered_text(subtext_args: tuple[str, ...]) -> None:
     display, gfx = _mk_display()
-    display.show("wifi")
+    display.show("wifi", *subtext_args)
 
     call_names = [c[0] for c in gfx.calls]
     assert call_names == ["set_font", "set_pen", "clear", "set_pen", "text", "update"]
 
-    # Verify font
     assert gfx.calls[0] == ("set_font", ("bitmap6",), {})
-    # Background pen then clear
     assert gfx.calls[1] == ("set_pen", (0,), {})
-    # Foreground pen
     assert gfx.calls[3] == ("set_pen", (1,), {})
-    # Text is drawn
     text_call = gfx.calls[4]
     assert text_call[1][0] == "wifi"
+    assert text_call[1][1] == (240 - gfx.measure_text("wifi", scale=3)) // 2
     assert text_call[2] == {"scale": 3}
 
 
@@ -83,36 +83,9 @@ def test_show_with_subtext_draws_both_lines() -> None:
     assert gfx.calls[6][1][0] == "at 13:05"
 
 
-def test_show_without_subtext_does_not_draw_subtext() -> None:
-    display, gfx = _mk_display()
-    display.show("sync time")
-
-    text_calls = [c for c in gfx.calls if c[0] == "text"]
-    assert len(text_calls) == 1
-    assert text_calls[0][1][0] == "sync time"
-
-
-def test_show_empty_subtext_does_not_draw_subtext() -> None:
-    display, gfx = _mk_display()
-    display.show("wifi", "")
-
-    text_calls = [c for c in gfx.calls if c[0] == "text"]
-    assert len(text_calls) == 1
-
-
 def test_precomputed_y_positions() -> None:
     display, _ = _mk_display(width=240, height=240)
     # text_y = (240 // 2) - (6 * 3) = 120 - 18 = 102
     assert display._text_y == 102
     # subtext_y = (240 // 2) + 5 = 125
     assert display._subtext_y == 125
-
-
-def test_text_is_horizontally_centered() -> None:
-    display, gfx = _mk_display(width=240, height=240)
-    display.show("hi")
-
-    text_call = [c for c in gfx.calls if c[0] == "text"][0]
-    text_width = gfx.measure_text("hi", scale=3)
-    expected_x = (240 - text_width) // 2
-    assert text_call[1][1] == expected_x

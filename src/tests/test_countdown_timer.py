@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from services.countdown_timer import (
     CountdownTimer,
     INITIAL,
@@ -22,6 +24,23 @@ def _mk_engine(**overrides):
     return e, on_done_calls, on_configure_calls
 
 
+def _engine_in(state: int) -> tuple[CountdownTimer, list[int], list[int]]:
+    """A 5-minute countdown driven to ``state``, started at 1000 s unless INITIAL, with its callback records cleared."""
+    e, on_done_calls, on_configure_calls = _mk_engine()
+    e.configure("5 min", 300)
+    if state != INITIAL:
+        e.start()
+    if state == PAUSED:
+        e.pause()
+    elif state == DONE:
+        e._get_time = lambda: 1000 + 300
+        e._tick()
+    assert e.state == state
+    on_done_calls.clear()
+    on_configure_calls.clear()
+    return e, on_done_calls, on_configure_calls
+
+
 # ── initial state ──────────────────────────────────────────────────────
 
 
@@ -37,53 +56,20 @@ def test_initial_state() -> None:
 # ── configure ──────────────────────────────────────────────────────────
 
 
-def test_configure_sets_label_and_total_sec() -> None:
-    e, *_ = _mk_engine()
-    e.configure("5 min", 300)
-    assert e.state == INITIAL
-    assert e.label == "5 min"
-    assert e.total_sec == 300
-
-
-def test_configure_from_running_resets_to_initial() -> None:
-    e, _, on_configure_calls = _mk_engine()
-    e.configure("5 min", 300)
-    e.start()
-    assert e.state == RUNNING
-
+@pytest.mark.parametrize("state", [INITIAL, RUNNING, PAUSED, DONE], ids=["initial", "running", "paused", "done"])
+def test_configure_from_any_state_sets_up_the_new_countdown_and_calls_on_configure(state: int) -> None:
+    e, _, on_configure_calls = _engine_in(state)
     e.configure("10 min", 600)
     assert e.state == INITIAL
     assert e.label == "10 min"
     assert e.total_sec == 600
-
-
-def test_configure_from_done_calls_on_configure() -> None:
-    now = 1000
-    e, on_done_calls, on_configure_calls = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
-
-    e._get_time = lambda: 1000 + 300
-    e._tick()
-    assert e.state == DONE
-
-    on_configure_calls.clear()
-    e.configure("10 min", 600)
     assert len(on_configure_calls) == 1
-    assert e.state == INITIAL
-
-
-def test_configure_always_calls_on_configure() -> None:
-    e, _, on_configure_calls = _mk_engine()
-    on_configure_calls.clear()
-    e.configure("5 min", 300)
-    assert len(on_configure_calls) == 1  # fires even from INITIAL
 
 
 # ── start ──────────────────────────────────────────────────────────────
 
 
-def test_start_transitions_to_running() -> None:
+def test_start_counts_down_from_the_total_with_the_clock() -> None:
     e, *_ = _mk_engine()
     e.configure("2 hours", 7200)
     e.start()
@@ -91,6 +77,11 @@ def test_start_transitions_to_running() -> None:
     assert e.state == RUNNING
     assert e.elapsed_sec == 0
     assert e.remaining_sec == 7200
+
+    e._get_time = lambda: 1060
+
+    assert e.elapsed_sec == 60
+    assert e.remaining_sec == 7200 - 60
 
 
 def test_start_ignored_when_not_initial() -> None:
@@ -101,16 +92,10 @@ def test_start_ignored_when_not_initial() -> None:
     assert e.state == RUNNING
 
 
-def test_start_rejected_with_zero_total_sec() -> None:
+@pytest.mark.parametrize("total_sec", [0, -1])
+def test_start_rejected_without_a_positive_total_sec(total_sec: int) -> None:
     e, *_ = _mk_engine()
-    e.configure("zero", 0)
-    e.start()
-    assert e.state == INITIAL
-
-
-def test_start_rejected_with_negative_total_sec() -> None:
-    e, *_ = _mk_engine()
-    e.configure("neg", -1)
+    e.configure("invalid", total_sec)
     e.start()
     assert e.state == INITIAL
 
@@ -118,7 +103,7 @@ def test_start_rejected_with_negative_total_sec() -> None:
 # ── pause / resume ────────────────────────────────────────────────────
 
 
-def test_pause_stores_remaining_time() -> None:
+def test_pause_freezes_the_elapsed_and_remaining_time() -> None:
     now = 1000
     e, *_ = _mk_engine(get_time=lambda: now)
     e.configure("2 hours", 7200)
@@ -127,10 +112,13 @@ def test_pause_stores_remaining_time() -> None:
     now = 1060
     e._get_time = lambda: now
     e.pause()
-
     assert e.state == PAUSED
-    assert e.remaining_sec == 7200 - 60
+
+    now = 9999
+    e._get_time = lambda: now
+
     assert e.elapsed_sec == 60
+    assert e.remaining_sec == 7200 - 60
 
 
 def test_pause_ignored_when_not_running() -> None:
@@ -170,10 +158,9 @@ def test_resume_ignored_when_not_paused() -> None:
 # ── reset ──────────────────────────────────────────────────────────────
 
 
-def test_reset_from_running() -> None:
-    e, *_ = _mk_engine()
-    e.configure("5 min", 300)
-    e.start()
+@pytest.mark.parametrize("state", [INITIAL, RUNNING, PAUSED, DONE], ids=["initial", "running", "paused", "done"])
+def test_reset_from_any_state_discards_progress_and_keeps_the_countdown(state: int) -> None:
+    e, _, on_configure_calls = _engine_in(state)
     e.reset()
 
     assert e.state == INITIAL
@@ -181,139 +168,35 @@ def test_reset_from_running() -> None:
     assert e.total_sec == 300
     assert e.elapsed_sec == 0
     assert e.remaining_sec == 0
-
-
-def test_reset_from_paused() -> None:
-    e, *_ = _mk_engine()
-    e.configure("5 min", 300)
-    e.start()
-    e.pause()
-    e.reset()
-
-    assert e.state == INITIAL
-    assert e.label == "5 min"
-
-
-def test_reset_from_done() -> None:
-    now = 1000
-    e, on_done_calls, on_configure_calls = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
-
-    e._get_time = lambda: 1000 + 300
-    e._tick()
-
-    on_configure_calls.clear()
-    e.reset()
-
-    assert e.state == INITIAL
-    assert e.label == "5 min"
     assert len(on_configure_calls) == 1
-
-
-def test_reset_from_initial_is_noop_equivalent() -> None:
-    e, *_ = _mk_engine()
-    e.configure("5 min", 300)
-    e.reset()
-    assert e.state == INITIAL
-    assert e.label == "5 min"
 
 
 # ── tick ──────────────────────────────────────────────────────────────
 
 
-def test_tick_transitions_to_done_when_time_exceeds_end() -> None:
-    now = 1000
-    e, on_done_calls, _ = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
+@pytest.mark.parametrize("elapsed_sec", [300, 301], ids=["at-end", "past-end"])
+def test_tick_finishes_a_running_countdown_at_or_past_its_end(elapsed_sec: int) -> None:
+    e, on_done_calls, _ = _engine_in(RUNNING)
 
-    e._get_time = lambda: 1000 + 301
+    e._get_time = lambda: 1000 + elapsed_sec
     e._tick()
 
     assert e.state == DONE
     assert len(on_done_calls) == 1
-
-
-def test_tick_does_nothing_when_not_running() -> None:
-    e, on_done_calls, _ = _mk_engine()
-    e.configure("5 min", 300)
-    e._tick()
-
-    assert e.state == INITIAL
-    assert len(on_done_calls) == 0
-
-
-def test_tick_does_nothing_when_paused() -> None:
-    now = 1000
-    e, on_done_calls, _ = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
-    e.pause()
-
-    e._get_time = lambda: 1000 + 301
-    e._tick()
-
-    assert e.state == PAUSED
-    assert len(on_done_calls) == 0
-
-
-def test_tick_does_nothing_when_time_not_reached() -> None:
-    now = 1000
-    e, on_done_calls, _ = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
-
-    e._get_time = lambda: 1000 + 100
-    e._tick()
-
-    assert e.state == RUNNING
-    assert len(on_done_calls) == 0
-
-
-# ── elapsed/remaining accessors ───────────────────────────────────────
-
-
-def test_elapsed_and_remaining_while_running() -> None:
-    now = 1000
-    e, *_ = _mk_engine(get_time=lambda: now)
-    e.configure("2 hours", 7200)
-    e.start()
-
-    now = 1060
-    e._get_time = lambda: now
-
-    assert e.elapsed_sec == 60
-    assert e.remaining_sec == 7200 - 60
-
-
-def test_elapsed_and_remaining_while_paused() -> None:
-    now = 1000
-    e, *_ = _mk_engine(get_time=lambda: now)
-    e.configure("2 hours", 7200)
-    e.start()
-
-    now = 1060
-    e._get_time = lambda: now
-    e.pause()
-
-    # Time advances while paused but accessors stay frozen
-    now = 9999
-    e._get_time = lambda: now
-
-    assert e.elapsed_sec == 60
-    assert e.remaining_sec == 7200 - 60
-
-
-def test_elapsed_and_remaining_in_done() -> None:
-    now = 1000
-    e, *_ = _mk_engine(get_time=lambda: now)
-    e.configure("5 min", 300)
-    e.start()
-
-    e._get_time = lambda: 1000 + 300
-    e._tick()
-
-    assert e.state == DONE
     assert e.elapsed_sec == 300
     assert e.remaining_sec == 0
+
+
+@pytest.mark.parametrize(
+    "state, elapsed_sec",
+    [(INITIAL, 0), (RUNNING, 100), (PAUSED, 301)],
+    ids=["initial", "running-before-end", "paused-past-end"],
+)
+def test_tick_does_nothing_unless_running_at_or_past_the_end(state: int, elapsed_sec: int) -> None:
+    e, on_done_calls, _ = _engine_in(state)
+
+    e._get_time = lambda: 1000 + elapsed_sec
+    e._tick()
+
+    assert e.state == state
+    assert len(on_done_calls) == 0

@@ -63,35 +63,38 @@ def workspace(tmp_path):
 # ---------------------------------------------------------------------
 
 
-def test_empty_user_module_falls_back_to_every_default(workspace) -> None:
-    workspace.write_defaults("FOO = 1\nBAR = 'two'\nBAZ = (1, 2, 3)\n")
+@pytest.mark.parametrize(
+    ("defaults_source", "defaults"),
+    [
+        ("FOO = 1\nBAR = 'two'\nBAZ = (1, 2, 3)\n", {"FOO": 1, "BAR": "two", "BAZ": (1, 2, 3)}),
+        # const() is a MicroPython compile-time hint that returns the bare value at runtime.
+        ("from micropython import const\nPORT = const(8080)\n", {"PORT": 8080}),
+    ],
+    ids=["plain", "const"],
+)
+def test_empty_user_module_falls_back_to_every_default(workspace, defaults_source: str, defaults: dict) -> None:
+    workspace.write_defaults(defaults_source)
     workspace.write_user("")
 
     merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert merged.FOO == 1
-    assert merged.BAR == "two"
-    assert merged.BAZ == (1, 2, 3)
+    for name, value in defaults.items():
+        assert getattr(merged, name) == value
+        assert type(getattr(merged, name)) is type(value)
 
 
-def test_user_override_wins_over_default(workspace) -> None:
-    workspace.write_defaults("FOO = 1\nBAR = 'sample'\n")
+def test_merge_fills_defaults_into_the_user_module_in_place_keeping_its_overrides(workspace) -> None:
+    workspace.write_defaults("FOO = 1\nBAR = 2\n")
     workspace.write_user("FOO = 100\n")
+    pre_imported = __import__(_USER_NAME)
+    assert not hasattr(pre_imported, "BAR")
 
     merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert merged.FOO == 100
-    assert merged.BAR == "sample"
-
-
-def test_apply_returns_user_module_object(workspace) -> None:
-    workspace.write_defaults("FOO = 1\n")
-    workspace.write_user("FOO = 100\n")
-
-    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    # The merged module IS the user module (in-place mutation), not a synthetic copy.
-    assert merged is sys.modules[_USER_NAME]
+    assert merged is pre_imported
+    assert sys.modules[_USER_NAME] is pre_imported
+    assert pre_imported.FOO == 100
+    assert pre_imported.BAR == 2
 
 
 def test_idempotent_apply_returns_same_module_without_rerunning(workspace, capsys) -> None:
@@ -105,21 +108,6 @@ def test_idempotent_apply_returns_same_module_without_rerunning(workspace, capsy
     assert first is second
     # Second call should be a sentinel-guarded no-op: no fresh warning emitted.
     assert "UNKNOWN_KEY" not in capsys.readouterr().out
-
-
-def test_in_place_mutation_visible_to_prior_references(workspace) -> None:
-    """A reference to ``user`` taken *before* the loader runs sees defaults
-    materialise on the same module object after the loader runs."""
-    workspace.write_defaults("FOO = 1\nBAR = 2\n")
-    workspace.write_user("FOO = 100\n")
-
-    pre_imported = __import__(_USER_NAME)
-    assert not hasattr(pre_imported, "BAR")
-
-    config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    assert pre_imported.BAR == 2
-    assert pre_imported.FOO == 100
 
 
 def test_unknown_user_key_emits_warning(workspace, capsys) -> None:
@@ -177,21 +165,6 @@ def test_setting_name_check_neither_indexes_nor_iterates_the_name() -> None:
     assert config_bootstrap._is_public_setting(_UnindexableStr("WIFI_SSID"), 1) is True
 
 
-def test_const_values_round_trip_as_plain_ints(workspace) -> None:
-    """``const()`` is a MicroPython compile-time hint that returns the bare
-    value at runtime — the loader should treat ``const(8080)`` as ``int``."""
-    workspace.write_defaults(
-        "from micropython import const\n"
-        "PORT = const(8080)\n"
-    )
-    workspace.write_user("")
-
-    merged = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    assert merged.PORT == 8080
-    assert type(merged.PORT) is int
-
-
 # ---------------------------------------------------------------------
 # apply_overrides — error paths
 # ---------------------------------------------------------------------
@@ -246,48 +219,34 @@ def test_missing_defaults_module_raises_runtime_error(workspace) -> None:
     assert _DEFAULTS_NAME in str(exc.value)
 
 
-def test_invalid_override_raises_invalid_config_error(workspace) -> None:
-    workspace.write_defaults("BME690_TEMP_OFFSET = -1.7\n")
-    workspace.write_user('BME690_TEMP_OFFSET = "minus two"\n')
+@pytest.mark.parametrize(
+    ("defaults_source", "user_source", "message_fragments"),
+    [
+        ("BME690_TEMP_OFFSET = -1.7\n", 'BME690_TEMP_OFFSET = "minus two"\n', ("BME690_TEMP_OFFSET", "float", "str")),
+        # A user config still on the old 5-tuple SENSOR_*_BANDS shape.
+        (
+            "SENSOR_TEMP_BANDS = (18.0, 25.0, 29.0)\n",
+            "SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)\n",
+            ("SENSOR_TEMP_BANDS", "length 3", "length 5"),
+        ),
+    ],
+    ids=["scalar-type", "tuple-length"],
+)
+def test_invalid_override_raises_invalid_config_error_describing_both_values(
+    workspace, defaults_source: str, user_source: str, message_fragments: tuple[str, str, str]
+) -> None:
+    workspace.write_defaults(defaults_source)
+    workspace.write_user(user_source)
 
     with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
         config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
     msg = str(exc.value)
-    assert "BME690_TEMP_OFFSET" in msg
-    assert "float" in msg
-    assert "str" in msg
-
-
-def test_invalid_tuple_shape_message_mentions_both_lengths(workspace) -> None:
-    """Realistic regression: user kept the old 5-tuple SENSOR_*_BANDS shape."""
-    workspace.write_defaults("SENSOR_TEMP_BANDS = (18.0, 25.0, 29.0)\n")
-    workspace.write_user("SENSOR_TEMP_BANDS = (16, 18, 25, 29, 31)\n")
-
-    with pytest.raises(config_bootstrap.InvalidConfigError) as exc:
-        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    msg = str(exc.value)
-    assert "SENSOR_TEMP_BANDS" in msg
-    assert "length 3" in msg
-    assert "length 5" in msg
-
-
-def test_failed_validation_does_not_set_sentinel(workspace) -> None:
-    """Otherwise a subsequent retry would early-return on a bad module."""
-    workspace.write_defaults("PORT = 8080\n")
-    workspace.write_user('PORT = "eighty-eighty"\n')
-
-    with pytest.raises(config_bootstrap.InvalidConfigError):
-        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    user_module = sys.modules[_USER_NAME]
-    assert not getattr(user_module, "_CONFIG_BOOTSTRAP_MERGED", False)
+    for fragment in message_fragments:
+        assert fragment in msg
 
 
 def test_failed_validation_does_not_mutate_user_module(workspace) -> None:
-    """Pass 1 must validate every key before pass 2 starts mutating, so a
-    later mismatch can't leave the user module half-merged."""
     workspace.write_defaults("AAA = 1\nBBB = 2\nCCC = 3\n")
     # User overrides AAA correctly but breaks CCC; without two-pass, BBB
     # might get filled in before CCC's mismatch fires.
@@ -298,8 +257,10 @@ def test_failed_validation_does_not_mutate_user_module(workspace) -> None:
 
     user_module = sys.modules[_USER_NAME]
     assert user_module.AAA == 100
-    assert not hasattr(user_module, "BBB")  # default NOT copied in
+    assert not hasattr(user_module, "BBB")
     assert user_module.CCC == "not an int"
+    # The merged sentinel would make a retry return the bad module unvalidated.
+    assert not hasattr(user_module, "_CONFIG_BOOTSTRAP_MERGED")
 
 
 def test_invalid_config_message_lists_extra_mismatch_count(workspace) -> None:
@@ -351,20 +312,21 @@ def test_compat_same_scalar_types_match() -> None:
     assert fn([1, 2], [3, 4]) is True
 
 
-def test_compat_mismatched_scalar_types_reject() -> None:
-    fn = config_bootstrap._is_compatible
-    assert fn(1, "a") is False
-    assert fn("a", 1) is False
-    assert fn((1, 2), [3, 4]) is False
-    assert fn([1, 2], (3, 4)) is False
-
-
-def test_compat_bool_int_strictly_rejected() -> None:
-    """``bool`` is a subclass of ``int`` in Python, but ``type(True) is int``
-    is False — config compatibility should also reject the swap."""
-    fn = config_bootstrap._is_compatible
-    assert fn(True, 1) is False
-    assert fn(1, True) is False
+@pytest.mark.parametrize(
+    ("expected", "actual"),
+    [
+        (1, "a"),
+        ("a", 1),
+        # bool is a subclass of int, but neither may override the other.
+        (True, 1),
+        (1, True),
+        (1, 1.0),
+        pytest.param([1, 2], (1, 2), id="tuple-for-list"),
+        pytest.param((1, 2), [1, 2], id="list-for-tuple"),
+    ],
+)
+def test_compat_rejects_an_override_of_another_type(expected, actual) -> None:
+    assert config_bootstrap._is_compatible(expected, actual) is False
 
 
 def test_compat_int_widens_to_float() -> None:
@@ -372,11 +334,6 @@ def test_compat_int_widens_to_float() -> None:
     assert fn(1.0, 5) is True
     assert fn(0.0, 0) is True
     assert fn(-1.7, -2) is True
-
-
-def test_compat_float_does_not_narrow_to_int() -> None:
-    fn = config_bootstrap._is_compatible
-    assert fn(1, 1.0) is False
 
 
 def test_compat_tuple_length_mismatch_rejects() -> None:
@@ -442,12 +399,6 @@ def test_compat_list_of_tuples_validates_element_shape() -> None:
     assert fn(default, [("BIO", (2026, 6, 4), 6, 0, 60, "2")]) is False  # wrong element type
 
 
-def test_compat_list_tuple_cross_type_rejected() -> None:
-    fn = config_bootstrap._is_compatible
-    assert fn([1, 2], (1, 2)) is False     # tuple override of list default
-    assert fn((1, 2), [1, 2]) is False     # list override of tuple default
-
-
 def test_compat_list_element_widens_int_to_float() -> None:
     """The int->float widening propagates into a variadic list's element template."""
     fn = config_bootstrap._is_compatible
@@ -471,56 +422,41 @@ def test_compat_list_nested_in_tuple_stays_variadic() -> None:
 # ---------------------------------------------------------------------
 
 
-def test_variadic_list_override_accepts_longer_list(workspace) -> None:
-    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
-    workspace.write_user('BUS_STOPS = ["U11006Z1", "U11006Z2"]\n')
+@pytest.mark.parametrize(
+    ("default", "override"),
+    [
+        (["U11006Z1"], ["U11006Z1", "U11006Z2"]),
+        (["Zlicin"], []),
+        (
+            [("", (2026, 1, 1), 0, 0, 0, 1)],
+            [("BIO", (2026, 6, 4), 6, 0, 60, 2), ("PLAST", (2026, 6, 5), 6, 0, 60, 2)],
+        ),
+    ],
+    ids=["longer", "empty", "list-of-tuples"],
+)
+def test_variadic_list_override_replaces_its_default(workspace, default: list, override: list) -> None:
+    workspace.write_defaults(f"SETTING = {default!r}\n")
+    workspace.write_user(f"SETTING = {override!r}\n")
 
     cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
 
-    assert cfg.BUS_STOPS == ["U11006Z1", "U11006Z2"]
+    assert cfg.SETTING == override
 
 
-def test_variadic_list_override_accepts_empty(workspace) -> None:
-    workspace.write_defaults('BUS_DESTINATION_FILTER = ["Zlicin"]\n')
-    workspace.write_user("BUS_DESTINATION_FILTER = []\n")
-
-    cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    assert cfg.BUS_DESTINATION_FILTER == []
-
-
-def test_variadic_list_rejects_wrong_element_type(workspace) -> None:
-    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
-    workspace.write_user('BUS_STOPS = ["ok", 42]\n')
-
-    with pytest.raises(config_bootstrap.InvalidConfigError):
-        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-
-def test_variadic_list_of_tuples_accepts_well_shaped_entries(workspace) -> None:
-    workspace.write_defaults("WASTE_SCHEDULE = [('', (2026, 1, 1), 0, 0, 0, 1)]\n")
-    workspace.write_user(
-        "WASTE_SCHEDULE = [('BIO', (2026, 6, 4), 6, 0, 60, 2),"
-        " ('PLAST', (2026, 6, 5), 6, 0, 60, 2)]\n"
-    )
-
-    cfg = config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-    assert len(cfg.WASTE_SCHEDULE) == 2
-    assert cfg.WASTE_SCHEDULE[0][0] == "BIO"
-
-
-def test_variadic_list_of_tuples_rejects_bad_entry_shape(workspace) -> None:
-    workspace.write_defaults("WASTE_SCHEDULE = [('', (2026, 1, 1), 0, 0, 0, 1)]\n")
-    workspace.write_user("WASTE_SCHEDULE = [('BIO',)]\n")
-
-    with pytest.raises(config_bootstrap.InvalidConfigError):
-        config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)
-
-
-def test_list_default_rejects_tuple_override(workspace) -> None:
-    workspace.write_defaults('BUS_STOPS = ["U11006Z1"]\n')
-    workspace.write_user('BUS_STOPS = ("U11006Z1",)\n')
+@pytest.mark.parametrize(
+    ("default", "override"),
+    [
+        (["U11006Z1"], ["ok", 42]),
+        ([("", (2026, 1, 1), 0, 0, 0, 1)], [("BIO",)]),
+        (["U11006Z1"], ("U11006Z1",)),
+    ],
+    ids=["wrong-element-type", "wrong-entry-shape", "tuple-override"],
+)
+def test_variadic_list_override_of_another_shape_raises_invalid_config_error(
+    workspace, default: list, override: list | tuple
+) -> None:
+    workspace.write_defaults(f"SETTING = {default!r}\n")
+    workspace.write_user(f"SETTING = {override!r}\n")
 
     with pytest.raises(config_bootstrap.InvalidConfigError):
         config_bootstrap.apply_overrides(_DEFAULTS_NAME, _USER_NAME)

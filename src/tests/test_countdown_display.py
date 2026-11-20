@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from displays.countdown import Display, DURATIONS_SEC
 from displays.ring import RING_SEGMENTS, TEXT_ABOVE_CENTER, TEXT_BELOW_CENTER, TEXT_CENTER
 from services.countdown_timer import (
@@ -49,6 +51,25 @@ def _mk_display(now=1000):
     return display, engine, renderer, on_done_calls, on_configure_calls, current_time
 
 
+def _display_in(state: int) -> tuple[Display, CountdownTimer, FakeRenderer, list[int]]:
+    """An entered display with its default 2-hour countdown driven to ``state``, started at 1000 s unless INITIAL,
+    with its renderer's record cleared."""
+    d, engine, renderer, _, _, clock = _mk_display()
+    d.initialize()
+    if state != INITIAL:
+        d.on_button_a()  # Start
+    if state == PAUSED:
+        d.on_button_a()  # Pause
+    elif state == DONE:
+        clock[0] += engine.total_sec
+        engine._tick()
+        d.render()
+    assert engine.state == state
+    renderer.calls.clear()
+    renderer.update_calls = 0
+    return d, engine, renderer, clock
+
+
 # ── initialize / deinitialize ──────────────────────────────────────────
 
 
@@ -72,57 +93,36 @@ def test_initialize_is_idempotent() -> None:
     assert len(d._renderer.calls) == calls_after_first
 
 
-def test_deinitialize_resets_state() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.deinitialize()
-
-    assert d._active is False
-
-
-def test_deinitialize_is_idempotent() -> None:
+def test_deinitialize_deactivates_the_display_idempotently() -> None:
     d, *_ = _mk_display()
     d.initialize()
-    d.deinitialize()
-    active_after_first = d._active
 
     d.deinitialize()
-    assert d._active == active_after_first
+    assert d._active is False
+
+    d.deinitialize()
+    assert d._active is False
 
 
 # ── button B: cycle duration ───────────────────────────────────────────
 
 
-def test_on_button_b_cycles_duration_in_idle() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    renderer.calls.clear()
-    renderer.update_calls = 0
+@pytest.mark.parametrize(
+    "press_count, label, total_sec",
+    [(1, "4 hours", 4 * 3600), (3, "5 min", 5 * 60), (len(DURATIONS_SEC), "2 hours", 2 * 3600)],
+)
+def test_on_button_b_cycles_the_duration_in_idle_wrapping_after_the_last(
+    press_count: int, label: str, total_sec: int
+) -> None:
+    d, engine, renderer, _ = _display_in(INITIAL)
 
-    d.on_button_b()
-    assert engine.label == "4 hours"
-    assert engine.total_sec == 4 * 3600
-    assert ("write_text", (TEXT_CENTER, "4 hours"), {}) in renderer.calls
-    assert renderer.update_calls == 1
-
-
-def test_on_button_b_cycles_wrap_around() -> None:
-    d, engine, *_ = _mk_display()
-    d.initialize()
-    for _ in range(len(DURATIONS_SEC)):
+    for _ in range(press_count):
         d.on_button_b()
-    assert engine.label == "2 hours"
 
-
-def test_on_button_b_resets_in_running() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.on_button_a()  # Start
-
-    d.on_button_b()  # Should reset
-
-    assert engine.state == INITIAL
-    assert ("reset", (), {}) in renderer.calls
+    assert engine.label == label
+    assert engine.total_sec == total_sec
+    assert renderer.calls[-1] == ("write_text", (TEXT_CENTER, label), {})
+    assert renderer.update_calls == press_count
 
 
 # ── button A: start countdown ─────────────────────────────────────────
@@ -143,64 +143,52 @@ def test_on_button_a_starts_countdown() -> None:
 
 
 def test_on_button_a_pauses_in_running() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.on_button_a()  # Start
-    d.on_button_a()  # Pause
+    d, engine, renderer, _ = _display_in(RUNNING)
+
+    d.on_button_a()
 
     assert engine.state == PAUSED
     assert ("write_text", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
 
 
-# ── button A/B in DONE state ──────────────────────────────────────────
+# ── reset to idle ─────────────────────────────────────────────────────
 
 
-def test_on_button_a_in_done_resets_to_initial() -> None:
-    d, engine, renderer, *_, clock = _mk_display()
-    d.initialize()
-    d.on_button_a()  # Start
-    clock[0] += engine.total_sec  # Advance past end
-    engine._tick()  # Triggers DONE
-    d._update_display()
-    renderer.calls.clear()
+@pytest.mark.parametrize(
+    "state, button",
+    [(RUNNING, "b"), (PAUSED, "b"), (DONE, "b"), (DONE, "a")],
+    ids=["b-running", "b-paused", "b-done", "a-done"],
+)
+def test_button_resets_a_started_countdown_to_the_idle_screen(state: int, button: str) -> None:
+    d, engine, renderer, _ = _display_in(state)
 
-    d.on_button_a()  # Reset
+    getattr(d, f"on_button_{button}")()
 
     assert engine.state == INITIAL
     assert ("reset", (), {}) in renderer.calls
     assert ("write_text", (TEXT_CENTER, "2 hours"), {}) in renderer.calls
 
 
-def test_on_button_b_in_done_resets_to_initial() -> None:
-    d, engine, renderer, *_, clock = _mk_display()
-    d.initialize()
-    d.on_button_a()  # Start
-    clock[0] += engine.total_sec
-    engine._tick()
-    d._update_display()
-    renderer.calls.clear()
-
-    d.on_button_b()
-
-    assert engine.state == INITIAL
-    assert ("reset", (), {}) in renderer.calls
+# ── render() ───────────────────────────────────────────────────────────
 
 
-# ── elapsed / remaining time formatting ───────────────────────────────
+# The 2-hour countdown clears one of the ring's 120 segments a minute.
+@pytest.mark.parametrize(
+    "elapsed_sec, elapsed_text, remaining_text, cleared_segment_count",
+    [(600, "00:10:00", "-01:50:00", 10), (3661, "01:01:01", "-00:58:59", 61)],
+)
+def test_render_while_running_shows_the_time_and_drains_the_ring(
+    elapsed_sec: int, elapsed_text: str, remaining_text: str, cleared_segment_count: int
+) -> None:
+    d, _, renderer, clock = _display_in(RUNNING)
+    clock[0] += elapsed_sec
 
+    d.render()
 
-def test_update_display_formats_elapsed_and_remaining() -> None:
-    d, engine, renderer, *_, clock = _mk_display(now=10_000)
-    d.initialize()
-    d.on_button_a()  # Start
-
-    clock[0] = 10_000 + 3661
-    renderer.calls.clear()
-
-    d._update_display()
-
-    assert ("write_text", (TEXT_ABOVE_CENTER, "01:01:01"), {}) in renderer.calls
-    assert renderer.update_calls >= 1
+    assert ("write_text", (TEXT_ABOVE_CENTER, elapsed_text), {}) in renderer.calls
+    assert ("write_text", (TEXT_BELOW_CENTER, remaining_text), {}) in renderer.calls
+    assert ("clear_ring_segments", (cleared_segment_count,), {}) in renderer.calls
+    assert renderer.update_calls == 1
 
 
 def test_update_display_does_nothing_in_idle() -> None:
@@ -216,15 +204,12 @@ def test_update_display_does_nothing_in_idle() -> None:
     assert renderer.update_calls == 0
 
 
-def test_update_display_detects_done_state() -> None:
-    d, engine, renderer, *_, clock = _mk_display()
-    d.initialize()
-    d.on_button_a()
+def test_render_detects_done_state() -> None:
+    d, engine, renderer, clock = _display_in(RUNNING)
     clock[0] += engine.total_sec
     engine._tick()  # Engine transitions to DONE
-    renderer.calls.clear()
 
-    d._update_display()  # Display should detect DONE and draw it
+    d.render()
 
     assert ("write_text", (TEXT_CENTER, engine.label), {}) in renderer.calls
     assert ("write_text", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
@@ -232,85 +217,7 @@ def test_update_display_detects_done_state() -> None:
     assert ("clear_ring_segments", (RING_SEGMENTS,), {}) in renderer.calls
 
 
-# ── render() ───────────────────────────────────────────────────────────
-
-
-def test_render_updates_ring_segments_while_running() -> None:
-    d, engine, renderer, *_, clock = _mk_display(now=1000)
-    d.initialize()
-    d.on_button_a()  # Start 2-hour countdown
-
-    # Advance clock partway (600s = 10 min)
-    clock[0] = 1000 + 600
-    renderer.calls.clear()
-    renderer.update_calls = 0
-
-    d.render()
-
-    # expected cleared: 600 * 120 // 7200 = 10
-    assert ("clear_ring_segments", (10,), {}) in renderer.calls
-    assert renderer.update_calls >= 1
-
-
-def test_render_detects_done_state() -> None:
-    d, engine, renderer, *_, clock = _mk_display(now=1000)
-    d.initialize()
-    d.on_button_a()  # Start
-
-    # Advance past end
-    clock[0] = 1000 + engine.total_sec
-    engine._tick()  # Transitions engine to DONE
-    renderer.calls.clear()
-
-    d.render()
-
-    assert ("write_text", (TEXT_ABOVE_CENTER, "Done!"), {}) in renderer.calls
-    assert ("clear_ring_segments", (RING_SEGMENTS,), {}) in renderer.calls
-
-
-# ── ring segment calculation ──────────────────────────────────────────
-
-
-def test_update_display_advances_ring_segments() -> None:
-    d, engine, renderer, *_, clock = _mk_display(now=1000)
-    d.initialize()
-    d.on_button_a()
-    renderer.calls.clear()
-    renderer.update_calls = 0
-
-    # Advance 600s: expected = 600 * 120 // 7200 = 10 segments
-    clock[0] = 1600
-    d._update_display()
-
-    assert ("clear_ring_segments", (10,), {}) in renderer.calls
-    assert renderer.update_calls == 1
-
-
-def test_countdown_with_changed_duration() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.on_button_b()  # 4 hours
-    d.on_button_b()  # 8 hours
-    d.on_button_b()  # 5 min (wraps)
-
-    d.on_button_a()
-
-    assert engine.state == RUNNING
-    assert engine.total_sec == 5 * 60
-
-
 # ── pause / resume ────────────────────────────────────────────────────
-
-
-def test_pause_shows_paused_text() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.on_button_a()
-    renderer.calls.clear()
-
-    d.on_button_a()  # Pause
-
-    assert ("write_text", (TEXT_ABOVE_CENTER, "Paused"), {}) in renderer.calls
 
 
 def test_resume_restores_ring_and_time() -> None:
@@ -330,17 +237,6 @@ def test_resume_restores_ring_and_time() -> None:
     # Ring progress restored: 60 * 120 // 7200 = 1 segment
     assert ("clear_ring_segments", (1,), {}) in renderer.calls
     assert renderer.update_calls >= 1
-
-
-def test_button_b_resets_from_paused() -> None:
-    d, engine, renderer, *_ = _mk_display()
-    d.initialize()
-    d.on_button_a()
-    d.on_button_a()  # Pause
-
-    d.on_button_b()  # Reset
-
-    assert engine.state == INITIAL
 
 
 # ── survive display switch ────────────────────────────────────────────

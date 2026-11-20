@@ -83,14 +83,10 @@ def started_wifi(wifi, fake_wlan, fake_timer, fake_ticks):
 
 # --- start_connect() ---
 
-def test_start_connect_transitions_to_connecting(started_wifi):
-    wifi, fake_wlan, *_ = started_wifi
+def test_start_connect_connects_and_starts_the_timer(started_wifi):
+    wifi, fake_wlan, fake_timer, _ = started_wifi
     assert wifi.state == wifi_client.CONNECTING
     assert fake_wlan._connect_calls == [("MySSID", "pass")]
-
-
-def test_start_connect_starts_timer(started_wifi):
-    _, _, fake_timer, _ = started_wifi
     assert fake_timer.init_called
 
 
@@ -129,15 +125,6 @@ def _exhaust_alarm_pool(**_kwargs):
     raise OSError(errno.ENOMEM, "ENOMEM")
 
 
-def test_start_connect_raises_and_fails_when_no_timer_starts(wifi, fake_wlan, fake_timer, fake_ticks):
-    fake_timer.init = _exhaust_alarm_pool
-
-    with pytest.raises(OSError):
-        wifi.start_connect("MySSID", "pass")
-
-    assert wifi.state == wifi_client.FAILED
-
-
 def test_link_joined_after_a_timer_failure_counts_as_connected(wifi, fake_wlan, fake_timer, fake_ticks):
     fake_timer.init = _exhaust_alarm_pool
     with pytest.raises(OSError):
@@ -148,10 +135,11 @@ def test_link_joined_after_a_timer_failure_counts_as_connected(wifi, fake_wlan, 
     assert wifi.is_connected() is True
 
 
-def test_start_connect_retries_after_a_timer_failure(wifi, fake_wlan, fake_timer, fake_ticks):
+def test_start_connect_fails_when_no_timer_starts_and_the_next_call_retries(wifi, fake_wlan, fake_timer, fake_ticks):
     fake_timer.init = _exhaust_alarm_pool
     with pytest.raises(OSError):
         wifi.start_connect("MySSID", "pass")
+    assert wifi.state == wifi_client.FAILED
     del fake_timer.init
 
     wifi.start_connect("MySSID", "pass")
@@ -191,69 +179,45 @@ def test_connect_exception_on_retry_is_printed(started_wifi, capsys):
 
 # --- _tick() transitions ---
 
-def test_tick_connecting_to_connected(started_wifi):
-    wifi, fake_wlan, *_ = started_wifi
-    fake_wlan._status_value = STAT_GOT_IP
+@pytest.mark.parametrize(
+    "status, expected_state, expected_disconnect_calls",
+    [(STAT_GOT_IP, wifi_client.CONNECTED, 0), (STAT_WRONG_PASSWORD, wifi_client.FAILED, 1)],
+    ids=["got-ip", "wrong-password"],
+)
+def test_tick_ends_the_attempt_on_a_final_status_and_stops_the_timer(
+    started_wifi, status, expected_state, expected_disconnect_calls
+):
+    wifi, fake_wlan, fake_timer, _ = started_wifi
+    fake_wlan._status_value = status
     wifi._tick(wifi._generation)
-    assert wifi.state == wifi_client.CONNECTED
-
-
-def test_tick_connecting_wrong_password(started_wifi):
-    wifi, fake_wlan, *_ = started_wifi
-    fake_wlan._status_value = STAT_WRONG_PASSWORD
-    wifi._tick(wifi._generation)
-    assert wifi.state == wifi_client.FAILED
-    assert fake_wlan._disconnect_calls >= 1
-
-
-def test_tick_connecting_stays_connecting(started_wifi):
-    wifi, fake_wlan, *_ = started_wifi
-    fake_wlan._status_value = STAT_CONNECTING
-    wifi._tick(wifi._generation)
-    assert wifi.state == wifi_client.CONNECTING
+    assert wifi.state == expected_state
+    assert fake_wlan._disconnect_calls == expected_disconnect_calls
+    assert fake_timer.deinit_called
 
 
 # --- _tick() retry on transient failure ---
 
-def test_tick_retry_on_no_ap_found(started_wifi):
+@pytest.mark.parametrize("status", [STAT_NO_AP_FOUND, STAT_CONNECT_FAIL], ids=["no-ap-found", "connect-fail"])
+def test_tick_retries_a_failed_join_at_once(started_wifi, status):
     wifi, fake_wlan, *_ = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
-    fake_wlan._status_value = STAT_NO_AP_FOUND
+    fake_wlan._status_value = status
     wifi._tick(wifi._generation)
     assert len(fake_wlan._connect_calls) == connect_count + 1
 
 
-def test_tick_retry_on_connect_fail(started_wifi):
-    wifi, fake_wlan, *_ = started_wifi
-    connect_count = len(fake_wlan._connect_calls)
-
-    fake_wlan._status_value = STAT_CONNECT_FAIL
-    wifi._tick(wifi._generation)
-    assert len(fake_wlan._connect_calls) == connect_count + 1
-
-
-def test_tick_retry_on_attempt_ttl_exceeded(started_wifi):
+@pytest.mark.parametrize("status", [STAT_CONNECTING, STAT_IDLE], ids=["connecting", "unknown"])
+def test_tick_retries_an_unresolved_status_only_past_the_attempt_ttl(started_wifi, status):
     wifi, fake_wlan, _, ticks = started_wifi
     connect_count = len(fake_wlan._connect_calls)
 
-    fake_wlan._status_value = STAT_CONNECTING
-    ticks[0] = 15_000  # exceeds _ATTEMPT_TTL_MS (10s)
+    fake_wlan._status_value = status
     wifi._tick(wifi._generation)
-    assert fake_wlan._disconnect_calls >= 1
-    assert len(fake_wlan._connect_calls) == connect_count + 1
-
-
-def test_tick_retry_on_unknown_status(started_wifi):
-    """Unknown WLAN status (e.g. STAT_IDLE=0) triggers retry after TTL."""
-    wifi, fake_wlan, _, ticks = started_wifi
-    connect_count = len(fake_wlan._connect_calls)
-
-    fake_wlan._status_value = STAT_IDLE
-    wifi._tick(wifi._generation)
+    assert wifi.state == wifi_client.CONNECTING
     assert len(fake_wlan._connect_calls) == connect_count
 
-    ticks[0] = 15_000
+    ticks[0] = 15_000  # exceeds _ATTEMPT_TTL_MS (10s)
     wifi._tick(wifi._generation)
     assert fake_wlan._disconnect_calls >= 1
     assert len(fake_wlan._connect_calls) == connect_count + 1
@@ -284,22 +248,6 @@ def test_tick_after_cooldown_elapses(started_wifi):
     fake_wlan._status_value = STAT_GOT_IP
     wifi._tick(wifi._generation)
     assert wifi.state == wifi_client.CONNECTED
-
-
-# --- Timer stop on terminal state ---
-
-def test_tick_stops_timer_on_connected(started_wifi):
-    wifi, fake_wlan, fake_timer, _ = started_wifi
-    fake_wlan._status_value = STAT_GOT_IP
-    wifi._tick(wifi._generation)
-    assert fake_timer.deinit_called
-
-
-def test_tick_stops_timer_on_failed(started_wifi):
-    wifi, fake_wlan, fake_timer, _ = started_wifi
-    fake_wlan._status_value = STAT_WRONG_PASSWORD
-    wifi._tick(wifi._generation)
-    assert fake_timer.deinit_called
 
 
 # --- Generation counter ---
@@ -361,17 +309,11 @@ def test_connect_empty_ssid(wifi):
 
 # --- reset() ---
 
-def test_reset_stops_timer(started_wifi):
+def test_reset_abandons_a_connect_attempt_and_stops_its_timer(started_wifi):
     wifi, _, fake_timer, _ = started_wifi
     wifi.reset()
-    assert fake_timer.deinit_called
-
-
-def test_reset_from_connecting(started_wifi):
-    wifi, *_ = started_wifi
-    assert wifi.state == wifi_client.CONNECTING
-    wifi.reset()
     assert wifi.state == wifi_client.IDLE
+    assert fake_timer.deinit_called
 
 
 def test_reset_from_connected(started_wifi):
@@ -384,23 +326,15 @@ def test_reset_from_connected(started_wifi):
 
 # --- is_connected() ---
 
-def test_is_connected_true(started_wifi):
+@pytest.mark.parametrize("link_up", [True, False])
+def test_is_connected_follows_the_wlan_link_not_the_state(started_wifi, link_up):
     wifi, fake_wlan, *_ = started_wifi
     fake_wlan._status_value = STAT_GOT_IP
-    fake_wlan._connected = True
+    fake_wlan._connected = link_up
     wifi._tick(wifi._generation)
-    assert wifi.is_connected() is True
+    assert wifi.state == wifi_client.CONNECTED
+    assert wifi.is_connected() is link_up
 
 
 def test_is_connected_false(wifi):
-    assert wifi.is_connected() is False
-
-
-def test_is_connected_checks_hardware(started_wifi):
-    """is_connected() checks actual WLAN, not just state variable."""
-    wifi, fake_wlan, *_ = started_wifi
-    fake_wlan._status_value = STAT_GOT_IP
-    fake_wlan._connected = False
-    wifi._tick(wifi._generation)
-    assert wifi.state == wifi_client.CONNECTED
     assert wifi.is_connected() is False

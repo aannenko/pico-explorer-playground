@@ -198,13 +198,6 @@ class TestLifecycle:
 
         assert gfx.updates == 2
 
-    def test_no_events_stay_pinned_between_redraws(self):
-        display, _gfx, _clock = _display([_ev("RAIN", _at(11, 0))])
-
-        display.initialize()
-
-        assert display._visible == [()]
-
     def test_a_redraw_that_raises_pins_no_events_and_retries_at_the_next_minute(self, fake_ticks):
         def raise_memory_error(*args, **kwargs) -> None:
             raise MemoryError
@@ -259,9 +252,16 @@ class TestLifecycle:
         assert ("09:13", 0, 0, WHITE) in gfx.texts
         assert ("in 1h47", _right_x("in 1h47"), _slot_y(0) + 4, BLACK) in gfx.texts
 
-    def test_too_wide_a_header_fails_at_construction(self):
+    @pytest.mark.parametrize(
+        "width, header_text_scale",
+        [pytest.param(240, 4, id="too wide a header"), pytest.param(230, 3, id="no room for the badge")],
+    )
+    def test_a_header_and_badge_wider_than_the_panel_fail_at_construction(self, width, header_text_scale):
+        gfx = _Raster()
+        gfx.get_bounds = lambda: (width, 240)
+
         with pytest.raises(RuntimeError, match="no room for header"):
-            calendar.Geometry(_Raster(), "bitmap8", 8, 4, 2, 8)
+            calendar.Geometry(gfx, "bitmap8", 8, header_text_scale, 2, 8)
 
     def test_too_few_slots_fail_at_construction(self):
         with pytest.raises(RuntimeError, match="no room for two slots"):
@@ -361,13 +361,6 @@ class TestFailingStream:
         assert ("Mon 20 Mar", 75, 0, RED) in gfx.texts
         badge_left = min(x for x, _y in circle_pixels(_BADGE_X, _BADGE_Y, _BADGE_R))
         assert badge_left - (75 + bitmap8_width("Mon 20 Mar", 3)) == 3
-
-    def test_a_header_without_room_for_the_badge_fails_at_construction(self):
-        gfx = _Raster()
-        gfx.get_bounds = lambda: (230, 240)
-
-        with pytest.raises(RuntimeError, match="no room for header"):
-            calendar.Geometry(gfx, "bitmap8", 8, 3, 2, 8)
 
     def test_a_failed_refresh_marks_the_frame_over_every_streams_events(self, fake_ticks):
         failed = [True]
@@ -505,11 +498,6 @@ class TestSlots:
 
         assert [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X] == ["FIRST", "SECOND"]
 
-    def test_ended_events_are_gone(self):
-        gfx = _drawn([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
-
-        assert "DONE" not in gfx.body_strings()
-
     def test_an_event_in_progress_outlives_a_later_one_that_ended(self):
         gfx = _drawn([_ev("LONG", _at(8, 0), 180), _ev("SHORT", _at(8, 30), 30), _ev("NEXT", _at(10, 0))])
 
@@ -533,37 +521,25 @@ class TestSlots:
         labels = [text for text, x, *_ in gfx.body_texts() if x == _LABEL_X]
         assert labels == [str(i) for i in range(_SLOT_COUNT)]
 
-    def test_label_is_cut_to_end_before_the_time_left(self):
-        gfx = _drawn([_ev("PLASTIC+METAL", _at(9, 0), 120, STREAM_YELLOW)])
-        note_x = _right_x("1h48 left")
+    @pytest.mark.parametrize(
+        "event, label_end",
+        [
+            pytest.param(
+                _ev("PLASTIC+METAL", _at(9, 0), 120, STREAM_YELLOW), _right_x("1h48 left") - _NOTE_GAP,
+                id="before the time left",
+            ),
+            pytest.param(_ev("PLASTIC AND METAL WASTE", _at(8, 0, day=1)), 240 - _TEXT_INSET, id="without a note"),
+        ],
+    )
+    def test_a_long_label_is_cut_to_end_before_its_note_or_else_the_field_inset(self, event, label_end):
+        gfx = _drawn([event])
 
         label = next(text for text, x, *_ in gfx.body_texts() if x == _LABEL_X)
-        assert "PLASTIC+METAL".startswith(label)
-        next_prefix = "PLASTIC+METAL"[:len(label) + 1]
-        assert _LABEL_X + bitmap8_width(label, 2) <= note_x - _NOTE_GAP < _LABEL_X + bitmap8_width(next_prefix, 2)
+        assert event.label.startswith(label)
+        next_prefix = event.label[:len(label) + 1]
+        assert _LABEL_X + bitmap8_width(label, 2) <= label_end < _LABEL_X + bitmap8_width(next_prefix, 2)
 
-    def test_a_long_label_without_a_note_reaches_the_field_inset(self):
-        full = "PLASTIC AND METAL WASTE"
-        gfx = _drawn([_ev(full, _at(8, 0, day=1))])
-
-        label = next(text for text, x, *_ in gfx.body_texts() if x == _LABEL_X)
-        assert full.startswith(label)
-        next_prefix = full[:len(label) + 1]
-        assert _LABEL_X + bitmap8_width(label, 2) <= 240 - _TEXT_INSET < _LABEL_X + bitmap8_width(next_prefix, 2)
-
-    def test_an_event_in_progress_since_before_today_shows_its_weekday(self):
-        gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60, STREAM_RED)])
-
-        assert ("Wed", 42 - bitmap8_width("Wed", 2), _slot_y(0) + 4, WHITE) in gfx.texts
-        assert "1d20 left" in gfx.body_strings()
-
-    def test_an_event_starting_at_the_horizon_is_not_shown(self):
-        gfx = _drawn([_ev("NEAR", _NOW + calendar.HORIZON_SEC - 1), _ev("FAR", _NOW + calendar.HORIZON_SEC)])
-
-        assert "NEAR" in gfx.body_strings()
-        assert "FAR" not in gfx.body_strings()
-
-    def test_a_clock_stepped_back_shows_again_the_events_not_over_then(self, fake_ticks):
+    def test_an_event_ending_now_is_gone_until_the_clock_steps_back_before_its_end(self, fake_ticks):
         display, gfx, clock = _display([_ev("DONE", _at(8, 0), 72), _ev("NEXT", _at(10, 0))])
         display.initialize()
         assert "DONE" not in gfx.body_strings()
@@ -606,11 +582,12 @@ class TestDayHeaders:
         assert "Tomorrow" not in gfx.body_strings()
         assert "PLAST" not in gfx.body_strings()
 
-    def test_an_event_in_progress_gets_no_day_header(self):
-        gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60)])
+    def test_an_event_in_progress_since_before_today_shows_its_weekday_and_no_day_header(self):
+        gfx = _drawn([_ev("BIRCH", _at(6, 0, day=-1), 3 * 24 * 60, STREAM_RED)])
 
-        assert "Tomorrow" not in gfx.body_strings()
+        assert gfx.body_strings() == ["BIRCH", "1d20 left", "Wed"]
         assert ("BIRCH", _LABEL_X, _slot_y(0) + 4, BLACK) in gfx.texts
+        assert ("Wed", 42 - bitmap8_width("Wed", 2), _slot_y(0) + 4, WHITE) in gfx.texts
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +662,7 @@ class TestTimeFrames:
 
         assert ("00:10", 42 - bitmap8_width("00:10", 2), _slot_y(0) + 4, WHITE) in gfx.texts
 
-    def test_the_horizon_is_real_time_from_now(self):
+    def test_an_event_starting_at_the_horizon_real_time_from_now_is_not_shown(self):
         gfx = _cet_drawn(_NOW, _ev("NEAR", _NOW + calendar.HORIZON_SEC - 1), _ev("FAR", _NOW + calendar.HORIZON_SEC))
 
         assert "NEAR" in gfx.body_strings()

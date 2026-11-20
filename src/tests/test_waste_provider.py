@@ -74,18 +74,19 @@ def test_the_slot_count_and_the_horizon_bound_the_list():
     assert _starts(_stream(pickup, horizon_sec=_WEEK + _DAY)(_ANCHOR_UTC)) == [_ANCHOR_UTC, _ANCHOR_UTC + _WEEK]
 
 
-def test_an_occurrence_in_progress_is_listed_until_it_ends():
-    stream = _stream([("BIO", 5, _ANCHOR, 6, 0, 60, 1)])
+@pytest.mark.parametrize(
+    "duration_min, listed_sec",
+    [
+        (60, _HOUR),
+        # A zero duration lasts its one instant.
+        (0, 1),
+    ],
+)
+def test_an_occurrence_is_listed_until_it_is_over(duration_min: int, listed_sec: int):
+    stream = _stream([("BIO", 5, _ANCHOR, 6, 0, duration_min, 1)])
 
-    assert _starts(stream(_ANCHOR_UTC + _HOUR - 1))[0] == _ANCHOR_UTC
-    assert _starts(stream(_ANCHOR_UTC + _HOUR))[0] == _ANCHOR_UTC + _WEEK
-
-
-def test_a_zero_duration_occurrence_is_listed_at_its_instant():
-    stream = _stream([("BIO", 5, _ANCHOR, 6, 0, 0, 1)])
-
-    assert _starts(stream(_ANCHOR_UTC))[0] == _ANCHOR_UTC
-    assert _starts(stream(_ANCHOR_UTC + 1))[0] == _ANCHOR_UTC + _WEEK
+    assert _starts(stream(_ANCHOR_UTC + listed_sec - 1))[0] == _ANCHOR_UTC
+    assert _starts(stream(_ANCHOR_UTC + listed_sec))[0] == _ANCHOR_UTC + _WEEK
 
 
 def test_a_one_off_ends_for_good_but_shows_again_after_the_clock_steps_back():
@@ -112,16 +113,17 @@ def test_the_wall_clock_time_holds_across_dst_changes():
     assert events[2].start_utc - events[1].start_utc == _WEEK - _HOUR
 
 
-def test_a_pickup_in_the_skipped_hour_starts_at_the_jump():
-    events = _stream([("BIO", 5, (2026, 3, 29), 2, 30, 60, 0)])(utc_epoch(2026, 3, 28, 0, 0, 0))
+@pytest.mark.parametrize(
+    "day, start_utc",
+    [
+        pytest.param((2026, 3, 29), utc_epoch(2026, 3, 29, 1, 0, 0), id="in the skipped hour, at the jump"),
+        pytest.param((2026, 10, 25), utc_epoch(2026, 10, 25, 0, 30, 0), id="in the repeated hour, at its first pass"),
+    ],
+)
+def test_a_pickup_starts_when_the_clock_first_shows_its_time(day: tuple[int, int, int], start_utc: int):
+    events = _stream([("BIO", 5, day, 2, 30, 60, 0)])(utc_epoch(*day, 0, 0, 0) - _DAY)
 
-    assert _starts(events) == [utc_epoch(2026, 3, 29, 1, 0, 0)]
-
-
-def test_a_pickup_in_the_repeated_hour_starts_at_its_first_pass():
-    events = _stream([("BIO", 5, (2026, 10, 25), 2, 30, 60, 0)])(utc_epoch(2026, 10, 24, 0, 0, 0))
-
-    assert _starts(events) == [utc_epoch(2026, 10, 25, 0, 30, 0)]
+    assert _starts(events) == [start_utc]
 
 
 def test_an_occurrence_in_progress_across_the_spring_forward_is_listed():

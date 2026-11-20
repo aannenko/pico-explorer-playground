@@ -65,25 +65,13 @@ def _uv(*rows):
 # --- precipitation ---------------------------------------------------------
 
 
-def test_precip_below_threshold_hours_emit_nothing():
-    assert _precip((10, 1.0, 61, 0), (0, 0.0, 0, 0)) == []
-
-
 def test_prob_equal_threshold_emits():
     assert len(_precip((30, 1.0, 61, 0))) == 1
 
 
-@pytest.mark.parametrize("row", [(None, 1.0, 61, 0), (90, 1.0, None, 0), (90, 0.0, 0, 0)])
-def test_a_missing_probability_or_a_non_precipitation_code_emits_nothing(row):
+@pytest.mark.parametrize("row", [(10, 1.0, 61, 0), (None, 1.0, 61, 0), (90, 1.0, None, 0), (90, 0.0, 0, 0)])
+def test_a_probability_below_the_threshold_or_missing_or_a_non_precipitation_code_emits_nothing(row):
     assert _precip(row) == []
-
-
-def test_single_qualifying_hour_emits_one_event():
-    events = _precip((50, 1.0, 61, 0))
-
-    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
-        ("RAIN", _T0, _HOUR, STREAM_YELLOW)
-    ]
 
 
 @pytest.mark.parametrize(
@@ -95,14 +83,15 @@ def test_single_qualifying_hour_emits_one_event():
         (7.59, STREAM_ORANGE),
         (7.6, STREAM_RED),
         (20.0, STREAM_RED),
+        (None, STREAM_YELLOW),
     ],
 )
-def test_amount_sets_the_level(mm, expected_index):
-    assert _precip((80, mm, 61, 0))[0].color_index == expected_index
+def test_a_qualifying_hour_is_one_event_at_its_amount_s_level(mm, expected_index):
+    events = _precip((80, mm, 61, 0))
 
-
-def test_none_precipitation_amount_still_warns_at_level_1():
-    assert _precip((80, None, 61, 0))[0].color_index == STREAM_YELLOW
+    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
+        ("RAIN", _T0, _HOUR, expected_index)
+    ]
 
 
 def test_precip_contiguous_hours_merge_at_their_highest_level():
@@ -191,28 +180,21 @@ def _by_species(**pollen) -> dict[str, list[tuple[str, int]]]:
     return {species: pollen.get(species, []) for species in _SPECIES}
 
 
-def test_air_below_threshold_hours_emit_nothing():
-    assert _air_hours(_row(10)) == ([], [[]] * len(_SPECIES))
-
-
-def test_none_values_emit_nothing():
-    assert _air_hours(_row(None, grass=None)) == ([], [[]] * len(_SPECIES))
-
-
-def test_single_aqi_hour_is_one_event():
-    events = _aqi(_row(60))
-
-    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
-        ("AQI", _T0, _HOUR, STREAM_YELLOW)
-    ]
+@pytest.mark.parametrize("row", [_row(10), _row(None, grass=None)], ids=["below-threshold", "missing"])
+def test_air_below_threshold_or_missing_emits_nothing(row):
+    assert _air_hours(row) == ([], [[]] * len(_SPECIES))
 
 
 @pytest.mark.parametrize(
     "aqi, expected_index",
     [(60, STREAM_YELLOW), (79, STREAM_YELLOW), (80, STREAM_ORANGE), (99, STREAM_ORANGE), (100, STREAM_RED)],
 )
-def test_aqi_sets_the_level(aqi, expected_index):
-    assert _aqi(_row(aqi))[0].color_index == expected_index
+def test_an_aqi_hour_is_one_event_at_its_level(aqi, expected_index):
+    events = _aqi(_row(aqi))
+
+    assert [(e.label, e.start_utc, e.duration_sec, e.color_index) for e in events] == [
+        ("AQI", _T0, _HOUR, expected_index)
+    ]
 
 
 @pytest.mark.parametrize(
@@ -314,13 +296,6 @@ def test_digits_only_parse_to_ints_and_other_numbers_to_floats():
     assert [[type(value) for value in values] for _, values in hours] == [[int, float], [float, float]]
 
 
-def test_a_metric_named_as_a_prefix_of_another_column_is_rejected():
-    header = b"time,precipitation_probability (%),uv_index ()"
-
-    with pytest.raises(HttpParseError):
-        _parse(_body(header, b"%d,0,0" % _T0, b"%d,0,0" % (_T0 + _HOUR)))
-
-
 def test_a_column_without_a_unit_matches_its_metric():
     hours = _parse(_body(b"time,precipitation,uv_index", b"%d,1,2" % _T0, b"%d,3,4" % (_T0 + _HOUR)))
 
@@ -333,6 +308,9 @@ def test_a_column_without_a_unit_matches_its_metric():
         _body(_PARSER_HEADER, b"%d,0" % _T0, b"%d,0,0" % (_T0 + _HOUR)),  # a short row
         _body(_PARSER_HEADER, b"%d,0,x" % _T0, b"%d,0,0" % (_T0 + _HOUR)),  # a non-number
         _body(b"time,precipitation (mm)", b"%d,0" % _T0),  # a header short of a metric
+        _body(  # a metric named as a prefix of another column
+            b"time,precipitation_probability (%),uv_index ()", b"%d,0,0" % _T0, b"%d,0,0" % (_T0 + _HOUR)
+        ),
         _body(_PARSER_HEADER, b"%d,0,0" % _T0),  # a row missing
         _body(_PARSER_HEADER),  # only the header
         _body(  # a row extra
@@ -389,10 +367,9 @@ def _air_csv(*rows: bytes) -> list[bytes]:
 
 class _FakeHttpClient:
     """Serves the forecast and air-quality requests a real ``Response`` over their own body, or raises their own
-    exception, or ``HttpConnectError("offline")`` before either while ``connected`` is false."""
+    exception."""
 
     def __init__(self) -> None:
-        self.connected = True
         self.forecast_lines = _forecast_csv(b"80,1.0,61,0")  # rain
         self.air_lines = _air_csv(b"60,0.0,0.0,0.0,0.0,0.0")  # AQI warning
         self.forecast_exc = None
@@ -402,8 +379,6 @@ class _FakeHttpClient:
         self.bodies: list[FakeBody] = []
 
     def get(self, url: str) -> Response:
-        if not self.connected:
-            raise HttpConnectError("offline")
         self.urls.append(url)
         is_air = url.startswith("http://air-quality-api.")
         exc = self.air_exc if is_air else self.forecast_exc
@@ -550,89 +525,39 @@ def test_second_fetch_refreshes_the_streams():
     assert h.visible_names() == _names(["SNOW"], [], [], grass=["GRASS"])
 
 
-def test_an_offline_refresh_fails_and_keeps_the_streams_until_one_succeeds():
-    h = _Harness()
-    h.fetch()
-    h.http_client.connected = False
-    h.http_client.forecast_lines = _forecast_csv(b"80,1.0,71,0")
-    h.advance(1000)
-
-    h.fetch()
-
-    assert h.service.refresh_failed() is True
-    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
-
-    h.http_client.connected = True
-    h.advance(5000)
-    h.fetch()
-
-    assert h.service.refresh_failed() is False
-    assert h.visible_names() == _names(["SNOW"], [], ["AQI"])
-
-
-def test_a_failed_forecast_request_skips_the_air_request_and_keeps_the_prior_snapshot():
-    h = _Harness()
-    h.fetch()
-
-    h.http_client.forecast_exc = HttpConnectError("down")
-    h.advance(1000)
-    h.fetch()
-
-    assert h.requested_hosts()[2:] == ["api.open-meteo.com"]
-    assert h.service._failures == 1
-    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
-
-
-def test_a_failed_air_request_publishes_no_stream_and_backs_off():
-    h = _Harness()
-    h.fetch()
-
-    h.http_client.forecast_lines = _forecast_csv(b"80,1.0,71,0")
-    h.http_client.air_exc = HttpConnectError("down")
-    h.advance(1000)
-    h.fetch()
-
-    assert h.service._failures == 1
-    assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
-
-
-def test_a_failed_read_backs_off_and_closes_the_body():
-    h = _Harness()
-    h.http_client.read_exc = OSError(9999, "connection reset")
-
-    h.fetch()
-
-    assert h.service._failures == 1
-    assert h.visible_names() == _names([], [], [])
-    assert [body.closed for body in h.http_client.bodies] == [True]
-
-
-def test_a_truncated_body_backs_off_without_publishing_and_closes_it():
-    h = _Harness()
-    h.http_client.air_lines = h.http_client.air_lines[:-1]
-
-    h.fetch()
-
-    assert h.service._failures == 1
-    assert h.visible_names() == _names([], [], [])
-    assert [body.closed for body in h.http_client.bodies] == [True, True]
-
-
-@pytest.mark.parametrize("source", ["forecast", "air"], ids=["forecast-truncated", "air-truncated"])
-def test_a_parse_failure_keeps_every_previously_published_stream(source: str) -> None:
+@pytest.mark.parametrize(
+    "attribute, value, requested_hosts, body_count",
+    [
+        pytest.param("forecast_exc", HttpConnectError("down"), ["api.open-meteo.com"], 0, id="forecast-request"),
+        pytest.param(
+            "air_exc", HttpConnectError("down"), ["api.open-meteo.com", "air-quality-api.open-meteo.com"], 1,
+            id="air-request",
+        ),
+        pytest.param("read_exc", OSError(9999, "connection reset"), ["api.open-meteo.com"], 1, id="read"),
+        pytest.param(
+            "forecast_lines", _forecast_csv(b"80,1.0,71,0")[:-1], ["api.open-meteo.com"], 1, id="forecast-truncated"
+        ),
+        pytest.param(
+            "air_lines", _air_csv(b"10,0.0,0.0,2.0,0.0,0.0")[:-1],
+            ["api.open-meteo.com", "air-quality-api.open-meteo.com"], 2, id="air-truncated",
+        ),
+    ],
+)
+def test_a_failed_request_aborts_the_refresh_without_publishing_and_closes_its_bodies(
+    attribute: str, value, requested_hosts: list[str], body_count: int
+) -> None:
     h = _Harness()
     h.fetch()
     previous = [stream(h.utc_now) for stream in h.streams]
     h.http_client.forecast_lines = _forecast_csv(b"80,1.0,71,0")
     h.http_client.air_lines = _air_csv(b"10,0.0,0.0,2.0,0.0,0.0")
-    if source == "forecast":
-        h.http_client.forecast_lines.pop()
-    else:
-        h.http_client.air_lines.pop()
+    setattr(h.http_client, attribute, value)
     h.advance(1000)
 
     h.fetch()
 
+    assert h.requested_hosts()[2:] == requested_hosts
     assert h.service._failures == 1
     assert h.visible_names() == _names(["RAIN"], [], ["AQI"])
     assert all(stream(h.utc_now) is old for stream, old in zip(h.streams, previous))
+    assert [body.closed for body in h.http_client.bodies[2:]] == [True] * body_count

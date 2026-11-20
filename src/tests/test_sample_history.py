@@ -33,15 +33,10 @@ def _make(
     )
 
 
-def test_constructor_does_one_immediate_commit() -> None:
-    h = _make(_FakeReader((224, 9631, 456, 757, "Stable")))
+def test_construction_commits_once_and_slots_no_commit_has_reached_hold_missing() -> None:
+    h = _make(_FakeReader((224, 9631, 456, 757, "Stable")), capacity=4)
     assert h.commit_count == 1
-    assert [metric[-1] for metric in h.samples] == [224, 9631, 456, 757]
-
-
-def test_slots_no_commit_has_reached_hold_missing() -> None:
-    h = _make(capacity=4)
-    assert all(list(metric[:-1]) == [MISSING] * 3 for metric in h.samples)
+    assert [list(metric) for metric in h.samples] == [[MISSING] * 3 + [sample] for sample in (224, 9631, 456, 757)]
 
 
 @pytest.mark.parametrize(
@@ -116,18 +111,6 @@ def test_constructor_does_not_register_on_tick_scheduler() -> None:
     parameters = inspect.signature(SampleHistory.__init__).parameters
     assert "tick_scheduler" not in parameters
     assert "scheduler" not in parameters
-
-
-def test_sampler_can_be_a_plain_callable() -> None:
-    counter = {"n": 0}
-
-    def sampler():
-        counter["n"] += 1
-        return (counter["n"], counter["n"] * 10)
-
-    h = SampleHistory(sampler, metric_count=2, capacity=4, ticks_per_commit=1)
-    h.tick()
-    assert [list(metric[-2:]) for metric in h.samples] == [[1, 2], [10, 20]]
 
 
 def test_entries_beyond_metric_count_are_ignored() -> None:

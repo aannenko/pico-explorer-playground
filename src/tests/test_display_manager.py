@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from displays.base import Display, RefreshGate
 from displays.manager import DisplayManager
 
@@ -53,29 +55,19 @@ def test_initialize_current_calls_first_display() -> None:
     assert d1.calls == []
 
 
-def test_cycle_deinitializes_current_and_initializes_next() -> None:
+def test_next_leaves_the_current_view_and_enters_the_next_wrapping_around() -> None:
     d0 = FakeDisplay("d0")
     d1 = FakeDisplay("d1")
 
     mgr = _mgr(d0, d1)
     mgr.initialize_current()
-    d0.calls.clear()
 
     mgr.next()
 
-    assert d0.calls == ["deinitialize"]
+    assert d0.calls == ["initialize", "deinitialize"]
     assert d1.calls == ["initialize"]
 
-
-def test_cycle_wraps_around() -> None:
-    d0 = FakeDisplay("d0")
-    d1 = FakeDisplay("d1")
-
-    mgr = _mgr(d0, d1)
-    mgr.initialize_current()
-
-    mgr.next()  # d0 -> d1
-    mgr.next()  # d1 -> d0
+    mgr.next()
 
     assert d0.calls == ["initialize", "deinitialize", "initialize"]
     assert d1.calls == ["initialize", "deinitialize"]
@@ -110,51 +102,29 @@ def test_previous_goes_backward() -> None:
 # ── button forwarding ─────────────────────────────────────────────────
 
 
-def test_on_button_a_forwards_to_current_display() -> None:
+@pytest.mark.parametrize("button", ["a", "b"])
+def test_button_press_forwards_to_current_display(button: str) -> None:
     d0 = FakeDisplayWithButtons("d0")
     d1 = FakeDisplay("d1")
 
     mgr = _mgr(d0, d1)
     mgr.initialize_current()
 
-    mgr._do_on_button_a(0)
+    getattr(mgr, "_do_on_button_" + button)(0)
 
-    assert "on_button_a" in d0.calls
-
-
-def test_on_button_b_forwards_to_current_display() -> None:
-    d0 = FakeDisplayWithButtons("d0")
-
-    mgr = _mgr(d0)
-    mgr.initialize_current()
-
-    mgr._do_on_button_b(0)
-
-    assert "on_button_b" in d0.calls
+    assert "on_button_" + button in d0.calls
 
 
-def test_on_button_a_ignored_for_display_without_handler() -> None:
-    d0 = FakeDisplay("d0")  # No on_button_a override — base no-op
+@pytest.mark.parametrize("button", ["a", "b"])
+def test_button_press_is_ignored_by_a_display_without_its_handler(button: str) -> None:
+    d0 = FakeDisplay("d0")
 
     mgr = _mgr(d0)
     mgr.initialize_current()
 
-    # Should not raise
-    mgr._do_on_button_a(0)
+    getattr(mgr, "_do_on_button_" + button)(0)
 
-    assert "on_button_a" not in d0.calls
-
-
-def test_on_button_b_ignored_for_display_without_handler() -> None:
-    d0 = FakeDisplay("d0")  # No on_button_b override — base no-op
-
-    mgr = _mgr(d0)
-    mgr.initialize_current()
-
-    # Should not raise
-    mgr._do_on_button_b(0)
-
-    assert "on_button_b" not in d0.calls
+    assert "on_button_" + button not in d0.calls
 
 
 def test_button_forwarding_follows_cycle() -> None:
@@ -172,30 +142,18 @@ def test_button_forwarding_follows_cycle() -> None:
     assert "on_button_a" not in d0.calls
 
 
-def test_do_next_ref_works_with_schedule_signature() -> None:
+@pytest.mark.parametrize("switch_ref", ["_do_next", "_do_previous"])
+def test_view_switch_refs_take_the_schedule_arg(switch_ref: str) -> None:
     d0 = FakeDisplay("d0")
     d1 = FakeDisplay("d1")
 
     mgr = _mgr(d0, d1)
     mgr.initialize_current()
 
-    mgr._do_next(0)  # Called with int arg like micropython.schedule
+    getattr(mgr, switch_ref)(0)
 
     assert "deinitialize" in d0.calls
     assert "initialize" in d1.calls
-
-
-def test_do_previous_ref_works_with_schedule_signature() -> None:
-    d0 = FakeDisplay("d0")
-    d1 = FakeDisplay("d1")
-
-    mgr = _mgr(d0, d1)
-    mgr.initialize_current()
-
-    mgr._do_previous(0)  # Called with int arg like micropython.schedule
-
-    assert "deinitialize" in d0.calls
-    assert "initialize" in d1.calls  # wraps to last
 
 
 # ── tick → render delegation + gate ───────────────────────────────────
@@ -253,7 +211,8 @@ def test_tick_gate_resets_on_view_switch() -> None:
     assert d1.calls == ["render"]
 
 
-def test_button_press_resets_gate() -> None:
+@pytest.mark.parametrize("button", ["a", "b"])
+def test_button_press_restarts_the_redraw_cadence_of_a_display_with_its_handler(button: str) -> None:
     d0 = FakeDisplayWithButtons("d0", refresh_period_ms=30)
 
     mgr = _mgr(d0, tick_period_ms=10)
@@ -263,30 +222,13 @@ def test_button_press_resets_gate() -> None:
     mgr.tick()
     mgr.tick()  # gate at 2/3
 
-    mgr._do_on_button_a(0)  # should reset gate
-    # After reset, need 3 more ticks before render fires.
+    getattr(mgr, "_do_on_button_" + button)(0)
     mgr.tick()
     mgr.tick()
     assert "render" not in d0.calls
 
     mgr.tick()
     assert "render" in d0.calls
-
-
-def test_button_b_press_resets_gate() -> None:
-    d0 = FakeDisplayWithButtons("d0", refresh_period_ms=30)
-
-    mgr = _mgr(d0, tick_period_ms=10)
-    mgr.initialize_current()
-    d0.calls.clear()
-
-    mgr.tick()
-    mgr.tick()
-    mgr._do_on_button_b(0)
-    mgr.tick()
-    mgr.tick()
-
-    assert "render" not in d0.calls
 
 
 def test_noop_button_press_does_not_reset_gate() -> None:
@@ -321,8 +263,9 @@ def test_refresh_gate_fires_every_period_ticks() -> None:
     assert fires == [False, False, True, False, False, True, False]
 
 
-def test_refresh_gate_period_one_fires_every_call() -> None:
-    gate = RefreshGate(1)
+@pytest.mark.parametrize("period_ticks", [1, 0])
+def test_refresh_gate_of_period_one_or_less_fires_every_call(period_ticks: int) -> None:
+    gate = RefreshGate(period_ticks)
 
     assert [gate.admit_tick() for _ in range(3)] == [True, True, True]
 
@@ -336,11 +279,3 @@ def test_refresh_gate_reset_restarts_count() -> None:
 
     # After reset, need 3 more calls to fire again.
     assert [gate.admit_tick() for _ in range(3)] == [False, False, True]
-
-
-def test_refresh_gate_clamps_zero_period_to_one() -> None:
-    gate = RefreshGate(0)
-
-    # Clamped to period=1 → fires every call.
-    assert gate.admit_tick() is True
-    assert gate.admit_tick() is True

@@ -76,17 +76,12 @@ def test_connect_initial_without_on_progress():
 
 # --- start_reconnect ---
 
-def test_start_reconnect_connects_a_dropped_link():
-    wifi = FakeWifiClient(is_connected=False)
+@pytest.mark.parametrize(
+    "connected, expected_calls", [(False, [(_SSID, _PASSWORD)]), (True, [])], ids=["dropped-link", "live-link"]
+)
+def test_start_reconnect_connects_only_a_dropped_link(connected, expected_calls):
+    wifi = FakeWifiClient(is_connected=connected)
     svc, _, _ = _mk_service(wifi=wifi)
     svc.start_reconnect()
 
-    assert wifi.start_connect_calls == [(_SSID, _PASSWORD)]
-
-
-def test_start_reconnect_leaves_a_live_link_alone():
-    wifi = FakeWifiClient(is_connected=True)
-    svc, _, _ = _mk_service(wifi=wifi)
-    svc.start_reconnect()
-
-    assert wifi.start_connect_calls == []
+    assert wifi.start_connect_calls == expected_calls

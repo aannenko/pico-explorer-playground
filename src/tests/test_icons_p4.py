@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from displays.shared import _icons_data, icons_p4
 
 
@@ -20,43 +22,44 @@ class FakeGfx:
 _ICON_2x2 = (2, 2, bytes([0x40, 0x05]))
 
 
-def test_decodes_nibbles_and_skips_transparent_zero() -> None:
+@pytest.mark.parametrize(
+    "scale, calls",
+    [
+        (1, [("set_pen", 4), ("rectangle", 10, 20, 1, 1), ("set_pen", 5), ("rectangle", 11, 21, 1, 1)]),
+        (
+            3,
+            [
+                ("set_pen", 4), ("rectangle", 10, 20, 3, 3),     # (0,0) -> col0,row0
+                ("set_pen", 5), ("rectangle", 13, 23, 3, 3),     # (1,1) -> col1,row1
+            ],
+        ),
+    ],
+)
+def test_draws_each_non_zero_nibble_as_a_scale_px_square_in_its_slot(scale: int, calls: list[tuple]) -> None:
     gfx = FakeGfx()
-    icons_p4.draw_icon(gfx, _ICON_2x2, x=10, y=20, scale=1)
-    # Only the two non-zero pixels are drawn (slot 0 is transparent).
-    assert gfx.calls == [
-        ("set_pen", 4), ("rectangle", 10, 20, 1, 1),
-        ("set_pen", 5), ("rectangle", 11, 21, 1, 1),
-    ]
+    icons_p4.draw_icon(gfx, _ICON_2x2, x=10, y=20, scale=scale)
+    assert gfx.calls == calls
 
 
-def test_scale_expands_each_pixel_to_a_square() -> None:
+@pytest.mark.parametrize(
+    "icon, calls",
+    [
+        # 2x1 icon: (0,0)=4, (1,0)=5  -> byte 0x45
+        pytest.param((2, 1, bytes([0x45])), [("set_pen", 5), ("rectangle", 1, 0, 1, 1)], id="that slot skipped"),
+        # (0,0)=0, (1,0)=5 -> byte 0x05
+        pytest.param(
+            (2, 1, bytes([0x05])),
+            [("set_pen", 0), ("rectangle", 0, 0, 1, 1), ("set_pen", 5), ("rectangle", 1, 0, 1, 1)],
+            id="slot zero drawn",
+        ),
+    ],
+)
+def test_a_transparent_override_skips_that_slot_instead_of_zero(
+    icon: tuple[int, int, bytes], calls: list[tuple]
+) -> None:
     gfx = FakeGfx()
-    icons_p4.draw_icon(gfx, _ICON_2x2, x=10, y=20, scale=3)
-    assert gfx.calls == [
-        ("set_pen", 4), ("rectangle", 10, 20, 3, 3),     # (0,0) -> col0,row0
-        ("set_pen", 5), ("rectangle", 13, 23, 3, 3),     # (1,1) -> col1,row1
-    ]
-
-
-def test_transparent_override_skips_that_slot_not_zero() -> None:
-    gfx = FakeGfx()
-    # 2x1 icon: (0,0)=4, (1,0)=5  -> byte 0x45
-    icon = (2, 1, bytes([0x45]))
     icons_p4.draw_icon(gfx, icon, x=0, y=0, scale=1, transparent=4)
-    # slot 4 skipped, slot 5 drawn (and slot 0 would have been drawn if present).
-    assert gfx.calls == [("set_pen", 5), ("rectangle", 1, 0, 1, 1)]
-
-
-def test_zero_pixel_drawn_when_transparent_is_nonzero() -> None:
-    gfx = FakeGfx()
-    # (0,0)=0, (1,0)=5 -> byte 0x05; with transparent=4, slot 0 is opaque.
-    icon = (2, 1, bytes([0x05]))
-    icons_p4.draw_icon(gfx, icon, x=0, y=0, scale=1, transparent=4)
-    assert gfx.calls == [
-        ("set_pen", 0), ("rectangle", 0, 0, 1, 1),
-        ("set_pen", 5), ("rectangle", 1, 0, 1, 1),
-    ]
+    assert gfx.calls == calls
 
 
 def test_pixels_sharing_a_slot_set_its_pen_once_even_across_a_transparent_gap() -> None:
@@ -68,17 +71,25 @@ def test_pixels_sharing_a_slot_set_its_pen_once_even_across_a_transparent_gap() 
     ]
 
 
-def test_a_pen_draws_every_opaque_pixel_in_it_whatever_its_own_colour() -> None:
+@pytest.mark.parametrize(
+    "icon, transparent, pen, calls",
+    [
+        pytest.param(
+            _ICON_2x2, 0, 7, [("set_pen", 7), ("rectangle", 10, 20, 1, 1), ("rectangle", 11, 21, 1, 1)], id="a colour"
+        ),
+        # 2x1 icon: (0,0)=4, (1,0)=0 -> byte 0x40; slot 4 is transparent, so only slot 0's pixel takes the pen.
+        pytest.param(
+            (2, 1, bytes([0x40])), 4, 0, [("set_pen", 0), ("rectangle", 11, 20, 1, 1)],
+            id="black, with slot 4 transparent",
+        ),
+    ],
+)
+def test_a_pen_draws_every_opaque_pixel_in_it_whatever_its_own_colour(
+    icon: tuple[int, int, bytes], transparent: int, pen: int, calls: list[tuple]
+) -> None:
     gfx = FakeGfx()
-    icons_p4.draw_icon(gfx, _ICON_2x2, x=10, y=20, scale=1, pen=7)
-    assert gfx.calls == [("set_pen", 7), ("rectangle", 10, 20, 1, 1), ("rectangle", 11, 21, 1, 1)]
-
-
-def test_black_is_a_pen_and_transparency_still_follows_the_icons_own_slots() -> None:
-    gfx = FakeGfx()
-    # 2x1 icon: (0,0)=4, (1,0)=0 -> byte 0x40; slot 4 is transparent, so only slot 0's pixel takes the pen.
-    icons_p4.draw_icon(gfx, (2, 1, bytes([0x40])), x=0, y=0, scale=1, transparent=4, pen=0)
-    assert gfx.calls == [("set_pen", 0), ("rectangle", 1, 0, 1, 1)]
+    icons_p4.draw_icon(gfx, icon, x=10, y=20, scale=1, transparent=transparent, pen=pen)
+    assert gfx.calls == calls
 
 
 def test_real_icon_decodes_within_bounds_and_palette() -> None:

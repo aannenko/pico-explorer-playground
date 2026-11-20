@@ -85,14 +85,10 @@ def test_shade_slots_dim_their_base_colours_evenly() -> None:
 # Auto-contrast lookup
 # ---------------------------------------------------------------------------
 
-def test_label_for_slot_is_black_or_white_per_slot() -> None:
+def test_label_for_slot_is_black_on_light_slots_and_white_on_dark_ones() -> None:
     assert len(LABEL_FOR_SLOT) == 16
     for entry in LABEL_FOR_SLOT:
         assert entry in (BLACK, WHITE)
-
-
-def test_label_for_slot_picks_readable_contrast() -> None:
-    # Light backgrounds → black text; dark backgrounds → white text.
     assert LABEL_FOR_SLOT[palette.WHITE] == BLACK
     assert LABEL_FOR_SLOT[palette.YELLOW] == BLACK
     assert LABEL_FOR_SLOT[palette.SKY] == BLACK
@@ -118,14 +114,11 @@ def test_program_palette_writes_all_16_slots() -> None:
 # Stream colours
 # ---------------------------------------------------------------------------
 
-def test_stream_colors_are_valid_slots() -> None:
+def test_stream_colors_are_ten_distinct_slots() -> None:
     assert len(STREAM_COLORS) == 10
     for idx, slot in enumerate(STREAM_COLORS):
         assert isinstance(slot, int)
         assert 0 <= slot <= 15, f"STREAM_COLORS[{idx}] out of slot range"
-
-
-def test_stream_colors_are_distinct() -> None:
     assert len(set(STREAM_COLORS)) == len(STREAM_COLORS), "two stream colours share a slot"
 
 
