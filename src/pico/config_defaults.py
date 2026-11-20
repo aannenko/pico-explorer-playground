@@ -66,7 +66,7 @@ UV_THRESHOLDS = (6, 8, 11)
 # POLLEN_THRESHOLDS: per Open-Meteo pollen species (without the ``_pollen``
 # suffix), the non-empty label its warnings show, and grains/m³ for DWD's
 # low / medium / high burden.  Each species is its own stream; add or remove
-# species freely.  A label is cut to fit beside the time left: MGWRT just fits.
+# species freely.  A label is cut to fit beside the time left: any five capitals just fit.
 # Species warnings starting together are listed in this order.
 AQI_THRESHOLDS = (60, 80, 100)
 POLLEN_THRESHOLDS = [
@@ -79,8 +79,8 @@ POLLEN_THRESHOLDS = [
 
 # Calendar: waste collection schedule.  Each entry:
 #   (label, color_index, (year, month, day), hour, minute, duration_min, period_weeks)
-# label is shown on its field; color_index picks the colour of its glyph and of
-# the stripe at its field's left edge (waste fields are light gray), 0-based:
+# label is shown on its field, brown for all waste; color_index picks the colour
+# of its glyph, 0-based:
 #   0=orange 1=sky 2=yellow 3=pink 4=blue 5=brown 6=gray 7=green 8=red 9=dark gray
 # period_weeks: 1=weekly, 2=biweekly, 0=once.  Set to [] to disable the stream.
 # Labels are shown upper-cased.

@@ -5,7 +5,7 @@ import pytest
 import config_defaults
 from displays.base import Display
 from displays.manager import DisplayManager
-from displays.palette import STREAM_BLUE, STREAM_GRAY, STREAM_GREEN, STREAM_PINK, STREAM_SKY, STREAM_YELLOW
+from displays.palette import STREAM_BLUE, STREAM_BROWN, STREAM_GREEN, STREAM_PINK, STREAM_SKY, STREAM_YELLOW
 from displays.shared import _icons_data
 from scheduling.event import create_event, Event
 from scheduling.providers import waste
@@ -137,11 +137,15 @@ def test_time_left_is_real_across_the_fall_back(app_module) -> None:
     assert "1d22 left" in panel.presented
 
 
-def test_default_pollen_labels_fit_beside_the_widest_time_left(app_module) -> None:
+def test_default_pollen_labels_and_any_five_capitals_but_nothing_wider_fit_beside_the_widest_time_left(
+    app_module,
+) -> None:
     utc = utc_epoch(2026, 8, 14, 11, 8, 0)
     # Every digit but 1 is as wide as the others, so no note is wider.
     end_utc = utc + 23 * 3600 + 23 * 60
-    labels = [label for _, label, _ in config_defaults.POLLEN_THRESHOLDS]
+    # No capital is wider than M, and PLANTS is 2 px wider than MMMMM, as close as two widths come at text scale 2.
+    fitting = [label for _, label, _ in config_defaults.POLLEN_THRESHOLDS] + ["MMMMM"]
+    labels = fitting + ["PLANTS"]
     start_utc = utc - 600
     events = [create_event(label, start_utc, end_utc - start_utc, STREAM_YELLOW) for label in labels]
     panel = _Panel()
@@ -151,7 +155,7 @@ def test_default_pollen_labels_fit_beside_the_widest_time_left(app_module) -> No
 
     calendar.initialize()
 
-    assert [text for text in panel.presented if text in labels] == labels
+    assert [text for text in panel.presented if text in fitting + ["PLANT"]] == fitting + ["PLANT"]
     assert panel.presented.count("23h23 left") == len(labels)
 
 
@@ -164,7 +168,7 @@ def test_streams_are_marked_and_coloured_by_type_waste_then_in_the_open_meteo_or
 
     pollen = [(_icons_data.GLYPH_FLOWER, STREAM_GREEN)] * len(config_defaults.POLLEN_THRESHOLDS)
     assert [(glyph, color_index) for glyph, color_index, _ in calendar._streams] == [
-        (_icons_data.GLYPH_WASTE, STREAM_GRAY),
+        (_icons_data.GLYPH_WASTE, STREAM_BROWN),
         (_icons_data.GLYPH_PRECIP, STREAM_BLUE),
         (_icons_data.GLYPH_SUN, STREAM_PINK),
         (_icons_data.GLYPH_AIR, STREAM_SKY),
@@ -186,9 +190,8 @@ def test_the_widest_glyph_sets_where_the_fields_start(app_module, monkeypatch) -
 
     calendar.initialize()
 
-    # After the start times' right edge at 42: a 20-px glyph cell with 8 px either side, then the 4-px stripe and the
-    # 4-px text inset.
-    assert [args[1] for name, args, _ in panel.calls if name == "text" and args[0] == "AQI"] == [86]
+    # After the start times' right edge at 42: a 20-px glyph cell with 8 px either side, then the 4-px text inset.
+    assert [args[1] for name, args, _ in panel.calls if name == "text" and args[0] == "AQI"] == [82]
 
 
 @pytest.mark.parametrize(

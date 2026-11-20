@@ -44,10 +44,9 @@ _SLOT_COUNT = 7
 _GLYPH_X = 50  # the glyph cell's left column
 _RAIL_X = 57  # the rail's left column
 _FIELD_X = 74
-_STRIPE = 4
-_TEXT_INSET = 4  # from the stripe to the label, and from the note to the field's right edge
+_TEXT_INSET = 4
 _NOTE_GAP = 6
-_LABEL_X = _FIELD_X + _STRIPE + _TEXT_INSET
+_LABEL_X = _FIELD_X + _TEXT_INSET
 _FIELD_HEIGHT = 22
 
 
@@ -119,7 +118,7 @@ def _stream(events: list[Event]):  # -> (int) -> list[Event]
 
 # Inked down its left column only, so the rail's columns fall in its transparent part.
 _GLYPH = (8, 8, bytes([0x30, 0x00, 0x00, 0x00] * 8))
-# Unlike any event's colour here, so a field never passes for its stripe or glyph.
+# Unlike any event's colour here, so a field drawn in its event's colour can't pass.
 _FIELD_COLOR = STREAM_GREEN
 
 
@@ -279,7 +278,7 @@ class TestLifecycle:
         display.initialize()
 
         # After the start times' right edge at 42: a 10-px glyph cell with 8 px either side.
-        assert [gfx.at(67, _slot_y(0) + 2), gfx.at(68, _slot_y(0) + 2)] == [BLACK, YELLOW]
+        assert [gfx.at(67, _slot_y(0) + 2), gfx.at(68, _slot_y(0) + 2)] == [BLACK, GREEN]
 
 
 # ---------------------------------------------------------------------------
@@ -397,23 +396,19 @@ class TestFailingStream:
 
 
 class TestSlots:
-    def test_an_upcoming_event_fills_its_streams_field_behind_a_stripe_and_beside_a_glyph_in_its_colour(self):
+    def test_an_upcoming_event_fills_its_streams_field_beside_a_glyph_in_its_colour(self):
         gfx = _drawn([_ev("RAIN", _at(16, 0), color_index=STREAM_RED)])
         y = _slot_y(0)
 
-        field = [gfx.at(_FIELD_X - 1, y + 2), gfx.at(_FIELD_X + _STRIPE, y), gfx.at(239, y + 21)]
-        assert field == [BLACK, GREEN, GREEN]
-        assert gfx.at(_FIELD_X + _STRIPE, y + 22) == BLACK
-        # The stripe: the field's left 4 columns, its full height, in the event's colour.
-        stripe = [gfx.at(x, y + row) for x in (_FIELD_X, _FIELD_X + _STRIPE - 1) for row in (0, 21)]
-        assert stripe == [RED] * 4
+        field = [gfx.at(_FIELD_X - 1, y + 2), gfx.at(_FIELD_X, y), gfx.at(_FIELD_X, y + 21), gfx.at(239, y + 21)]
+        assert field == [BLACK, GREEN, GREEN, GREEN]
         assert gfx.at(_FIELD_X, y + 22) == BLACK
         # The 16-px glyph is centred in the field's 22 rows: its left column, from row 3 to row 18.
         glyph_column = [gfx.at(x, y + row) for x in (_GLYPH_X, _GLYPH_X + 1) for row in range(3, 19)]
         assert glyph_column == [RED] * 32
         assert [gfx.at(_GLYPH_X, y + 2), gfx.at(_GLYPH_X, y + 19), gfx.at(_GLYPH_X + 2, y + 10)] == [BLACK] * 3
         assert ("16:00", 42 - bitmap8_width("16:00", 2), y + 4, GRAY) in gfx.texts
-        # Black on the green field, where white would suit the red stripe.
+        # Black on the green field, where white would suit the event's red.
         assert ("RAIN", _LABEL_X, y + 4, BLACK) in gfx.texts
         assert ("in 6h48", _right_x("in 6h48"), y + 4, BLACK) in gfx.texts
 
@@ -455,14 +450,13 @@ class TestSlots:
             (_GLYPH, STREAM_BLUE, [_ev("RAIN", _at(10, 0), color_index=STREAM_YELLOW)]),
         )
 
-        # Per slot: the stripe, the bare field above the text, and the label's and the note's ink, all as drawn last.
+        # Per slot: the field's left edge beside the label, and the label's and the note's ink, all as drawn last.
         def slot_pixels(slot: int, note: str) -> list[int | None]:
             y = _slot_y(slot)
-            return [gfx.at(_FIELD_X, y + 10), gfx.at(_FIELD_X + _STRIPE, y + 2), gfx.at(_LABEL_X, y + 5),
-                    gfx.at(_right_x(note), y + 5)]
+            return [gfx.at(_FIELD_X, y + 10), gfx.at(_LABEL_X, y + 5), gfx.at(_right_x(note), y + 5)]
 
-        assert slot_pixels(0, "in 48m") == [YELLOW, BLUE, WHITE, WHITE]
-        assert slot_pixels(1, "in 1h48") == [BROWN, GREEN, BLACK, BLACK]
+        assert slot_pixels(0, "in 48m") == [BLUE, WHITE, WHITE]
+        assert slot_pixels(1, "in 1h48") == [GREEN, BLACK, BLACK]
 
     def test_a_glyph_smaller_than_its_cell_is_centred_on_the_rail(self):
         gfx = _drawn(
@@ -489,7 +483,7 @@ class TestSlots:
         # 72 of 120 minutes gone: 99 of the field's 166 px.
         elapsed_end = _FIELD_X + 99
 
-        assert [gfx.at(_FIELD_X, y + 21), gfx.at(100, y + 21)] == [BROWN, PINK]
+        assert [gfx.at(_FIELD_X, y + 21), gfx.at(100, y + 21)] == [PINK, PINK]
         assert all(gfx.at(x, y + row) == WHITE for x in (_FIELD_X, elapsed_end - 1) for row in range(22, 26))
         assert all(gfx.at(x, y + row) == DARK_GRAY for x in (elapsed_end, 239) for row in range(22, 26))
         assert gfx.at(_FIELD_X, y + 26) == BLACK
@@ -531,7 +525,7 @@ class TestSlots:
         events = [_ev("ODD", _at(10, 0), color_index=len(STREAM_COLORS) + 3)]
         gfx = _drawn((_GLYPH, len(STREAM_COLORS) + 5, events))
 
-        assert [gfx.at(_FIELD_X, _slot_y(0) + 2), gfx.at(100, _slot_y(0) + 2)] == [STREAM_COLORS[-1]] * 2
+        assert [gfx.at(_GLYPH_X, _slot_y(0) + 10), gfx.at(100, _slot_y(0) + 2)] == [STREAM_COLORS[-1]] * 2
 
     def test_events_beyond_the_last_slot_are_not_shown(self):
         gfx = _drawn([_ev(str(i), _at(10 + i, 0)) for i in range(_SLOT_COUNT + 2)])

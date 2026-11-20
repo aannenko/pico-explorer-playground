@@ -12,7 +12,7 @@ from displays.palette import (
     GRAY,
     ORANGE,
     STREAM_BLUE,
-    STREAM_GRAY,
+    STREAM_BROWN,
     STREAM_GREEN,
     STREAM_PINK,
     STREAM_SKY,
@@ -165,7 +165,7 @@ def _calendar_stream_types() -> tuple[tuple[tuple[int, int, bytes], int], ...]:
     """Return the glyph and field colour index of each of the calendar's streams, in their order: waste, then the
     Open-Meteo service's precipitation, UV, AQI and a stream per pollen species."""
     return (
-        (_icons_data.GLYPH_WASTE, STREAM_GRAY),
+        (_icons_data.GLYPH_WASTE, STREAM_BROWN),
         (_icons_data.GLYPH_PRECIP, STREAM_BLUE),
         (_icons_data.GLYPH_SUN, STREAM_PINK),
         (_icons_data.GLYPH_AIR, STREAM_SKY),

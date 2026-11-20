@@ -30,12 +30,11 @@ _BODY_MARGIN_PX = const(3)
 _DESCENDER_ROWS = const(1)
 # Above and below a field's text.
 _FIELD_PAD_PX = const(4)
-_BAR_PX = const(4)
-_STRIPE_PX = const(_BAR_PX)
-# From the stripe to the label, and from the time left or to go to the field's right edge.
+# From a field's left and right edges to its texts.
 _TEXT_INSET_PX = const(4)
 # Between a label and the time left or to go.
 _NOTE_GAP_PX = const(6)
+_BAR_PX = const(4)
 _SLOT_GAP_PX = const(5)
 _RAIL_PX = const(2)
 # Either side of a glyph: to the start times and to the fields.
@@ -133,9 +132,8 @@ class Display(_Display):
     ``STREAM_COLORS[index]``, or its last colour for an index past its end.
 
     Each of ``streams`` is a ``(glyph, color_index, getter)`` triple.  Each of the stream's events fills a field of
-    the stream's ``color_index``, beside the glyph on the rail and behind a stripe at the field's left edge, both in
-    the event's own colour.  The glyph, an icon as ``icons_p4.draw_icon`` takes it, is no wider than the geometry's
-    ``glyph_width`` nor taller than a field.
+    the stream's ``color_index``, beside the glyph on the rail in the event's own colour.  The glyph, an icon as
+    ``icons_p4.draw_icon`` takes it, is no wider than the geometry's ``glyph_width`` nor taller than a field.
     The getter ``(now_utc) -> list[Event]`` returns the stream's events in start order; they may include events
     already over or starting after the horizon.  The calendar reads each list only while drawing and never changes
     it.  A getter that raises is logged and left out of that redraw, which draws the other streams under a red date
@@ -297,8 +295,8 @@ class Display(_Display):
         in_progress: bool,
         today: int,
     ) -> None:
-        """Draw ``event`` in ``slot``: its ``stream``'s glyph, its field and stripe, label, time left or to go,
-        progress bar and start time."""
+        """Draw ``event`` in ``slot``: its ``stream``'s glyph, its field, label, time left or to go, progress bar and
+        start time."""
         geom = self._geom
         gfx = self._gfx
         scale = geom.label_text_scale
@@ -307,7 +305,6 @@ class Display(_Display):
         field_width = geom.width - geom.field_x
         start = event.start_utc
         glyph, field_color_index, _ = stream
-        pen = _pen(event.color_index)
         field_pen = _pen(field_color_index)
 
         # The rail breaks beside the field, so it doesn't show through the glyph.
@@ -320,12 +317,10 @@ class Display(_Display):
             geom.rail_x - glyph_width * scale // 2,
             y + (geom.field_height - glyph_height * scale) // 2,
             scale,
-            pen=pen,
+            pen=_pen(event.color_index),
         )
         gfx.set_pen(field_pen)
         gfx.rectangle(geom.field_x, y, field_width, geom.field_height)
-        gfx.set_pen(pen)
-        gfx.rectangle(geom.field_x, y, _STRIPE_PX, geom.field_height)
 
         # Only today's events say how soon they start: a later day's header dates them.
         if in_progress:
@@ -334,7 +329,7 @@ class Display(_Display):
             note = "in " + _format_duration(start - now_utc)
         else:
             note = ""
-        label_x = geom.field_x + _STRIPE_PX + _TEXT_INSET_PX
+        label_x = geom.field_x + _TEXT_INSET_PX
         label_end = geom.width - _TEXT_INSET_PX
         if note:
             note_x = label_end - gfx.measure_text(note, scale=scale)
