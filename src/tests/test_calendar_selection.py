@@ -5,7 +5,7 @@ import pytest
 import config_defaults
 from displays.base import Display
 from displays.manager import DisplayManager
-from displays.palette import STREAM_BLUE, STREAM_BROWN, STREAM_GREEN, STREAM_PINK, STREAM_SKY, STREAM_YELLOW
+from displays.palette import STREAM_BLUE, STREAM_GRAY, STREAM_GREEN, STREAM_PINK, STREAM_SKY, STREAM_YELLOW
 from displays.shared import _icons_data
 from scheduling.event import create_event, Event
 from scheduling.providers import waste
@@ -168,7 +168,7 @@ def test_streams_are_marked_and_coloured_by_type_waste_then_in_the_open_meteo_or
 
     pollen = [(_icons_data.GLYPH_FLOWER, STREAM_GREEN)] * len(config_defaults.POLLEN_THRESHOLDS)
     assert [(glyph, color_index) for glyph, color_index, _ in calendar._streams] == [
-        (_icons_data.GLYPH_WASTE, STREAM_BROWN),
+        (_icons_data.GLYPH_WASTE, STREAM_GRAY),
         (_icons_data.GLYPH_PRECIP, STREAM_BLUE),
         (_icons_data.GLYPH_SUN, STREAM_PINK),
         (_icons_data.GLYPH_AIR, STREAM_SKY),

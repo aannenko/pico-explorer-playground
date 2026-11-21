@@ -19,7 +19,7 @@ leaves them ambiguous.
 - **Calendar view** — an agenda of every stream's events in start order, from
   those in progress to those starting within a week, under the time and date;
   redrawn as each minute starts, no button interaction. Each event is a field
-  coloured by its type (waste brown, rain blue, UV pink, air quality sky,
+  coloured by its type (waste gray, rain blue, UV pink, air quality sky,
   pollen green) beside its stream's glyph on a rail (a bin, a rain cloud, a
   sun, air or a flower); the glyph shows the warning's level, or the pickup's
   colour for waste. Its start time is on the left; events in
@@ -53,10 +53,23 @@ leaves them ambiguous.
 
 - **Bus departures** (calendar stream) — Prague Integrated Transport
   realtime via Golemio: one configured stop plus an optional destination
-  filter. Blocked on transport — the API is HTTPS-only and on-device TLS
-  exhausts the RP2040 heap, so it needs a local HTTPS proxy (which can also
-  hold the API token) or an offline GTFS-static fallback. The calendar has no
-  bus stream until then.
+  filter. The calendar has no bus stream yet. The goal is direct HTTPS from
+  the Pico; an offline GTFS timetable remains a fallback for scheduled
+  departures, not realtime updates.
+  - **TLS memory:** Reproduce the allocation failure on official Pico W
+    firmware, then submit the MicroPython feature request for reserving
+    reusable TLS record buffers at startup. The local draft and reproduction
+    instructions are in `src/docs/micropython-rfc-tls-buffer-reservation.md`.
+    If the firmware gains support, verify repeated HTTPS connections with
+    the display and weather streams running, not just the first connection.
+  - **API token:** Verify Golemio's certificate and hostname before sending
+    the token, and reject redirects without making a second request. The
+    bundled `requests` disables certificate verification, forwards request
+    headers on redirect and drops the socket timeout.
+  - **Response size:** Parse departures in bounded pieces and keep only as
+    many as the calendar can show. If the transport changes, bound status and
+    header lines, close the socket on parse failures, and preserve chunked
+    decoding and detection of truncated `Content-Length` bodies.
 
 ## Planned
 
